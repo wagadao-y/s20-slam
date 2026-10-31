@@ -40,6 +40,25 @@ fn main() -> Result<()> {
                 out.display()
             ));
         }
+        "cut-raw" => {
+            let raw = PathBuf::from(a.positional_req("raw folder")?);
+            let out = PathBuf::from(a.positional_req("output raw folder")?);
+            let from: f64 = a.get("--from", 0.0)?;
+            let to: f64 = a
+                .get_str("--to")?
+                .context("--to is needed")?
+                .parse()
+                .context("--to")?;
+            a.finish()?;
+            let s = s20_io::cut::cut_raw(&raw, &out, from, to, &job)?;
+            job.log(&format!(
+                "done: {} messages ({:.2} GB) from {:.1} to {:.1} s",
+                s.messages,
+                s.bytes as f64 / 1e9,
+                s.span[0],
+                s.span[1]
+            ));
+        }
         "temp" => {
             let raw = PathBuf::from(a.positional_req("raw folder")?);
             let data = PathBuf::from(a.positional_req("data folder")?);
@@ -728,6 +747,10 @@ const USAGE: &str = "usage:
   s20 extract <raw folder> <data folder>   (indices of the points and images in the bag; IMU, GNSS)
   s20 images <data folder> <output folder>   (the camera JPEGs from the bag, as <side>/<side>_NNNNN.jpg)
   s20 temp <raw folder> <data folder>   (LiDAR core temperature from the info bag into temp.npy)
+  s20 cut-raw <raw folder> <output raw folder> [--from s] --to s
+      (the bag's messages from --from to --to seconds after its first scan, as a raw folder of its own with
+       the other files copied, for short test recordings; start a few seconds before the device moves:
+       the odometry starts from the first seconds being still)
   s20 calib <calibration.yaml>
   s20 eval-traj <estimate.txt> <reference.txt> [--align_s 30]
       (drift after fitting the first seconds, ATE, relative errors over 1/5/30 s, jump intervals)

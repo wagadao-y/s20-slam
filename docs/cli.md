@@ -55,8 +55,11 @@ s20 images   <data> <フォルダー>                                # カメラ
 s20 convert  in.las out.laz                                     # LAS と LAZ の変換（拡張子で判断）
 s20 potree   <in.las|laz> [--no_rgb] [--gps_time]               # Potree 2.0 の 8 分木を作る
 s20 eval-traj <推定.txt> <基準.txt>                             # 軌跡の評価（ATE、1／5／30 秒の相対誤差、跳び）
+s20 cut-raw <生データ> <出力> [--from 秒] --to 秒               # 撮影の一部を、短い生データフォルダーとして切り出す（テスト用）
 s20 licenses                                                    # ライセンスの表示
 ```
+
+`cut-raw` の時刻は bag の最初のスキャンからの秒です。切り出すのは `all_*.bag` だけで、ほかのファイル（`info/`、`frame_pose.txt`、`BASE.BIN` など）はそのままコピーします。LIO は最初の 2 秒が静止していることを前提に初期化するので、`--from` は機体が動き出す数秒前にしてください。本体の軌跡（`frame_pose.txt`）は bag より早く始まることがあり、その時刻は目安になりません。抽出した IMU で動き出しを確かめてください。
 
 点群のファイルは拡張子で LAS と LAZ を切り替えます（`.laz` なら圧縮）。読み込みはどちらも受け付けます。
 

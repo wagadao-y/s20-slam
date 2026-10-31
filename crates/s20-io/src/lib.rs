@@ -2,6 +2,7 @@
 pub mod args;
 pub mod bag;
 pub mod calib;
+pub mod cut;
 pub mod dataset;
 pub mod extract;
 pub mod geodesy;

@@ -1,12 +1,14 @@
 //! Minimal ROS1 bag (v2.0) reader for S20 recordings.
 //!
 //! The file is memory-mapped. Only uncompressed chunks are supported (S20 writes them uncompressed);
-//! message payloads are returned as slices into the map (zero copy).
+//! message payloads are returned as slices into the map (zero copy). [`BagWriter`] writes a bag
+//! this reader reads back: a part of a recording, as a short raw folder for tests.
 
 use anyhow::{Context, Result, bail};
 use memmap2::Mmap;
 use std::collections::HashMap;
 use std::fs::File;
+use std::io::{BufWriter, Write};
 use std::path::Path;
 
 const MAGIC: &[u8] = b"#ROSBAG V2.0\n";
@@ -39,6 +41,8 @@ pub struct Bag {
     pub connections: HashMap<u32, Connection>,
     /// All message records in file order.
     pub messages: Vec<MsgRef>,
+    /// The byte range in the file of each connection's (first) record, header and data.
+    conn_records: HashMap<u32, (usize, usize)>,
 }
 
 struct Record<'a> {
@@ -113,6 +117,7 @@ impl Bag {
             bail!("{} is not a ROS1 bag v2.0", path.display());
         }
         let mut connections = HashMap::new();
+        let mut conn_records = HashMap::new();
         let mut messages = Vec::new();
         let b: &[u8] = &map;
         let mut p = MAGIC.len();
@@ -130,6 +135,7 @@ impl Bag {
                 OP_BAG_HEADER | OP_INDEX_DATA | OP_CHUNK_INFO => {}
                 OP_CONNECTION => {
                     let c = parse_connection(b, &r)?;
+                    conn_records.entry(c.id).or_insert((p, r.end));
                     connections.entry(c.id).or_insert(c);
                 }
                 OP_CHUNK => {
@@ -159,6 +165,7 @@ impl Bag {
                             }
                             OP_CONNECTION => {
                                 let c = parse_connection(b, &m)?;
+                                conn_records.entry(c.id).or_insert((q, m.end));
                                 connections.entry(c.id).or_insert(c);
                             }
                             _ => {}
@@ -193,6 +200,7 @@ impl Bag {
             map,
             connections,
             messages,
+            conn_records,
         })
     }
 
@@ -205,6 +213,11 @@ impl Bag {
         let o = (s.as_ptr() as usize).wrapping_sub(self.map.as_ptr() as usize);
         assert!(o + s.len() <= self.map.len(), "slice is not in the bag");
         o
+    }
+
+    /// The record of connection `id` as it is in the file (header and data), for [`BagWriter`].
+    pub fn connection_record(&self, id: u32) -> Option<&[u8]> {
+        self.conn_records.get(&id).map(|&(a, b)| &self.map[a..b])
     }
 
     /// Connection ids of a topic.
@@ -230,6 +243,112 @@ impl Bag {
             .collect();
         v.sort_by_key(|m| m.time_ns);
         v
+    }
+}
+
+/// Header fields (`name=value`), each after its length.
+fn header(fields: &[(&str, &[u8])]) -> Vec<u8> {
+    let mut h = Vec::new();
+    for (k, v) in fields {
+        h.extend((k.len() as u32 + 1 + v.len() as u32).to_le_bytes());
+        h.extend(k.as_bytes());
+        h.push(b'=');
+        h.extend(*v);
+    }
+    h
+}
+
+/// A record: its header fields and data.
+fn record(fields: &[(&str, &[u8])], data: &[u8]) -> Vec<u8> {
+    let h = header(fields);
+    let mut r = (h.len() as u32).to_le_bytes().to_vec();
+    r.extend(h);
+    r.extend((data.len() as u32).to_le_bytes());
+    r.extend(data);
+    r
+}
+
+/// Chunks are closed at about this size (a record's data length is a u32).
+const CHUNK_BYTES: usize = 32 << 20;
+
+/// Writes messages of an open [`Bag`] into a new bag: uncompressed chunks, each connection's
+/// record (as in the source) before its first message, no index (this reader does not use one;
+/// rosbag's tools want it).
+pub struct BagWriter {
+    file: BufWriter<File>,
+    chunk: Vec<u8>,
+    written: std::collections::HashSet<u32>,
+}
+
+impl BagWriter {
+    pub fn create(path: &Path) -> Result<Self> {
+        let f = File::create(path).with_context(|| format!("create {}", path.display()))?;
+        let mut file = BufWriter::new(f);
+        file.write_all(MAGIC)?;
+        // no index: its position and the counts are 0
+        let header = record(
+            &[
+                ("op", &[OP_BAG_HEADER]),
+                ("index_pos", &0u64.to_le_bytes()),
+                ("conn_count", &0u32.to_le_bytes()),
+                ("chunk_count", &0u32.to_le_bytes()),
+            ],
+            &[],
+        );
+        file.write_all(&header)?;
+        Ok(BagWriter {
+            file,
+            chunk: Vec::new(),
+            written: Default::default(),
+        })
+    }
+
+    /// Appends message `m` of `bag`, its connection first when it is new.
+    pub fn write(&mut self, bag: &Bag, m: &MsgRef) -> Result<()> {
+        if self.written.insert(m.conn) {
+            let c = bag
+                .connection_record(m.conn)
+                .with_context(|| format!("no record of connection {}", m.conn))?;
+            self.chunk.extend(c);
+        }
+        let mut time = ((m.time_ns / 1_000_000_000) as u32).to_le_bytes().to_vec();
+        time.extend(((m.time_ns % 1_000_000_000) as u32).to_le_bytes());
+        self.chunk.extend(record(
+            &[
+                ("op", &[OP_MSG_DATA]),
+                ("conn", &m.conn.to_le_bytes()),
+                ("time", &time),
+            ],
+            bag.data(m),
+        ));
+        if self.chunk.len() >= CHUNK_BYTES {
+            self.close_chunk()?;
+        }
+        Ok(())
+    }
+
+    fn close_chunk(&mut self) -> Result<()> {
+        if self.chunk.is_empty() {
+            return Ok(());
+        }
+        let size = u32::try_from(self.chunk.len()).context("chunk over 4 GB")?;
+        let r = record(
+            &[
+                ("op", &[OP_CHUNK]),
+                ("compression", b"none"),
+                ("size", &size.to_le_bytes()),
+            ],
+            &self.chunk,
+        );
+        self.file.write_all(&r)?;
+        self.chunk.clear();
+        Ok(())
+    }
+
+    pub fn finish(mut self) -> Result<()> {
+        self.close_chunk()?;
+        self.file.flush()?;
+        Ok(())
     }
 }
 
@@ -261,22 +380,6 @@ fn parse_connection(b: &[u8], r: &Record) -> Result<Connection> {
 mod tests {
     use super::*;
 
-    /// A record: its header fields (`name=value`) and data.
-    fn record(fields: &[(&str, &[u8])], data: &[u8]) -> Vec<u8> {
-        let mut h = Vec::new();
-        for (k, v) in fields {
-            h.extend((k.len() as u32 + 1 + v.len() as u32).to_le_bytes());
-            h.extend(k.as_bytes());
-            h.push(b'=');
-            h.extend(*v);
-        }
-        let mut r = (h.len() as u32).to_le_bytes().to_vec();
-        r.extend(h);
-        r.extend((data.len() as u32).to_le_bytes());
-        r.extend(data);
-        r
-    }
-
     /// The message times of a bag of one message outside a chunk, with header fields `op` and
     /// `time` as given.
     fn times(name: &str, op: &[u8], time: &[u8]) -> Result<Vec<u64>> {
@@ -296,6 +399,61 @@ mod tests {
         let mut t = 3u32.to_le_bytes().to_vec();
         t.extend(5u32.to_le_bytes());
         assert_eq!(times("ok", &[OP_MSG_DATA], &t).unwrap(), [3_000_000_005]);
+    }
+
+    #[test]
+    fn written_back_as_read() {
+        let dir = std::env::temp_dir().join(format!("s20_bag_write_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let conn = 7u32.to_le_bytes();
+        // a connection's data: the topic's fields
+        let fields = header(&[("topic", b"/a"), ("type", b"std_msgs/String")]);
+        let mut b = MAGIC.to_vec();
+        b.extend(record(
+            &[("op", &[OP_CONNECTION]), ("conn", &conn), ("topic", b"/a")],
+            &fields,
+        ));
+        for (k, payload) in [b"one".as_slice(), b"two", b"three"]
+            .into_iter()
+            .enumerate()
+        {
+            let mut t = (10 + k as u32).to_le_bytes().to_vec();
+            t.extend(0u32.to_le_bytes());
+            b.extend(record(
+                &[("op", &[OP_MSG_DATA]), ("conn", &conn), ("time", &t)],
+                payload,
+            ));
+        }
+        let src = dir.join("src.bag");
+        std::fs::write(&src, &b).unwrap();
+        let out = dir.join("out.bag");
+        {
+            let bag = Bag::open(&src).unwrap();
+            let mut w = BagWriter::create(&out).unwrap();
+            for m in &bag.messages[1..] {
+                w.write(&bag, m).unwrap();
+            }
+            w.finish().unwrap();
+            let back = Bag::open(&out).unwrap();
+            let got: Vec<(u64, &[u8])> = back
+                .messages
+                .iter()
+                .map(|m| (m.time_ns, back.data(m)))
+                .collect();
+            assert_eq!(
+                got,
+                [
+                    (11_000_000_000, b"two".as_slice()),
+                    (12_000_000_000, b"three")
+                ]
+            );
+            let c = &back.connections[&7];
+            assert_eq!(
+                (c.topic.as_str(), c.msg_type.as_str()),
+                ("/a", "std_msgs/String")
+            );
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
