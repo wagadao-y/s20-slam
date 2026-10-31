@@ -8,6 +8,7 @@ mod camera;
 mod images;
 mod log_view;
 mod notice;
+mod panics;
 mod params_view;
 mod quality;
 mod render;
@@ -30,6 +31,7 @@ fn attach_parent_console() {
 }
 
 fn main() -> eframe::Result<()> {
+    panics::install();
     let args: Vec<String> = std::env::args().skip(1).collect();
     let arg = |k: &str| {
         args.iter()

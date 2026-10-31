@@ -870,14 +870,10 @@ impl App {
         let cancel = Arc::new(AtomicBool::new(false));
         let worker_cancel = cancel.clone();
         std::thread::spawn(move || {
-            let _ = tx.send(scene::load(
-                &cfg,
-                view,
-                trajectory,
-                stride,
-                convert,
-                &worker_cancel,
-            ));
+            let loaded = crate::panics::catch(|| {
+                scene::load(&cfg, view, trajectory, stride, convert, &worker_cancel)
+            });
+            let _ = tx.send(loaded.map_err(anyhow::Error::from).and_then(|r| r));
             ctx.request_repaint();
         });
         self.loading = Some(Loading { rx, cancel });
@@ -1034,14 +1030,15 @@ impl App {
         let cancel = job.cancel.clone();
         let ctx2 = ctx.clone();
         std::thread::spawn(move || {
-            let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match last {
+            let r = crate::panics::catch(|| match last {
                 Some(l) => cfg.run_range(first, l, &job),
                 None => cfg.run_from(first, &job),
-            }))
-            .unwrap_or_else(|_| {
-                Err(anyhow::anyhow!(crate::lang::tl(
-                    "処理中に内部エラー（panic）が起きました",
-                    "An internal error (panic) occurred during processing"
+            })
+            .unwrap_or_else(|p| {
+                Err(anyhow::anyhow!(tr!(
+                    "処理中に内部エラー（panic）が起きました: {}",
+                    "An internal error (panic) occurred during processing: {}",
+                    p.detail
                 )))
             });
             let _ = tx.send(Event::Done(r));
@@ -3213,7 +3210,10 @@ impl App {
             self.img_busy[side] = true;
             let (tx, file, ctx) = (self.img_tx.clone().unwrap(), st.file.clone(), ctx.clone());
             std::thread::spawn(move || {
-                let img = crate::images::decode_small(&file, 4);
+                // a panic must still answer: the side stays busy until it does
+                let img = crate::panics::catch(|| crate::images::decode_small(&file, 4))
+                    .ok()
+                    .flatten();
                 let _ = tx.send((side, file, img));
                 ctx.request_repaint();
             });

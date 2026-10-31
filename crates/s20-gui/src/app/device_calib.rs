@@ -253,14 +253,13 @@ impl App {
         let cancel = job.cancel.clone();
         let ctx2 = ctx.clone();
         std::thread::spawn(move || {
-            let r =
-                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| calibrate(&cfgs, &job)))
-                    .unwrap_or_else(|_| {
-                        Err(anyhow::anyhow!(crate::lang::tl(
-                            "処理中に内部エラー（panic）が起きました",
-                            "An internal error (panic) occurred during processing"
-                        )))
-                    });
+            let r = crate::panics::catch(|| calibrate(&cfgs, &job)).unwrap_or_else(|p| {
+                Err(anyhow::anyhow!(tr!(
+                    "処理中に内部エラー（panic）が起きました: {}",
+                    "An internal error (panic) occurred during processing: {}",
+                    p.detail
+                )))
+            });
             let _ = tx.send(CalibEvent::Done(r));
             ctx2.request_repaint();
         });

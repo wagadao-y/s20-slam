@@ -455,15 +455,17 @@ impl App {
                 let (raw, run, ctx) = (raw.to_path_buf(), job.clone(), ui.ctx().clone());
                 let cfg = self.config();
                 std::thread::spawn(move || {
-                    let result = gnss::inspect(&raw, &run)
-                        .map(|(rover, base)| GnssFiles {
-                            rover,
-                            base,
-                            positioning: cfg
-                                .map_or(Err(String::new()), |c| positioning(&c, k, &raw, &run)),
-                        })
-                        .map_err(|e| format!("{e:#}"));
-                    let _ = tx.send(result);
+                    let result = crate::panics::catch(|| {
+                        gnss::inspect(&raw, &run)
+                            .map(|(rover, base)| GnssFiles {
+                                rover,
+                                base,
+                                positioning: cfg
+                                    .map_or(Err(String::new()), |c| positioning(&c, k, &raw, &run)),
+                            })
+                            .map_err(|e| format!("{e:#}"))
+                    });
+                    let _ = tx.send(result.map_err(|p| p.to_string()).and_then(|r| r));
                     ctx.request_repaint();
                 });
                 self.raw_view.gnss_loading = Some((k, rx, job));
@@ -551,7 +553,9 @@ impl App {
             let path = file.clone();
             let ctx = ctx.clone();
             std::thread::spawn(move || {
-                let _ = tx.send(RawBag::open(&path).map_err(|e| format!("{e:#}")));
+                let bag =
+                    crate::panics::catch(|| RawBag::open(&path).map_err(|e| format!("{e:#}")));
+                let _ = tx.send(bag.map_err(|p| p.to_string()).and_then(|r| r));
                 ctx.request_repaint();
             });
             self.raw_view.loading = Some((file, rx));

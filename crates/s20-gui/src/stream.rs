@@ -321,12 +321,14 @@ impl Streaming {
                 check_cancel(&cancel)?;
                 Ok((ni, ci, reader(ni, part.offset, part.count, origin)?))
             };
-            let result = if parallel {
-                jobs.into_par_iter().map(read).collect()
-            } else {
-                jobs.into_iter().map(read).collect()
-            };
-            let _ = tx.send(result);
+            let result = crate::panics::catch(|| {
+                if parallel {
+                    jobs.into_par_iter().map(read).collect()
+                } else {
+                    jobs.into_iter().map(read).collect()
+                }
+            });
+            let _ = tx.send(result.map_err(anyhow::Error::from).and_then(|r| r));
             repaint();
         });
     }
