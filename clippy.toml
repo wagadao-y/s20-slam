@@ -1,0 +1,7 @@
+# Small text is hard to read (Japanese especially): the body size everywhere, `weak()` for hints.
+disallowed-methods = [
+    { path = "egui::RichText::small", reason = "小さい文字は使わない（補足は weak() で）" },
+    { path = "egui::Ui::small", reason = "小さい文字は使わない（補足は ui.weak() で）" },
+    { path = "egui::Ui::small_button", reason = "小さい文字は使わない（ui.button() で）" },
+    { path = "egui::Button::small", reason = "小さい文字は使わない" },
+]

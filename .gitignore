@@ -1,0 +1,8 @@
+/target
+*.las
+*.laz
+/out*/
+ref/*
+__pycache__/
+/notes/
+/CLAUDE.local.md

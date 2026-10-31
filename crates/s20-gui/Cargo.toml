@@ -1,0 +1,30 @@
+[package]
+name = "s20-gui"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+version.workspace = true
+
+[[bin]]
+name = "s20-gui"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+rayon.workspace = true
+kiddo.workspace = true
+zune-jpeg = "0.5"
+zune-core = "0.5"
+s20-io = { path = "../s20-io" }
+s20-geom = { path = "../s20-geom" }
+s20-pipeline = { path = "../s20-pipeline" }
+eframe = { version = "0.36.2", default-features = false, features = ["default_fonts", "wgpu", "persistence"] }
+wgpu = { version = "30.0.1", default-features = false, features = ["dx12", "wgsl"] }
+rfd = "0.17.2"
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
+bytemuck = { version = "1.23", features = ["derive"] }
+glam = "0.33"
+egui-phosphor = "0.14.0"
+serde.workspace = true
+serde_json = { workspace = true, features = ["preserve_order"] }
+image = { version = "0.25.10", default-features = false, features = ["png"] }

@@ -1,0 +1,33 @@
+[workspace]
+members = ["crates/s20-ppk", "crates/s20-io", "crates/s20-geom", "crates/s20-lio",
+    "crates/s20-opt", "crates/s20-finish", "crates/s20-visual", "crates/s20-pipeline", "crates/s20-cli", "crates/s20-gui"]
+resolver = "2"
+
+[workspace.package]
+edition = "2024"
+license = "Apache-2.0"
+version = "0.1.0"
+publish = false
+
+[workspace.dependencies]
+anyhow = "1.0"
+brotli = "8.0"
+memmap2 = "0.9"
+nalgebra = "0.34"
+rayon = "1.10"
+kiddo = "5"
+laz = { version = "0.13", features = ["parallel"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[profile.release]
+lto = "thin"
+
+[profile.smoke]
+inherits = "release"
+lto = false
+incremental = true
+codegen-units = 256
+
+[profile.test]
+opt-level = 1

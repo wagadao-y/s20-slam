@@ -1,0 +1,23 @@
+[package]
+name = "s20-cli"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+version.workspace = true
+
+[[bin]]
+name = "s20"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+nalgebra.workspace = true
+s20-io = { path = "../s20-io" }
+s20-geom = { path = "../s20-geom" }
+s20-lio = { path = "../s20-lio" }
+s20-opt = { path = "../s20-opt" }
+s20-finish = { path = "../s20-finish" }
+s20-visual = { path = "../s20-visual" }
+serde_json.workspace = true
+s20-pipeline = { path = "../s20-pipeline" }
+rayon.workspace = true
