@@ -20,6 +20,8 @@ A post-processing app for the **SHARE SLAM S20**. From the S20's raw recording f
 
 Get the latest zip from [Releases](../../releases/latest), unzip it anywhere and run `s20-gui.exe`. No installer is needed.
 
+The executables are not code-signed, so Windows may show "Windows protected your PC" the first time. Choose **More info → Run anyway**. They are built by GitHub Actions from the public source of this repository.
+
 | File | |
 |---|---|
 | `s20-gui.exe` | The app |

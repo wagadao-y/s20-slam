@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    runs-on: windows-latest
+    steps:
+      # rustfmt.toml asks for LF; keep Git from turning the checkout into CRLF
+      - run: git config --global core.autocrlf false
+      - uses: actions/checkout@v5
+      # the toolchain of rust-toolchain.toml, with rustfmt and clippy
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - name: Format
+        run: cargo fmt --all --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Test
+        run: cargo test --workspace
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-about@0.9.3
+      - name: Third-party licenses up to date
+        shell: bash
+        run: |
+          cargo about generate about.hbs -o target/THIRD-PARTY-LICENSES.txt
+          if ! diff -q THIRD-PARTY-LICENSES.txt target/THIRD-PARTY-LICENSES.txt; then
+            echo "::error::THIRD-PARTY-LICENSES.txt is out of date: run cargo about generate about.hbs -o THIRD-PARTY-LICENSES.txt"
+            exit 1
+          fi

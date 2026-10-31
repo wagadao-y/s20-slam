@@ -1,0 +1,52 @@
+name: Release
+
+# Pushing a tag v<version> (the workspace version in Cargo.toml) builds the executables,
+# zips them with the licenses and READMEs, and attaches the zip to a draft release.
+# Check the draft, edit its notes and publish it on GitHub.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - run: git config --global core.autocrlf false
+      - uses: actions/checkout@v5
+      - run: rustup toolchain install
+      - name: The tag matches the version
+        shell: bash
+        run: |
+          version=$(grep -m1 -E '^version *= *"' Cargo.toml | sed -E 's/.*"(.*)".*/\1/')
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match the version $version in Cargo.toml"
+            exit 1
+          fi
+      - name: Build
+        shell: bash
+        run: |
+          # the source paths kept for panic messages without the runner's folders
+          sysroot=$(cygpath -w "$(rustc --print sysroot)")
+          export RUSTFLAGS="--remap-path-prefix=$sysroot=/rust --remap-path-prefix=$USERPROFILE\\.cargo\\registry\\src=/cargo --remap-path-prefix=$USERPROFILE\\.cargo\\git\\checkouts=/cargo-git --remap-path-prefix=$GITHUB_WORKSPACE=/s20-slam --remap-path-prefix=$USERPROFILE=/home"
+          cargo build --release --locked -p s20-gui -p s20-cli
+      - name: Zip
+        shell: pwsh
+        run: |
+          $name = "s20-slam-$env:GITHUB_REF_NAME"
+          New-Item -ItemType Directory $name | Out-Null
+          Copy-Item target/release/s20-gui.exe, target/release/s20.exe, LICENSE, NOTICE, THIRD-PARTY-LICENSES.txt, README.md, README_jp.md $name
+          Compress-Archive -Path $name -DestinationPath "$name-windows-x64.zip"
+      - name: Draft release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" "s20-slam-$GITHUB_REF_NAME-windows-x64.zip" \
+            --draft --title "s20-slam $GITHUB_REF_NAME" --generate-notes
