@@ -4,6 +4,7 @@
 use super::*;
 use crate::lang::tl;
 use s20_pipeline::device::{Info, Store, calibrate, unusable};
+use s20_pipeline::runlog::PathMask;
 
 /// The folder the device calibrations are kept in (beside the GUI settings).
 pub(super) fn store() -> Store {
@@ -121,11 +122,11 @@ impl App {
                 };
                 match self.device.save(&job.maker, &yaml, &info) {
                     Ok(f) => {
-                        self.log.push(tr!(
+                        self.log.push(PathMask::home().apply(&tr!(
                             "機体の校正を保存しました: {}",
                             "Saved the device calibration: {}",
                             f.display()
-                        ));
+                        )));
                         // the processed recordings of this device among the recent work folders
                         let digest = s20_pipeline::file_digest(&job.maker);
                         let mut works: Vec<PathBuf> =
@@ -198,7 +199,16 @@ impl App {
             return;
         };
         let maker = cfgs[0].calib();
-        let log_file = s20_pipeline::runlog::LogFile::create(&self.device.dir.join("logs"))
+        // the recordings by the names of their work and raw folders
+        let mask = cfgs.iter().fold(PathMask::home(), |m, c| {
+            let name = c.work.file_name().unwrap_or_default().to_string_lossy();
+            c.sessions
+                .iter()
+                .fold(m.with(&c.work, &format!("<work:{name}>")), |m, s| {
+                    m.with(&s.raw, &format!("<raw:{}>", s.name))
+                })
+        });
+        let log_file = s20_pipeline::runlog::LogFile::create(&self.device.dir.join("logs"), mask)
             .ok()
             .map(Arc::new);
         if let Some(f) = &log_file {
@@ -232,9 +242,9 @@ impl App {
                 }
             },
             move |s| {
-                let line = format!("[{:7.1}s] {s}", t0.elapsed().as_secs_f64());
+                let mut line = format!("[{:7.1}s] {s}", t0.elapsed().as_secs_f64());
                 if let Some(f) = &lf {
-                    f.line(&line);
+                    line = f.line(&line);
                 }
                 let _ = tl.send(CalibEvent::Log(line));
                 cl.request_repaint();
@@ -260,8 +270,11 @@ impl App {
             works.len()
         ));
         if let Some(f) = &log_file {
-            self.log
-                .push(tr!("ログファイル: {}", "Log file: {}", f.path.display()));
+            self.log.push(PathMask::home().apply(&tr!(
+                "ログファイル: {}",
+                "Log file: {}",
+                f.path.display()
+            )));
         }
         win.message = None;
         win.job = Some(CalibJob {

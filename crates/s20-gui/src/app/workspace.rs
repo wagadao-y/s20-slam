@@ -947,6 +947,31 @@ impl App {
                         {
                             ui.ctx().copy_text(self.log.join("\n"));
                         }
+                        // as RunConfig::log_dir, without reading the work folder every frame
+                        let work = self.s.work.trim();
+                        let logs = (!work.is_empty()).then(|| Path::new(work).join("logs"));
+                        if ui
+                            .add_enabled(
+                                logs.as_ref().is_some_and(|d| d.exists()),
+                                egui::Button::new(tr!(
+                                    "{} ログフォルダーを開く",
+                                    "{} Open the log folder",
+                                    icon::FOLDER_OPEN
+                                )),
+                            )
+                            .on_hover_text(tl(
+                                "処理ごとのログファイル（作業フォルダーの logs）を開きます",
+                                "Opens the log files of the runs (logs in the work folder)",
+                            ))
+                            .on_disabled_hover_text(tl(
+                                "作業フォルダーで処理を実行すると作られます",
+                                "Made when a run is started in the work folder",
+                            ))
+                            .clicked()
+                            && let Some(d) = logs
+                        {
+                            let _ = std::process::Command::new("explorer").arg(d).spawn();
+                        }
                     });
                     self.log_panel(ui);
                 });

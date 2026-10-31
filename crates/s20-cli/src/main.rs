@@ -682,7 +682,10 @@ fn run(a: &mut Args, job: &Job) -> Result<()> {
         None => s20_pipeline::Step::Images,
     };
     // the log kept in the work folder as well
-    let file = std::sync::Arc::new(s20_pipeline::runlog::LogFile::create(&cfg.log_dir())?);
+    let file = std::sync::Arc::new(s20_pipeline::runlog::LogFile::create(
+        &cfg.log_dir(),
+        cfg.path_mask(),
+    )?);
     let what = format!("{} から {} まで（s20 run）", first.key(), last.key());
     for l in s20_pipeline::runlog::header(&cfg, &what) {
         file.line(&l);
@@ -693,9 +696,8 @@ fn run(a: &mut Args, job: &Job) -> Result<()> {
     let logged = Job::new(
         |_, _, _| {},
         move |s| {
-            let line = format!("[{:7.1}s] {s}", t0.elapsed().as_secs_f64());
+            let line = f.line(&format!("[{:7.1}s] {s}", t0.elapsed().as_secs_f64()));
             eprintln!("{line}");
-            f.line(&line);
         },
     );
     let r = cfg.run_until(first, last, &logged);

@@ -21,6 +21,7 @@ use eframe::egui;
 use egui_phosphor::regular as icon;
 use glam::{DMat4, DVec3};
 use s20_pipeline::job::{Job, is_cancelled};
+use s20_pipeline::runlog::PathMask;
 use s20_pipeline::{At, Edits, FolderKind, PointAt, ProcessParams, RunConfig, Step, WorkSettings};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -984,7 +985,8 @@ impl App {
             None => tr!("{} から実行", "Run from {}", step_label(first)),
         };
         // the log kept in the work folder as well
-        let log_file = match s20_pipeline::runlog::LogFile::create(&cfg.log_dir()) {
+        let log_file = match s20_pipeline::runlog::LogFile::create(&cfg.log_dir(), cfg.path_mask())
+        {
             Ok(f) => {
                 let preset = if self.s.outdoor {
                     tl("屋外", "Outdoor")
@@ -1003,7 +1005,7 @@ impl App {
                 Some(Arc::new(f))
             }
             Err(e) => {
-                self.log.push(tr!(
+                self.log_line(tr!(
                     "ログファイルを作れませんでした: {e:#}",
                     "Could not create the log file: {e:#}"
                 ));
@@ -1021,9 +1023,9 @@ impl App {
                 cp.request_repaint();
             },
             move |s| {
-                let line = format!("[{:7.1}s] {s}", t0.elapsed().as_secs_f64());
+                let mut line = format!("[{:7.1}s] {s}", t0.elapsed().as_secs_f64());
                 if let Some(f) = &lf {
-                    f.line(&line);
+                    line = f.line(&line);
                 }
                 let _ = tl.send(Event::Log(line));
                 cl.request_repaint();
@@ -1053,8 +1055,7 @@ impl App {
         self.error = None;
         self.log.push(format!("---- {what}"));
         if let Some(f) = &log_file {
-            self.log
-                .push(tr!("ログファイル: {}", "Log file: {}", f.path.display()));
+            self.log_line(tr!("ログファイル: {}", "Log file: {}", f.path.display()));
         }
         self.job = Some(Running {
             rx,
@@ -1158,14 +1159,14 @@ impl App {
                     if let Some(c) = self.current {
                         self.steps.insert(c, StepState::Failed);
                     }
-                    self.error = Some(format!("{e:#}"));
+                    let e = self.path_mask().apply(&format!("{e:#}"));
                     self.s.show_log = true;
-                    self.log
-                        .push(tr!("---- エラー: {e:#}", "---- Error: {e:#}"));
+                    self.log.push(tr!("---- エラー: {e}", "---- Error: {e}"));
                     self.notices.push(
                         Level::Error,
-                        tr!("処理が失敗しました: {e:#}", "Processing failed: {e:#}"),
+                        tr!("処理が失敗しました: {e}", "Processing failed: {e}"),
                     );
+                    self.error = Some(e);
                 }
             }
             self.current = None;
@@ -1339,7 +1340,7 @@ impl App {
         self.log.push(tr!(
             "作業フォルダーを開きました: {}",
             "Opened the work folder: {}",
-            work.display()
+            work.file_name().unwrap_or_default().to_string_lossy()
         ));
     }
 
@@ -2390,9 +2391,26 @@ impl App {
 
     /// Writes `text` to the log and shows it over the view for a few seconds.
     fn notify(&mut self, level: Level, text: impl Into<String>) {
-        let text = text.into();
+        let text = self.path_mask().apply(&text.into());
         self.log.push(text.clone());
         self.notices.push(level, text);
+    }
+
+    /// The paths of the log as in the log files: relative to the work folder, the raw folders
+    /// by session, the rest of the user's folder as `~`.
+    fn path_mask(&self) -> PathMask {
+        let work = self.s.work.trim();
+        match self.project() {
+            Some(c) => c.path_mask(),
+            None if !work.is_empty() => PathMask::home().with(Path::new(work), ""),
+            None => PathMask::home(),
+        }
+    }
+
+    /// Adds `s` to the log with its paths masked as in the log files.
+    fn log_line(&mut self, s: impl Into<String>) {
+        let s = self.path_mask().apply(&s.into());
+        self.log.push(s);
     }
 
     fn log_panel(&mut self, ui: &mut egui::Ui) {
