@@ -33,7 +33,7 @@ jobs:
         run: cargo test --workspace
       - uses: taiki-e/install-action@v2
         with:
-          tool: cargo-about@0.9.3
+          tool: cargo-about@0.9.3,cargo-audit@0.22.2
       - name: Third-party licenses up to date
         shell: bash
         run: |
@@ -42,3 +42,7 @@ jobs:
             echo "::error::THIRD-PARTY-LICENSES.txt is out of date: run cargo about generate about.hbs -o THIRD-PARTY-LICENSES.txt"
             exit 1
           fi
+      # the dependencies against the RustSec advisories: a vulnerability fails, warnings
+      # (unmaintained, unsound, yanked) are only reported
+      - name: Security advisories
+        run: cargo audit
