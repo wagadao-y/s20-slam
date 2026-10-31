@@ -777,6 +777,17 @@ impl App {
         app.reload_edits();
         app.refresh_steps();
         app.load_scene(&cc.egui_ctx);
+        if let Some(log) = crate::panics::take_last_crash() {
+            let log = log.display();
+            app.s.show_log = true;
+            app.notify(
+                Level::Error,
+                tr!(
+                    "前回は内部エラー（panic）で終了しました。記録: {log}",
+                    "The last run ended by an internal error (panic). Record: {log}"
+                ),
+            );
+        }
         app
     }
 
@@ -3881,6 +3892,7 @@ fn turbo(t: f32) -> [u8; 3] {
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        crate::panics::crash_to(self.s.work.trim(), || self.path_mask());
         self.window_place.track(&ctx);
         self.hold_close(&ctx);
         self.poll(&ctx);

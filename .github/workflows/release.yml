@@ -1,7 +1,7 @@
 name: Release
 
 # Pushing a tag v<version> (the workspace version in Cargo.toml) builds the executables,
-# zips them with the licenses and READMEs, and attaches the zip to a draft release.
+# zips them with the licenses and READMEs, and attaches the zip and its SHA-256 to a draft release.
 # Check the draft, edit its notes and publish it on GitHub.
 
 on:
@@ -43,10 +43,14 @@ jobs:
           New-Item -ItemType Directory $name | Out-Null
           Copy-Item target/release/s20-gui.exe, target/release/s20.exe, LICENSE, NOTICE, THIRD-PARTY-LICENSES.txt, README.md, README_jp.md $name
           Compress-Archive -Path $name -DestinationPath "$name-windows-x64.zip"
+          # the checksum in the format of sha256sum, for checking the download
+          $hash = (Get-FileHash "$name-windows-x64.zip" -Algorithm SHA256).Hash.ToLower()
+          "$hash  $name-windows-x64.zip" | Out-File -Encoding ascii -NoNewline "$name-windows-x64.zip.sha256"
       - name: Draft release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$GITHUB_REF_NAME" "s20-slam-$GITHUB_REF_NAME-windows-x64.zip" \
+            "s20-slam-$GITHUB_REF_NAME-windows-x64.zip.sha256" \
             --draft --title "s20-slam $GITHUB_REF_NAME" --generate-notes

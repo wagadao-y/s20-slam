@@ -95,13 +95,13 @@ fn field<'a>(r: &Record<'a>, name: &[u8]) -> Option<&'a [u8]> {
 
 fn op(r: &Record) -> Result<u8> {
     let v = field(r, b"op").context("record without op")?;
-    Ok(v[0])
+    v.first().copied().context("empty op field")
 }
 
-fn time_ns(v: &[u8]) -> u64 {
-    let s = u32::from_le_bytes(v[0..4].try_into().unwrap()) as u64;
-    let n = u32::from_le_bytes(v[4..8].try_into().unwrap()) as u64;
-    s * 1_000_000_000 + n
+fn time_ns(v: &[u8]) -> Result<u64> {
+    let s = read_u32(v, 0).context("short time field")? as u64;
+    let n = read_u32(v, 4).context("short time field")? as u64;
+    Ok(s * 1_000_000_000 + n)
 }
 
 impl Bag {
@@ -149,7 +149,7 @@ impl Bag {
                                 let conn = u32::from_le_bytes(
                                     field(&m, b"conn").context("msg without conn")?.try_into()?,
                                 );
-                                let t = time_ns(field(&m, b"time").context("msg without time")?);
+                                let t = time_ns(field(&m, b"time").context("msg without time")?)?;
                                 messages.push(MsgRef {
                                     conn,
                                     time_ns: t,
@@ -171,7 +171,7 @@ impl Bag {
                     let conn = u32::from_le_bytes(
                         field(&r, b"conn").context("msg without conn")?.try_into()?,
                     );
-                    let t = time_ns(field(&r, b"time").context("msg without time")?);
+                    let t = time_ns(field(&r, b"time").context("msg without time")?)?;
                     messages.push(MsgRef {
                         conn,
                         time_ns: t,
@@ -255,4 +255,56 @@ fn parse_connection(b: &[u8], r: &Record) -> Result<Connection> {
         msg_type: get(b"type"),
         message_definition: get(b"message_definition"),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A record: its header fields (`name=value`) and data.
+    fn record(fields: &[(&str, &[u8])], data: &[u8]) -> Vec<u8> {
+        let mut h = Vec::new();
+        for (k, v) in fields {
+            h.extend((k.len() as u32 + 1 + v.len() as u32).to_le_bytes());
+            h.extend(k.as_bytes());
+            h.push(b'=');
+            h.extend(*v);
+        }
+        let mut r = (h.len() as u32).to_le_bytes().to_vec();
+        r.extend(h);
+        r.extend((data.len() as u32).to_le_bytes());
+        r.extend(data);
+        r
+    }
+
+    /// The message times of a bag of one message outside a chunk, with header fields `op` and
+    /// `time` as given.
+    fn times(name: &str, op: &[u8], time: &[u8]) -> Result<Vec<u64>> {
+        let mut b = MAGIC.to_vec();
+        let conn = 0u32.to_le_bytes();
+        b.extend(record(&[("op", op), ("conn", &conn), ("time", time)], b"x"));
+        let path = std::env::temp_dir().join(format!("s20_bag_{name}_{}.bag", std::process::id()));
+        std::fs::write(&path, &b).unwrap();
+        // the bag (its map) is closed before the file is removed
+        let t = Bag::open(&path).map(|bag| bag.messages.iter().map(|m| m.time_ns).collect());
+        let _ = std::fs::remove_file(&path);
+        t
+    }
+
+    #[test]
+    fn message_time_read() {
+        let mut t = 3u32.to_le_bytes().to_vec();
+        t.extend(5u32.to_le_bytes());
+        assert_eq!(times("ok", &[OP_MSG_DATA], &t).unwrap(), [3_000_000_005]);
+    }
+
+    #[test]
+    fn short_fields_are_errors() {
+        let e = times("short_time", &[OP_MSG_DATA], &[1, 2, 3])
+            .err()
+            .unwrap();
+        assert!(format!("{e:#}").contains("short time field"), "{e:#}");
+        let e = times("empty_op", &[], &[0; 8]).err().unwrap();
+        assert!(format!("{e:#}").contains("empty op field"), "{e:#}");
+    }
 }
