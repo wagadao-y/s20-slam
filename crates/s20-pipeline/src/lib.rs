@@ -2095,6 +2095,24 @@ mod tests {
     use super::*;
 
     #[test]
+    fn revisits_are_on_for_new_settings_and_off_for_settings_written_before_them() {
+        let new = ProcessParams::default();
+        assert!(new.opt.revisits.enabled);
+        assert!(
+            ProcessParams::from_json(&new.to_json())
+                .unwrap()
+                .opt
+                .revisits
+                .enabled
+        );
+        let mut v = serde_json::to_value(&new).unwrap();
+        v["opt"].as_object_mut().unwrap().remove("revisits");
+        let old: ProcessParams = serde_json::from_value(v).unwrap();
+        assert!(!old.opt.revisits.enabled);
+        assert_eq!(old.opt.revisits.max_dist, new.opt.revisits.max_dist);
+    }
+
+    #[test]
     fn las_colours_are_whole_8_bit_levels_never_in_the_8_bit_range_unless_black() {
         assert_eq!(las_rgb([0.9, 0.4, 5.9]), [257, 0, 6 * 257]);
         assert_eq!(las_rgb([-3., 255., 300.]), [0, 65535, 65535]);

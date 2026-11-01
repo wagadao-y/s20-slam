@@ -87,7 +87,9 @@ pub struct Params {
     /// registration of the loops the user marked
     pub loop_reg: LoopParams,
     /// revisits found and registered automatically, with the loops weighted by how well their
-    /// registration fixes each direction and robust (when enabled)
+    /// registration fixes each direction and robust (when enabled). Settings written before the
+    /// revisits existed read as off, so a work folder's results stay as they were.
+    #[serde(default = "revisit::RevisitParams::off")]
     pub revisits: revisit::RevisitParams,
 }
 

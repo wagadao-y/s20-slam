@@ -42,7 +42,7 @@ s20 colorize out/cloud.laz out/cloud_col.laz --images <data>/images --imgpose ru
 
 - 時刻は、セッションの最初のスキャンからの秒です。負の値は終わりからの秒です。複数セッションでは `セッション名@秒` か `番号@秒` で指定します。
 - `opt` に複数の LIO の軌跡をカンマ区切りで渡すと、複数セッションとして解きます（`data` に `sessions.txt` と連結した `imu.npy`／`gnss.npy` が必要です。`s20 run` が作ります）。GNSS がないときは、最初のセッションを基準に、セッションをまたぐループか `--match [session:]x,y,z=[session:]x,y,z`（同じ特徴の座標、セッションの組ごとに 2 組以上）で残りを置きます。
-- `opt --revisits` で再訪（[処理の仕組み](processing.md)）を使います。`--revisit_dist m`（組にする距離）、`--revisit_inliers f`（重なりの下限）、`--revisit_path_sd k`（道沿いの標準偏差の倍率）、`--robust sd` などで設定を変えられます。`s20 eval-revisits <data> <opt_knots.txt> [out.csv]` は、軌跡の同じ場所の組を位置合わせし直して、二重の幅を組ごとに CSV に書きます。
+- `opt` は再訪（[処理の仕組み](processing.md)）を使います。`--no_revisits` で使いません。`--revisit_dist m`（組にする距離）、`--revisit_inliers f`（重なりの下限）、`--revisit_path_sd k`（道沿いの標準偏差の倍率）、`--robust sd` などで設定を変えられます。`s20 eval-revisits <data> <opt_knots.txt> [out.csv]` は、軌跡の同じ場所の組を位置合わせし直して、二重の幅を組ごとに CSV に書きます。
 - `cloud` の `--config` は点群の設定の JSON です。ない項目は既定値になります。
 - `colorize` の画像は、`<data>/images` にファイルがあればそれを、なければ bag の中の JPEG を読みます。
 

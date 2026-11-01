@@ -31,7 +31,7 @@ type M6 = SMatrix<f64, 6, 6>;
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct RevisitParams {
-    /// find and use the revisits (off: only the loops marked, as before)
+    /// find and use the revisits (off: only the loops marked)
     pub enabled: bool,
     /// a submap holds the knots within half this many seconds of its centre (s)
     pub len_s: f64,
@@ -61,7 +61,10 @@ pub struct RevisitParams {
 impl Default for RevisitParams {
     fn default() -> Self {
         RevisitParams {
-            enabled: false,
+            // without GNSS they keep the passes of a place together where the odometry drifted (in
+            // a park checked against RTK, the worst pairs from 1-3 m to decimetres); with GNSS they
+            // change little
+            enabled: true,
             len_s: 15.0,
             radius: 30.0,
             min_gap_s: 60.0,
@@ -78,6 +81,14 @@ impl Default for RevisitParams {
 }
 
 impl RevisitParams {
+    /// The defaults, off.
+    pub fn off() -> Self {
+        RevisitParams {
+            enabled: false,
+            ..Default::default()
+        }
+    }
+
     /// Whether a registration whose weakest direction has this share of the strongest is along
     /// a path.
     pub fn along_path(&self, weak: f64) -> bool {

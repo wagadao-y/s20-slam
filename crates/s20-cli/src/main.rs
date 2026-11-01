@@ -428,7 +428,9 @@ fn opt(a: &mut Args, job: &Job) -> Result<()> {
     p.loop_reg.half_s = a.get("--loop_half", p.loop_reg.half_s)?;
     p.loop_reg.remeasure = !a.flag("--no_loop_remeasure");
     p.revisits = revisit_params(a)?;
-    p.revisits.enabled = a.flag("--revisits");
+    // --revisits: the default now, still accepted
+    let _ = a.flag("--revisits");
+    p.revisits.enabled = !a.flag("--no_revisits");
     if let Some(it) = a.get_str("--iters")? {
         let v: Vec<usize> = it.split(',').map(str::parse).collect::<Result<_, _>>()?;
         if v.len() != p.stages.len() {
@@ -798,7 +800,7 @@ const USAGE: &str = "usage:
       (--hold: the heading and gyro bias follow the IMU in that interval, for round hills or featureless slopes; repeatable)
   s20 opt <data folder> <lio.txt>[,<lio.txt>...] <out.txt> [--every n] [--ng x] [--na x] [--nbg x] [--nba x] [--sigma_pt m]
       [--lidar_w w] [--iters a,b,c] [--rtk [--rtk_sig_h m] [--rtk_sig_v m] [--rtk_c m] [--rtk_exclude a:b]] [--no_fix_check] [--fix_step_h m] [--fix_step_v m] [--loop a:b|start-end] [--loop_half s] [--no_loop_remeasure]
-      [--edits s20_edits.json] [--revisits [--revisit_len s] [--revisit_dist m] [--revisit_inliers f] [--revisit_path_sd k] [--revisit_min_weak r] [--robust sd]]
+      [--edits s20_edits.json] [--no_revisits] [--revisit_len s] [--revisit_dist m] [--revisit_inliers f] [--revisit_path_sd k] [--revisit_min_weak r] [--robust sd]
       [--ppk ppk.json[,ppk.json...]] [--match [session:]x,y,z=[session:]x,y,z]
       (times: seconds from the first scan of a session, [session@]t with the session's name or number; negative: from its end;
        several sessions without --rtk / --ppk: the first is the reference, the others are placed by loops between sessions

@@ -808,8 +808,8 @@ const LABELS: &[(&str, &str, [&str; 2], [&str; 2])] = &[
         "enabled",
         ["再訪を使う", "Use revisits"],
         [
-            "建物の壁などが二重に写るのを防ぎます。複数セッションをつなぐときに勧めます。位置合わせの決まり方に応じて重みをつけ、合わないものは弱く扱います（指定したループも同じく）。最適化の時間は延びます",
-            "Keeps walls and other surfaces from doubling. Recommended when joining sessions. Each is weighted by how well its registration fixes each direction, and those that disagree pull little (the marked loops too). The optimization takes longer",
+            "自動のループです。GNSS なしで解くとき、ドリフトでずれた通過どうし（約 2 m まで）を合わせ、建物の壁などが二重に写るのを防ぎます。位置合わせの決まり方に応じて重みをつけ、合わないものは弱く扱います（指定したループも同じく）。最適化の時間は 1 割ほど延びます",
+            "Automatic loops. Without GNSS, they bring together passes the drift set apart (up to about 2 m) and keep walls and other surfaces from doubling. Each is weighted by how well its registration fixes each direction, and those that disagree pull little (the marked loops too). The optimization takes about a tenth longer",
         ],
     ),
     (
