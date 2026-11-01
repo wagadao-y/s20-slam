@@ -53,4 +53,4 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" "s20-slam-$GITHUB_REF_NAME-windows-x64.zip" \
             "s20-slam-$GITHUB_REF_NAME-windows-x64.zip.sha256" \
-            --draft --title "s20-slam $GITHUB_REF_NAME" --generate-notes
+            --draft --title "s20-slam $GITHUB_REF_NAME" --notes ""
