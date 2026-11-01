@@ -17,6 +17,7 @@ pub mod links;
 pub mod planes;
 pub mod quality;
 pub mod relpose;
+pub mod revisit;
 pub mod tridiag;
 
 #[cfg(test)]
@@ -85,6 +86,9 @@ pub struct Params {
     pub conv_deg: f64,
     /// registration of the loops the user marked
     pub loop_reg: LoopParams,
+    /// revisits found and registered automatically, with the loops weighted by how well their
+    /// registration fixes each direction and robust (when enabled)
+    pub revisits: revisit::RevisitParams,
 }
 
 /// A stage on its own (a stage added to the list starts as the finest one).
@@ -192,6 +196,7 @@ impl Default for Params {
             conv_mm: 5.0,
             conv_deg: 0.02,
             loop_reg: LoopParams::default(),
+            revisits: revisit::RevisitParams::default(),
         }
     }
 }
@@ -656,8 +661,12 @@ impl Problem {
     fn prior_weights(&self, s: &State) -> (M3, f64, f64, f64) {
         // world-frame rotation weights: yaw tight, tilt loose (gravity observes it). With RTK the position and
         // yaw are observed, the prior only keeps the system regular.
+        // Without RTK the prior only fixes the gauge, loosely: held tight on its one knot, the
+        // corrections that turn the whole map (a loop's) bend the first seconds instead, the knot
+        // staying while the rest slides by the turn about the map (13 cm in 2 s on a park's 25-minute
+        // loop, 2026-10-31). `run` puts the first knot back afterwards.
         let (sy, sp) = if self.rtk.is_empty() {
-            (1e-5f64, 1e-4f64)
+            (1f64.to_radians(), 0.1f64)
         } else {
             (10f64.to_radians(), 10.0)
         };
@@ -1324,7 +1333,32 @@ impl Problem {
             stages,
             ..prm.clone()
         };
-        self.run_stages(prm, "", "opt", job)
+        let hist = self.run_stages(prm, "", "opt", job)?;
+        if self.rtk.is_empty() {
+            self.reanchor();
+        }
+        Ok(hist)
+    }
+
+    /// Moves the whole trajectory, unchanged in shape, so that the first knot of the reference
+    /// session is where its prior has it (position and yaw; the tilt stays as gravity has it).
+    fn reanchor(&mut self) {
+        let Some((k0, p0)) = self
+            .priors
+            .iter()
+            .find(|(k, _)| !self.free[self.session[*k]])
+            .copied()
+        else {
+            return;
+        };
+        let s = self.states[k0];
+        let rz = links::yaw_only(&(p0.r * s.r.transpose()));
+        let tr = p0.p - rz * s.p;
+        for s in self.states.iter_mut() {
+            s.r = rz * s.r;
+            s.p = rz * s.p + tr;
+            s.v = rz * s.v;
+        }
     }
 
     /// Runs the stages of `prm`, logging each iteration with `tag` in front and reporting the
@@ -1396,6 +1430,9 @@ impl Problem {
             }
             if prm.loop_reg.remeasure && !st.odometry && si != last && !self.loops.is_empty() {
                 self.remeasure_loops(&prm.loop_reg, prm.rmax, &log);
+                if prm.revisits.enabled {
+                    self.remeasure_revisits(&prm.revisits, &log);
+                }
             }
         }
         Ok(hist)

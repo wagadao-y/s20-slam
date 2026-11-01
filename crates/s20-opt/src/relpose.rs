@@ -30,6 +30,11 @@ pub struct RelPose {
     /// measured by registering the points around these places (in the bodies of knots a and b)
     /// rather than the local maps of the two times (see [`crate::links`])
     pub region: Option<(V3, V3)>,
+    /// the information of the residual [rotation; translation] from the registration, in place
+    /// of `sig_r` and `sig_t`: weak where the points hardly fix the pose (see [`crate::revisit`])
+    pub info: Option<M6>,
+    /// Cauchy scale on the whitened residual: a factor far off the others pulls less
+    pub robust: Option<f64>,
 }
 
 /// A linearised relative pose factor on the [theta, p] blocks of two knots.
@@ -77,9 +82,16 @@ impl RelPose {
 
     pub fn term(&self, states: &[State]) -> RelTerm {
         let (r, ja, jb) = self.linearize(&states[self.a], &states[self.b]);
-        let wr = 1.0 / (self.sig_r * self.sig_r);
-        let wt = 1.0 / (self.sig_t * self.sig_t);
-        let w = M6::from_diagonal(&V6::new(wr, wr, wr, wt, wt, wt));
+        let w = self.weights();
+        let chi2 = r.dot(&(w * r));
+        // Cauchy: the weight of the current residual (IRLS) and its cost
+        let (w, cost) = match self.robust {
+            Some(c) => {
+                let u = chi2 / (c * c);
+                (w / (1.0 + u), 0.5 * c * c * u.ln_1p())
+            }
+            None => (w, 0.5 * chi2),
+        };
         RelTerm {
             a: self.a,
             b: self.b,
@@ -88,8 +100,23 @@ impl RelPose {
             hbb: jb.transpose() * w * jb,
             ga: ja.transpose() * w * r,
             gb: jb.transpose() * w * r,
-            cost: 0.5 * r.dot(&(w * r)),
+            cost,
         }
+    }
+
+    /// The weights of the residual: the registration's information, else from `sig_r`, `sig_t`.
+    pub fn weights(&self) -> M6 {
+        self.info.unwrap_or_else(|| {
+            let wr = 1.0 / (self.sig_r * self.sig_r);
+            let wt = 1.0 / (self.sig_t * self.sig_t);
+            M6::from_diagonal(&V6::new(wr, wr, wr, wt, wt, wt))
+        })
+    }
+
+    /// The whitened residual's squared norm (how many standard deviations off, squared).
+    pub fn chi2(&self, states: &[State]) -> f64 {
+        let (r, _, _) = self.linearize(&states[self.a], &states[self.b]);
+        r.dot(&(self.weights() * r))
     }
 }
 
@@ -124,12 +151,27 @@ impl Problem {
     /// Points around knot `c` (knots within `half` seconds, same session, points within `radius` m),
     /// in the frame of knot c.
     fn local_map(&self, c: usize, half: f64, radius: f64) -> Vec<V3> {
-        let pre = self.preintegrate(&crate::imu::Noise {
+        self.local_map_with(&self.map_preint(), c, half, radius)
+    }
+
+    /// The preintegration the local maps place the points between the knots with.
+    pub(crate) fn map_preint(&self) -> Vec<Option<crate::imu::Preint>> {
+        self.preintegrate(&crate::imu::Noise {
             ng: 2e-4,
             na: 5e-3,
             nbg: 1e-4,
             nba: 1e-3,
-        });
+        })
+    }
+
+    /// As [`Problem::local_map`], with the preintegration of [`Problem::map_preint`] given.
+    pub(crate) fn local_map_with(
+        &self,
+        pre: &[Option<crate::imu::Preint>],
+        c: usize,
+        half: f64,
+        radius: f64,
+    ) -> Vec<V3> {
         let (rc, pc) = (self.states[c].r, self.states[c].p);
         let rct = rc.transpose();
         let ks: Vec<usize> = (0..self.kt.len())
@@ -219,6 +261,8 @@ impl Problem {
                 sig_r: lp.sig_r_deg.to_radians(),
                 sig_t: lp.sig_t,
                 region: None,
+                info: None,
+                robust: None,
             },
             inliers: best.2,
             gap_m,
@@ -246,6 +290,10 @@ impl Problem {
     pub fn remeasure_loops(&mut self, lp: &LoopParams, range: f64, log: &dyn Fn(&str)) {
         for k in 0..self.loops.len() {
             let l = self.loops[k];
+            // revisits found automatically are measured once, on submaps of their own
+            if l.info.is_some() {
+                continue;
+            }
             let what = format!("loop {} = {}", self.knot_label(l.a), self.knot_label(l.b));
             let fit = match l.region {
                 None => self.register_loop(self.kt[l.a], self.kt[l.b], lp),
@@ -287,7 +335,10 @@ impl Problem {
                         so3::log(&(l.r.transpose() * f.rel.r)).norm().to_degrees(),
                         f.inliers * 100.0
                     ));
-                    self.loops[k] = f.rel;
+                    self.loops[k] = RelPose {
+                        robust: l.robust,
+                        ..f.rel
+                    };
                 }
                 Ok(f) => log(&format!(
                     "  {what} measured again: not accepted ({:.0}% matched), the previous measurement stays",
@@ -315,6 +366,8 @@ impl Problem {
                     sig_r: 0.05f64.to_radians(),
                     sig_t: 0.005,
                     region: None,
+                    info: None,
+                    robust: None,
                 }
             })
             .collect()
@@ -355,6 +408,8 @@ mod tests {
             sig_r: 1.0,
             sig_t: 1.0,
             region: None,
+            info: None,
+            robust: None,
         };
         let (r0, ja, jb) = rel.linearize(&a, &b);
         let h = 1e-6;

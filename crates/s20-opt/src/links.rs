@@ -247,6 +247,8 @@ impl Problem {
             sig_r: lp.sig_r_deg.to_radians(),
             sig_t: lp.sig_t,
             region: None,
+            info: None,
+            robust: None,
         }
     }
 

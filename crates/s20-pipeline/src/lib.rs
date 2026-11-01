@@ -12,6 +12,7 @@ pub mod device;
 pub mod export;
 pub mod frames;
 mod place;
+pub mod revisits;
 pub mod runlog;
 pub use at::{At, Clock, PointAt};
 pub use s20_io::job;
@@ -330,7 +331,14 @@ pub fn opt(
         );
     }
     pr.loops.extend(matched);
+    let marked = p
+        .revisits
+        .enabled
+        .then(|| revisits::add(&mut pr, &p.revisits, &clock, job));
     pr.run(p, job)?;
+    if let Some(m) = marked {
+        revisits::report(&pr, &p.revisits, m, &clock, job);
+    }
     for lp in &pr.loops {
         let (deg, m) = lp.error(&pr.states);
         job.log(&format!(
@@ -897,6 +905,12 @@ struct StepRecord {
     params: serde_json::Value,
 }
 
+/// A step's finished result before it runs again: its time, and its record as written.
+struct PreviousResult {
+    modified: std::time::SystemTime,
+    record: Option<String>,
+}
+
 /// Why a step's result is out of date.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Stale {
@@ -944,6 +958,12 @@ impl Step {
     /// Steps run for each session (the others run once for all of them).
     pub fn per_session(self) -> bool {
         matches!(self, Step::Extract | Step::Lio)
+    }
+
+    /// Steps that write their result only once they have finished: a run cancelled or failed
+    /// before that leaves the previous result whole.
+    fn writes_at_end(self) -> bool {
+        matches!(self, Step::Lio | Step::Opt)
     }
 
     pub const ALL: [Step; 8] = [
@@ -1827,8 +1847,12 @@ impl RunConfig {
                 job.log(&format!("-- {}", self.sessions[k].name));
                 std::fs::create_dir_all(self.session_runs(k))?;
             }
+            let previous = self.previous_result(step, k);
             self.write_record(step, k, false)?;
-            self.run_step_inner(step, k.unwrap_or(0), job)?;
+            if let Err(e) = self.run_step_inner(step, k.unwrap_or(0), job) {
+                self.restore_result(step, k, previous, job);
+                return Err(e);
+            }
             self.write_record(step, k, true)?;
         }
         if step == Step::Extract {
@@ -1840,6 +1864,43 @@ impl RunConfig {
             }
         }
         Ok(())
+    }
+
+    /// A finished result of a step that writes it at the end, before running it again: the time of
+    /// the result and its record as written (none for results of older versions).
+    fn previous_result(&self, step: Step, k: Option<usize>) -> Option<PreviousResult> {
+        if !step.writes_at_end() || !self.done_of(step, k) {
+            return None;
+        }
+        let modified = std::fs::metadata(self.result_of(step, k))
+            .and_then(|m| m.modified())
+            .ok()?;
+        let record = std::fs::read_to_string(self.record_of(step, k)).ok();
+        Some(PreviousResult { modified, record })
+    }
+
+    /// After a run that did not finish: the previous result stays finished if the run did not
+    /// touch it (its record as before), so a cancelled run does not lose it.
+    fn restore_result(
+        &self,
+        step: Step,
+        k: Option<usize>,
+        previous: Option<PreviousResult>,
+        job: &Job,
+    ) {
+        let Some(p) = previous else { return };
+        let now = std::fs::metadata(self.result_of(step, k)).and_then(|m| m.modified());
+        if now.ok() != Some(p.modified) {
+            return;
+        }
+        let f = self.record_of(step, k);
+        let restored = match &p.record {
+            Some(r) => std::fs::write(&f, r),
+            None => std::fs::remove_file(&f),
+        };
+        if restored.is_ok() {
+            job.log(&format!("{}: the previous result is kept", step.key()));
+        }
     }
 
     /// Runs `step`; for a step of each session, for session `k`.
@@ -2166,6 +2227,46 @@ mod tests {
         c.write_record(Step::Opt, None, true).unwrap();
         c.rtk = !c.rtk;
         assert_eq!(c.staleness(Step::Opt), Some(Stale::Params));
+        std::fs::remove_dir_all(&work).unwrap();
+    }
+
+    #[test]
+    fn a_run_that_stops_before_writing_keeps_the_previous_result() {
+        let work = std::env::temp_dir().join(format!("s20_keep_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&work);
+        let c = RunConfig::new(PathBuf::from("raw"), work.clone());
+        std::fs::create_dir_all(c.runs()).unwrap();
+        std::fs::write(c.opt_file(), "x").unwrap();
+        c.write_record(Step::Opt, None, true).unwrap();
+        // the optimisation fails (no odometry) before it writes its result
+        let log = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let l = log.clone();
+        let job = Job::new(|_, _, _| {}, move |s| l.lock().unwrap().push(s.into()));
+        assert!(c.run_step(Step::Opt, &job).is_err());
+        assert!(c.done(Step::Opt));
+        assert!(
+            log.lock()
+                .unwrap()
+                .iter()
+                .any(|s| s.contains("previous result is kept"))
+        );
+        // a step that did not finish before stays unfinished
+        c.write_record(Step::Opt, None, false).unwrap();
+        assert!(
+            c.run_step(Step::Opt, &Job::new(|_, _, _| {}, |_| {}))
+                .is_err()
+        );
+        assert!(!c.done(Step::Opt));
+        // the result written, then the run failing: not the previous result any more
+        let previous = c.previous_result(Step::Opt, None);
+        assert!(previous.is_none());
+        c.write_record(Step::Opt, None, true).unwrap();
+        let previous = c.previous_result(Step::Opt, None);
+        c.write_record(Step::Opt, None, false).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        std::fs::write(c.opt_file(), "y").unwrap();
+        c.restore_result(Step::Opt, None, previous, &Job::new(|_, _, _| {}, |_| {}));
+        assert!(!c.done(Step::Opt));
         std::fs::remove_dir_all(&work).unwrap();
     }
 

@@ -102,11 +102,13 @@ fn object(
         let b = base.and_then(|b| b.get(k));
         let id = format!("{path}.{k}");
         let title = header(info(section, k).0, Some(&*c) != b);
+        let inner = group_section(section, k);
+        let inner = inner.as_str();
         egui::CollapsingHeader::new(title)
             .id_salt(&id)
             .show(ui, |ui| match c {
-                Value::Array(items) => changed |= list(ui, section, &id, items, b),
-                _ => changed |= object(ui, section, &id, c, b),
+                Value::Array(items) => changed |= list(ui, inner, &id, items, b),
+                _ => changed |= object(ui, inner, &id, c, b),
             });
     }
     changed
@@ -296,6 +298,17 @@ fn section_title(key: &str) -> &str {
         "cloud" => tl("点群生成", "Point cloud"),
         "color" => tl("色付け", "Colorization"),
         k => k,
+    }
+}
+
+/// The section whose labels a group's parameters take: the group's own when it has labels (keys
+/// it shares with another group mean other things there), else its parent's.
+fn group_section(section: &str, key: &str) -> String {
+    let sub = format!("{section}.{key}");
+    if LABELS.iter().any(|l| l.0 == sub) {
+        sub
+    } else {
+        section.to_string()
     }
 }
 
@@ -776,6 +789,126 @@ const LABELS: &[(&str, &str, [&str; 2], [&str; 2])] = &[
         [
             "面を使う段階ごとに、その時点の軌跡で局所地図を作り直してループを測り直します。最初の測定は LIO の軌跡の歪みで偏るためです",
             "At each plane stage, the local maps are rebuilt with the trajectory at that point and the loops remeasured, since the first measurement is biased by the LIO trajectory's distortion",
+        ],
+    ),
+    (
+        "opt",
+        "revisits",
+        [
+            "再訪（同じ場所の自動の対応）",
+            "Revisits (same places found automatically)",
+        ],
+        [
+            "同じセッションの後の通過や別のセッションで同じ場所を通ったところを自動で見つけ、点群を位置合わせして拘束にします",
+            "Finds the places the trajectory passes again, later in the same session or in another one, registers their points and adds them as constraints",
+        ],
+    ),
+    (
+        "opt.revisits",
+        "enabled",
+        ["再訪を使う", "Use revisits"],
+        [
+            "建物の壁などが二重に写るのを防ぎます。複数セッションをつなぐときに勧めます。位置合わせの決まり方に応じて重みをつけ、合わないものは弱く扱います（指定したループも同じく）。最適化の時間は延びます",
+            "Keeps walls and other surfaces from doubling. Recommended when joining sessions. Each is weighted by how well its registration fixes each direction, and those that disagree pull little (the marked loops too). The optimization takes longer",
+        ],
+    ),
+    (
+        "opt.revisits",
+        "len_s",
+        ["部分地図の時間幅 (s)", "Submap time span (s)"],
+        ["", ""],
+    ),
+    (
+        "opt.revisits",
+        "radius",
+        ["部分地図の半径 (m)", "Submap radius (m)"],
+        ["", ""],
+    ),
+    (
+        "opt.revisits",
+        "min_gap_s",
+        [
+            "同じセッションで再訪とみなす間隔 (s)",
+            "Time apart for a revisit in one session (s)",
+        ],
+        ["", ""],
+    ),
+    (
+        "opt.revisits",
+        "max_dist",
+        ["組にする距離 (m)", "Pair distance (m)"],
+        [
+            "部分地図の中心がこの距離以内なら位置合わせします",
+            "Submaps whose centres are within this distance are registered",
+        ],
+    ),
+    (
+        "opt.revisits",
+        "min_inliers",
+        ["採用する一致率の下限", "Min inlier ratio accepted"],
+        [
+            "離れたところから同じ壁を見た通過どうしは重なりが少なくても、よく位置が決まります",
+            "Passes that see a wall from far apart share few points but fix each other well",
+        ],
+    ),
+    (
+        "opt.revisits",
+        "min_weak",
+        ["道沿いとみなす比", "Along-a-path ratio"],
+        [
+            "位置合わせの最も弱い方向の情報が最も強い方向のこの割合未満なら、道沿い（道に沿う方向が決まらない）とみなします",
+            "A registration whose weakest direction has less than this share of the strongest's information is taken as along a path (its position along the path is hardly fixed)",
+        ],
+    ),
+    (
+        "opt.revisits",
+        "path_sd",
+        [
+            "道沿いの標準偏差の倍率",
+            "Along-a-path standard deviation factor",
+        ],
+        [
+            "道沿いの位置合わせは、林の中などで回転や道を横切る方向にもばらつくため、弱く扱います",
+            "Registrations along a path also scatter in rotation and across the path (in a wood, for example), so they are trusted less",
+        ],
+    ),
+    (
+        "opt.revisits",
+        "max_spread",
+        [
+            "推定のばらつきの上限 (m)",
+            "Max spread of the estimates (m)",
+        ],
+        ["", ""],
+    ),
+    (
+        "opt.revisits",
+        "sig_t",
+        [
+            "最も強い方向の標準偏差：並進 (m)",
+            "Standard deviation of the strongest direction: translation (m)",
+        ],
+        ["", ""],
+    ),
+    (
+        "opt.revisits",
+        "sig_r_deg",
+        [
+            "最も強い方向の標準偏差：回転 (deg)",
+            "Standard deviation of the strongest direction: rotation (deg)",
+        ],
+        ["", ""],
+    ),
+    (
+        "opt.revisits",
+        "robust",
+        [
+            "ロバストの尺度（標準偏差の倍数）",
+            "Robust scale (standard deviations)",
+        ],
+        [
+            "残差がこれを超える再訪とループは弱く扱います",
+            "Revisits and loops with residuals beyond this pull little",
         ],
     ),
     // RTK
@@ -1682,7 +1815,7 @@ mod tests {
                         if info(section, k).0 == k {
                             missing.push(format!("{section}.{k}"));
                         }
-                        walk(section, c, missing);
+                        walk(&group_section(section, k), c, missing);
                     }
                 }
                 Value::Array(a) => a.iter().for_each(|c| walk(section, c, missing)),

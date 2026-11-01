@@ -3,11 +3,13 @@
 
 mod device_calib;
 mod history;
+mod match_edit;
 mod raw_view;
 mod traj_edit;
 mod welcome;
 mod workspace;
 use crate::lang::{Lang, tl};
+use match_edit::MATCH;
 use traj_edit::{EditKind, EditRef, Placing};
 use workspace::{InspectorTab, PointColor, ScanRange};
 
@@ -347,6 +349,8 @@ struct TrajectoryKey {
     placing_hover: Option<f64>,
     selected_edit: Option<EditRef>,
     marker: Option<(f64, DVec3)>,
+    /// the sessions hidden, sorted
+    hidden: Vec<String>,
 }
 
 type WorstPlaces = Arc<[(f64, f64)]>;
@@ -422,6 +426,11 @@ pub struct App {
     /// adding matched points: Some(None) waits for the first point, Some(Some(p)) for the second
     /// (the first: its session and the point as stored)
     matching: Option<Option<(usize, PointAt)>>,
+    /// the matched point selected; the one being dragged (match, second point); the shown point
+    /// under the pointer while adding or dragging, with its session
+    selected_match: Option<usize>,
+    dragging_match: Option<(usize, bool)>,
+    match_hover: Option<(DVec3, Option<usize>)>,
     /// the session of each chunk drawn last frame (for picking)
     drawn_session: Vec<Option<usize>>,
     /// camera images shown (left, right): file and texture; requested file and decoder channel
@@ -744,6 +753,9 @@ impl App {
             hidden: HashSet::new(),
             sel_session: 0,
             matching: None,
+            selected_match: None,
+            dragging_match: None,
+            match_hover: None,
             drawn_session: Vec::new(),
             img_shown: [None, None],
             img_want: [None, None],
@@ -1425,6 +1437,9 @@ impl App {
         self.dragging_end = None;
         self.selected_edit = None;
         self.matching = None;
+        self.selected_match = None;
+        self.dragging_match = None;
+        self.match_hover = None;
         self.hidden.clear();
         self.sel_session = 0;
         self.height_manual = None;
@@ -2503,6 +2518,30 @@ impl App {
         }
     }
 
+    /// `at_short_label` after `prefix`, laid out for the view: the short session name in the
+    /// session's colour, the rest in `color`.
+    fn at_short_galley(
+        &self,
+        painter: &egui::Painter,
+        prefix: &str,
+        a: &At,
+        color: egui::Color32,
+    ) -> std::sync::Arc<egui::Galley> {
+        let font = egui::FontId::proportional(13.0);
+        let mut job = egui::text::LayoutJob::default();
+        let mut push = |s: &str, c: egui::Color32| {
+            job.append(s, 0.0, egui::TextFormat::simple(font.clone(), c));
+        };
+        push(prefix, color);
+        if let Some(k) = self.session_index(&a.session).filter(|_| self.multi()) {
+            let [r, g, b] = Self::session_color(k);
+            push(&Self::session_tag(k), egui::Color32::from_rgb(r, g, b));
+            push(" ", color);
+        }
+        push(&Self::loop_label(a.t), color);
+        painter.layout_job(job)
+    }
+
     /// The short name of session `k` on the view and beside its full name: S1, S2, …
     fn session_tag(k: usize) -> String {
         format!("S{}", k + 1)
@@ -2593,6 +2632,11 @@ impl App {
             placing_hover: self.placing_hover,
             selected_edit: self.selected_edit,
             marker: self.marker,
+            hidden: {
+                let mut h: Vec<String> = self.hidden.iter().cloned().collect();
+                h.sort();
+                h
+            },
         };
         if let Some((old, lines)) = &self.trajectory_cache
             && *old == key
@@ -2654,10 +2698,13 @@ impl App {
             i += step;
         }
         for (a, b) in &self.edits.loops {
-            if let (Some(pa), Some(pb)) = (
-                self.abs_of(a).and_then(|t| self.scene.position_at(t)),
-                self.abs_of(b).and_then(|t| self.scene.position_at(t)),
-            ) {
+            // not to or from a hidden session
+            let shown = |x: &At| {
+                self.abs_of(x)
+                    .filter(|&t| self.session_visible(self.scene.session_at(t)))
+                    .and_then(|t| self.scene.position_at(t))
+            };
+            if let (Some(pa), Some(pb)) = (shown(a), shown(b)) {
                 let lift = DVec3::Z * 0.3;
                 for (x, y) in [(pa, pa + lift), (pa + lift, pb + lift), (pb + lift, pb)] {
                     out.push(Line {
@@ -2669,22 +2716,19 @@ impl App {
                 }
             }
         }
+        // matched points: the line between the two (their markers are drawn on the view), not to
+        // or from a hidden session
         for (a, b) in &self.edits.matches {
-            if let (Some(pa), Some(pb)) = (self.match_world(a), self.match_world(b)) {
-                for p in [pa, pb] {
-                    for d in [DVec3::X, DVec3::Y, DVec3::Z] {
-                        out.push(Line {
-                            a: p - d * 0.15,
-                            b: p + d * 0.15,
-                            color: [255, 90, 220, 255],
-                            width: 3.0 * pixels,
-                        });
-                    }
-                }
+            let shown = |p: &PointAt| {
+                self.session_index(&p.session)
+                    .filter(|&k| self.session_visible(Some(k)))
+                    .and_then(|_| self.match_world(p))
+            };
+            if let (Some(pa), Some(pb)) = (shown(a), shown(b)) {
                 out.push(Line {
                     a: pa,
                     b: pb,
-                    color: [255, 90, 220, 255],
+                    color: [MATCH[0], MATCH[1], MATCH[2], 255],
                     width: 1.5 * pixels,
                 });
             }
@@ -2859,55 +2903,6 @@ impl App {
         self.edit_actions_ui(ui);
         let ctx = ui.ctx().clone();
         self.traj_edits_ui(ui, &ctx);
-    }
-
-    /// Matched points: the same feature picked in two sessions (placing a session whose path does
-    /// not meet the others).
-    fn match_edits_ui(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
-        ui.horizontal(|ui| {
-            ui.label(tl("点の対応:", "Point matches:"));
-            if self.edits.matches.is_empty() {
-                ui.label(tl("なし", "None"));
-            }
-            let on = self.matching.is_some();
-            let text = if on {
-                tr!("{} 点の対応を追加中…", "{} Adding point matches…", icon::PLUS)
-            } else {
-                tr!("{} 点の対応を追加", "{} Add point matches", icon::PLUS)
-            };
-            if ui
-                .add(egui::Button::new(text).selected(on))
-                .on_hover_text(
-                    tl("スキャン表示で、2 つのセッションに写っている同じ特徴（柱の角、窓枠など）を順にクリックします。\
-                     2 組以上あると確実です。軌跡が交わらないセッション（別の階など）をつなぐときに使います（Esc で終わる）", "In the scan view, click the same feature (a pillar's corner, a window frame…) seen in two sessions in turn. Two or more pairs make it reliable. Used to connect sessions whose trajectories don't cross (different floors, etc.) (Esc to finish)"),
-                )
-                .clicked()
-            {
-                self.matching = if on { None } else { Some(None) };
-                if !on && self.s.view != PreviewSource::Scans {
-                    self.s.view = PreviewSource::Scans;
-                    self.load_scene(ctx);
-                }
-            }
-        });
-        let mut remove = None;
-        for (i, (a, b)) in self.edits.matches.iter().enumerate() {
-            let l = |p: &PointAt| self.at_label(&At::on(&p.session, p.t.unwrap_or(0.0)));
-            ui.horizontal(|ui| {
-                ui.label(tr!("  {} ＝ {}", "  {} = {}", l(a), l(b)));
-                if ui
-                    .button(icon::TRASH)
-                    .on_hover_text(tl("削除", "Delete"))
-                    .clicked()
-                {
-                    remove = Some(i);
-                }
-            });
-        }
-        if let Some(i) = remove {
-            self.edits.matches.remove(i);
-            self.save_edits();
-        }
     }
 
     /// Time slider over the trajectory: marks the time, the camera may follow, images show it.
@@ -3466,8 +3461,11 @@ impl App {
 
     /// As [`App::pick`], with the session of the point (scans only).
     fn pick_session(&self, response: &egui::Response) -> Option<(DVec3, Option<usize>)> {
-        let pos = response.interact_pointer_pos()?;
-        let rect = response.rect;
+        self.pick_at(response.rect, response.interact_pointer_pos()?)
+    }
+
+    /// The shown point at `pos` in the viewport `rect`, with its session (as [`App::pick_session`]).
+    fn pick_at(&self, rect: egui::Rect, pos: egui::Pos2) -> Option<(DVec3, Option<usize>)> {
         let click = [
             ((pos.x - rect.left()) / rect.width()) as f64,
             ((pos.y - rect.top()) / rect.height()) as f64,
@@ -3502,57 +3500,6 @@ impl App {
             t: Some(at.t),
             p: x.to_array(),
         })
-    }
-
-    /// Adding matched points by clicking the same feature in two sessions. Returns whether the
-    /// pointer is busy with it.
-    fn match_input(&mut self, ctx: &egui::Context, response: &egui::Response) -> bool {
-        let Some(first) = self.matching.clone() else {
-            return false;
-        };
-        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-            self.matching = None;
-            return false;
-        }
-        if response.hovered() {
-            ctx.set_cursor_icon(egui::CursorIcon::Crosshair);
-        }
-        if !(response.clicked() && !ctx.input(|i| i.modifiers.command)) {
-            return false;
-        }
-        let Some((p, session)) = self.pick_session(response) else {
-            return true;
-        };
-        let Some(k) = session else {
-            self.notify(
-                Level::Warn,
-                tl(
-                    "点の対応は「スキャン」の表示で、セッションの点をクリックしてください",
-                    "For point matches, click a session's points in the \"Scans\" view",
-                ),
-            );
-            return true;
-        };
-        let Some(pa) = self.point_at(k, p) else {
-            return true;
-        };
-        match first {
-            None => self.matching = Some(Some((k, pa))),
-            Some((k0, _)) if k0 == k => self.notify(
-                Level::Warn,
-                tl(
-                    "2 点目は別のセッションの、同じ特徴をクリックしてください",
-                    "Click the same feature in a different session for the second point",
-                ),
-            ),
-            Some((_, p0)) => {
-                self.edits.matches.push((p0, pa));
-                self.save_edits();
-                // ready for the next pair
-                self.matching = Some(None);
-            }
-        }
-        true
     }
 
     /// Marks the trajectory sample drawn nearest to the pointer (within 20 pixels).
@@ -3672,37 +3619,11 @@ impl App {
         if let Some((text, color)) = self.edit_hint() {
             labels.add(&painter, top(), text, None, color, true, true);
         }
-        if let Some(first) = &self.matching {
-            let text = if first.is_none() {
-                tl(
-                    "点の対応の1点目：あるセッションの特徴（柱の角、窓枠など）をクリック",
-                    "First point of the match: click a feature (a pillar's corner, a window frame…) in one session",
-                )
-            } else {
-                tl(
-                    "点の対応の2点目：別のセッションで同じ特徴をクリック",
-                    "Second point of the match: click the same feature in another session",
-                )
-            };
-            let pink = egui::Color32::from_rgb(255, 90, 220);
-            let at = top();
-            labels.add(
-                &painter,
-                at,
-                tr!("{text}　　Esc で終わる", "{text}    Esc to finish"),
-                None,
-                pink,
-                true,
-                true,
-            );
+        if let Some(text) = self.match_hint() {
+            let white = egui::Color32::from_rgb(MATCH[0], MATCH[1], MATCH[2]);
+            labels.add(&painter, top(), text, None, white, true, true);
         }
-        if let Some(Some((_, p0))) = &self.matching
-            && let Some(w) = self.match_world(p0)
-            && let Some(sp) = self.to_screen(rect, w)
-        {
-            let pink = egui::Color32::from_rgb(255, 90, 220);
-            painter.circle(sp, 7.0, pink, egui::Stroke::new(2.0, egui::Color32::BLACK));
-        }
+        self.draw_match_marks(&painter, rect, &mut labels);
         // the names of the sessions at their first sample
         if self.multi() && self.s.show_traj {
             for (k, s) in self.scene.sessions.iter().enumerate() {
@@ -3824,6 +3745,21 @@ impl ViewLabels {
         force: bool,
     ) {
         let galley = painter.layout_no_wrap(text, egui::FontId::proportional(13.0), color);
+        self.add_galley(painter, at, galley, full, color, below, force);
+    }
+
+    /// Like `add`, with the text laid out already (in several colours).
+    #[allow(clippy::too_many_arguments)]
+    fn add_galley(
+        &mut self,
+        painter: &egui::Painter,
+        at: egui::Pos2,
+        galley: std::sync::Arc<egui::Galley>,
+        full: Option<String>,
+        color: egui::Color32,
+        below: bool,
+        force: bool,
+    ) {
         let size = galley.size();
         let spot = |below: bool, k: f32| {
             let dy = if below {
@@ -4214,6 +4150,9 @@ mod tests {
             hidden: HashSet::new(),
             sel_session: 0,
             matching: None,
+            selected_match: None,
+            dragging_match: None,
+            match_hover: None,
             drawn_session: Vec::new(),
             img_shown: [None, None],
             img_want: [None, None],
@@ -4271,6 +4210,12 @@ mod tests {
             |a| a.s.show_edit_spans = false,
             |a| a.s.show_traj = false,
             |a| a.s.show_traj = true,
+            |a| {
+                a.hidden.insert("b".into());
+            },
+            |a| {
+                a.hidden.remove("b");
+            },
             |a| {
                 a.scene.traj[0].1 = DVec3::Z;
                 a.scene_revision += 1;
@@ -4434,6 +4379,35 @@ mod tests {
             };
             assert!((f - 0.575).abs() < 1e-6, "{f}");
         }
+    }
+
+    #[test]
+    fn a_dragged_matched_point_moves_only_onto_its_own_session() {
+        let mut app = app();
+        app.scene.sessions = ["a", "b"]
+            .iter()
+            .zip([(100.0, 159.0), (160.0, 219.0)])
+            .map(|(name, (start, end))| scene::SceneSession {
+                name: (*name).into(),
+                start,
+                end,
+                placed: true,
+            })
+            .collect();
+        let p0 = app.point_at(0, DVec3::new(1.0, 0.0, 0.0)).unwrap();
+        let p1 = app.point_at(1, DVec3::new(2.0, 0.0, 0.0)).unwrap();
+        app.edits.matches.push((p0, p1));
+        let moved = DVec3::new(3.0, 1.0, 0.5);
+        app.match_hover = Some((moved, Some(1)));
+        app.drop_match(0, true);
+        assert!((app.match_world(&app.edits.matches[0].1).unwrap() - moved).length() < 1e-9);
+        // onto a point of the other session: unchanged
+        let before = app.edits.matches[0].clone();
+        app.match_hover = Some((DVec3::new(9.0, 0.0, 0.0), Some(0)));
+        app.drop_match(0, true);
+        app.match_hover = None;
+        app.drop_match(0, false);
+        assert_eq!(app.edits.matches[0], before);
     }
 
     #[test]

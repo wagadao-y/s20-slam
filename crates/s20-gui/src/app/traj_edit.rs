@@ -214,6 +214,8 @@ impl App {
         };
         self.placing_hover = None;
         self.selected_edit = None;
+        self.selected_match = None;
+        self.matching = None;
     }
 
     /// A click on the trajectory at `t` while placing: the first end, or the second, which adds
@@ -291,6 +293,7 @@ impl App {
             self.dragging_end = self.handle_at(rect, press);
             if let Some((e, _)) = self.dragging_end {
                 self.selected_edit = Some(e);
+                self.selected_match = None;
             }
         }
         if let Some(((kind, i), second)) = self.dragging_end {
@@ -375,6 +378,9 @@ impl App {
                     .and_then(|(t, _)| self.interval_at(t))
             });
             picked = hit.is_some();
+            if picked {
+                self.selected_match = None;
+            }
             self.selected_edit = hit;
         }
         if response.hovered()
@@ -387,12 +393,19 @@ impl App {
         (false, picked)
     }
 
-    /// Label of the two ends of a correction.
-    fn edit_label(&self, kind: EditKind, a: &At, b: &At) -> String {
+    /// Label of the two ends of a correction, with the short session names (S1, S2, …) if `short`.
+    fn edit_label(&self, kind: EditKind, a: &At, b: &At, short: bool) -> String {
+        let l = |x: &At| {
+            if short {
+                self.at_short_label(x)
+            } else {
+                self.at_label(x)
+            }
+        };
         if kind.interval() {
-            format!("{} 〜 {}", self.at_label(a), self.at_label(b))
+            format!("{} 〜 {}", l(a), l(b))
         } else {
-            format!("{} ⇄ {}", self.at_label(a), self.at_label(b))
+            format!("{} ⇄ {}", l(a), l(b))
         }
     }
 
@@ -435,7 +448,7 @@ impl App {
                 "{}: {}　　端をドラッグで調整、Delete で削除",
                 "{}: {}    drag the ends to adjust, Delete to delete",
                 kind.title(),
-                self.edit_label(kind, a, b)
+                self.edit_label(kind, a, b, false)
             ),
             kind.color(),
         ))
@@ -493,12 +506,13 @@ impl App {
                     } else {
                         tl("1点目 ", "first point ")
                     };
-                    labels.add(
+                    let (galley, color) = self.end_label(painter, what, p.kind, &at);
+                    labels.add_galley(
                         painter,
                         sp,
-                        format!("{what}{}", self.at_short_label(&at)),
+                        galley,
                         Some(format!("{what}{}", self.at_label(&at))),
-                        p.kind.color(),
+                        color,
                         false,
                         false,
                     );
@@ -525,15 +539,34 @@ impl App {
             let x = if second { b } else { a };
             // the two ends may coincide (start = end): one label above, one below
             let full = self.multi().then(|| self.at_label(x));
-            labels.add(
-                painter,
-                sp,
-                self.at_short_label(x),
-                full,
+            let (galley, color) = self.end_label(painter, "", kind, x);
+            labels.add_galley(painter, sp, galley, full, color, second, false);
+        }
+    }
+
+    /// The view's label of an end of a correction, after `what`, and its colour: a loop's in the
+    /// colour of its session when there are several (its marker shows it is a loop), an
+    /// interval's in the colour of its kind with the short session name in the session's.
+    fn end_label(
+        &self,
+        painter: &egui::Painter,
+        what: &str,
+        kind: EditKind,
+        at: &At,
+    ) -> (std::sync::Arc<egui::Galley>, egui::Color32) {
+        let session = self.session_index(&at.session).filter(|_| self.multi());
+        match session {
+            Some(k) if !kind.interval() => {
+                let [r, g, b] = Self::session_color(k);
+                let color = egui::Color32::from_rgb(r, g, b);
+                let text = format!("{what}{}", self.at_short_label(at));
+                let galley = painter.layout_no_wrap(text, egui::FontId::proportional(13.0), color);
+                (galley, color)
+            }
+            _ => (
+                self.at_short_galley(painter, what, at, kind.color()),
                 kind.color(),
-                second,
-                false,
-            );
+            ),
         }
     }
 
@@ -604,17 +637,30 @@ impl App {
         let mut retime: Option<(usize, bool, f64)> = None;
         for (i, (a, b)) in self.edit_list(kind).iter().enumerate() {
             let selected = self.selected_edit == Some((kind, i));
+            // short session names in the list, the full ones on hover
+            let mut tip = String::new();
+            if self.multi() {
+                tip = self.edit_label(kind, a, b, false) + "\n";
+            }
+            tip += tl(
+                "選ぶと軌跡上で強調し、端の時刻を直せます",
+                "Selecting it highlights it on the trajectory and lets you fix the times of its ends",
+            );
             ui.horizontal(|ui| {
                 ui.add_space(14.0);
                 if ui
-                    .selectable_label(selected, self.edit_label(kind, a, b))
-                    .on_hover_text(tl("選ぶと軌跡上で強調し、端の時刻を直せます", "Selecting it highlights it on the trajectory and lets you fix the times of its ends"))
+                    .selectable_label(selected, self.edit_label(kind, a, b, true))
+                    .on_hover_text(tip)
                     .clicked()
                 {
                     select = Some(if selected { None } else { Some((kind, i)) });
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button(icon::TRASH).on_hover_text(tl("削除", "Delete")).clicked() {
+                    if ui
+                        .button(icon::TRASH)
+                        .on_hover_text(tl("削除", "Delete"))
+                        .clicked()
+                    {
                         remove = Some(i);
                     }
                     if ui
@@ -652,6 +698,7 @@ impl App {
         }
         if let Some(s) = select {
             self.selected_edit = s;
+            self.selected_match = None;
             self.placing = None;
         }
         if let Some((i, second, t)) = retime {
@@ -667,6 +714,7 @@ impl App {
         }
         if let Some((i, t)) = go {
             self.selected_edit = Some((kind, i));
+            self.selected_match = None;
             self.placing = None;
             self.go_to_time(t);
         }

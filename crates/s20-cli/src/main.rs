@@ -247,6 +247,18 @@ fn main() -> Result<()> {
         }
         "run" => run(&mut a, &job)?,
         "debug-vgicp" => debug_vgicp(&mut a)?,
+        "eval-revisits" => {
+            let rp = revisit_params(&mut a)?;
+            let pairs = a.get_str("--pairs")?.map(PathBuf::from);
+            let data = PathBuf::from(a.positional_req("data folder")?);
+            let knots = PathBuf::from(a.positional_req("knots .txt (opt_knots.txt)")?);
+            let out = a
+                .positional()
+                .map(PathBuf::from)
+                .unwrap_or_else(|| s20_pipeline::revisits::default_out(&knots));
+            a.finish()?;
+            s20_pipeline::revisits::eval(&data, &knots, &out, pairs.as_deref(), &rp, &job)?;
+        }
         "eval-traj" => {
             let align_s: f64 = a.get("--align_s", 30.0)?;
             let est = PathBuf::from(a.positional_req("estimated trajectory .txt")?);
@@ -382,6 +394,19 @@ fn debug_vgicp(a: &mut Args) -> Result<()> {
     Ok(())
 }
 
+/// The revisit parameters, defaults changed by `--revisit_len s`, `--revisit_dist m`,
+/// `--revisit_inliers f`, `--revisit_path_sd k`, `--revisit_min_weak r`, `--robust sd`.
+fn revisit_params(a: &mut Args) -> Result<s20_opt::revisit::RevisitParams> {
+    let mut rp = s20_opt::revisit::RevisitParams::default();
+    rp.len_s = a.get("--revisit_len", rp.len_s)?;
+    rp.max_dist = a.get("--revisit_dist", rp.max_dist)?;
+    rp.min_inliers = a.get("--revisit_inliers", rp.min_inliers)?;
+    rp.path_sd = a.get("--revisit_path_sd", rp.path_sd)?;
+    rp.min_weak = a.get("--revisit_min_weak", rp.min_weak)?;
+    rp.robust = a.get("--robust", rp.robust)?;
+    Ok(rp)
+}
+
 fn opt(a: &mut Args, job: &Job) -> Result<()> {
     let mut p = s20_opt::Params::default();
     p.every = a.get("--every", p.every)?;
@@ -402,6 +427,8 @@ fn opt(a: &mut Args, job: &Job) -> Result<()> {
     p.loop_pre_iters = a.get("--loop_pre", p.loop_pre_iters)?;
     p.loop_reg.half_s = a.get("--loop_half", p.loop_reg.half_s)?;
     p.loop_reg.remeasure = !a.flag("--no_loop_remeasure");
+    p.revisits = revisit_params(a)?;
+    p.revisits.enabled = a.flag("--revisits");
     if let Some(it) = a.get_str("--iters")? {
         let v: Vec<usize> = it.split(',').map(str::parse).collect::<Result<_, _>>()?;
         if v.len() != p.stages.len() {
@@ -442,7 +469,15 @@ fn opt(a: &mut Args, job: &Job) -> Result<()> {
                 .context("--rtk_exclude a:b (seconds from the first scan of a session)")?,
         );
     }
-    let mut loops = Vec::new();
+    // the loops and matched points of a corrections file (s20_edits.json), then those given
+    let edits: s20_pipeline::Edits = match a.get_str("--edits")? {
+        Some(f) => {
+            serde_json::from_str(&std::fs::read_to_string(&f).with_context(|| format!("read {f}"))?)
+                .with_context(|| f.clone())?
+        }
+        None => Default::default(),
+    };
+    let mut loops = edits.loops;
     while let Some(e) = a.get_str("--loop")? {
         if e == "start-end" {
             loops.push((At::new(0.5), At::new(-0.5)));
@@ -452,7 +487,7 @@ fn opt(a: &mut Args, job: &Job) -> Result<()> {
             "--loop a:b (seconds from the first scan of a session, [session@]t; negative: from its end) or start-end",
         )?);
     }
-    let mut matches = Vec::new();
+    let mut matches = edits.matches;
     while let Some(e) = a.get_str("--match")? {
         matches.push(
             s20_pipeline::PointAt::parse_pair(&e)
@@ -752,6 +787,7 @@ const USAGE: &str = "usage:
        the other files copied, for short test recordings; start a few seconds before the device moves:
        the odometry starts from the first seconds being still)
   s20 calib <calibration.yaml>
+  s20 eval-revisits <data> <opt_knots.txt> [out.csv] [--pairs pairs.csv] [--revisit_len s] [--revisit_dist m] [--revisit_inliers f] [--revisit_path_sd k] [--revisit_min_weak r]
   s20 eval-traj <estimate.txt> <reference.txt> [--align_s 30]
       (drift after fitting the first seconds, ATE, relative errors over 1/5/30 s, jump intervals)
   s20 lio <data folder> <out.txt> [--indoor] [--scans a:b] [--init_traj prev.txt] [--down m] [--map_vox m]
@@ -762,6 +798,7 @@ const USAGE: &str = "usage:
       (--hold: the heading and gyro bias follow the IMU in that interval, for round hills or featureless slopes; repeatable)
   s20 opt <data folder> <lio.txt>[,<lio.txt>...] <out.txt> [--every n] [--ng x] [--na x] [--nbg x] [--nba x] [--sigma_pt m]
       [--lidar_w w] [--iters a,b,c] [--rtk [--rtk_sig_h m] [--rtk_sig_v m] [--rtk_c m] [--rtk_exclude a:b]] [--no_fix_check] [--fix_step_h m] [--fix_step_v m] [--loop a:b|start-end] [--loop_half s] [--no_loop_remeasure]
+      [--edits s20_edits.json] [--revisits [--revisit_len s] [--revisit_dist m] [--revisit_inliers f] [--revisit_path_sd k] [--revisit_min_weak r] [--robust sd]]
       [--ppk ppk.json[,ppk.json...]] [--match [session:]x,y,z=[session:]x,y,z]
       (times: seconds from the first scan of a session, [session@]t with the session's name or number; negative: from its end;
        several sessions without --rtk / --ppk: the first is the reference, the others are placed by loops between sessions
