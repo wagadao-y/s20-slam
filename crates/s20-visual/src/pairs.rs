@@ -110,8 +110,8 @@ pub fn observe(a: &View, b: &View, cloud: &Cloud, focal: f64, gate: f64) -> Vec<
             .filter_map(|&(i, j)| {
                 let (p, q) = (x.features.uv[i], y.features.uv[j]);
                 let an = associate(p, x.grid, &x.pose, x.cam, cloud)?;
-                if cloud.occluders(&x.pose.p, &an.point, &an.normal) > 1
-                    || cloud.occluders(&y.pose.p, &an.point, &an.normal) > 1
+                if cloud.occluded(&x.pose.p, &an.point, &an.normal)
+                    || cloud.occluded(&y.pose.p, &an.point, &an.normal)
                 {
                     return None;
                 }
@@ -286,8 +286,8 @@ pub fn observe_guided(
                 let (i, j, _, an) = &proposals[k];
                 // the occluders lie off the anchored plane: none to count without one
                 if planar(&k)
-                    && (cloud.occluders(&x.pose.p, &an.point, &an.normal) > 1
-                        || cloud.occluders(&y.pose.p, &an.point, &an.normal) > 1)
+                    && (cloud.occluded(&x.pose.p, &an.point, &an.normal)
+                        || cloud.occluded(&y.pose.p, &an.point, &an.normal))
                 {
                     return None;
                 }

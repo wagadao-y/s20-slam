@@ -84,8 +84,14 @@ pub enum Kind {
     Track,
 }
 
+/// 0 for the left camera's image, 1 for the right's, by its file name (the names of several
+/// sessions are absolute paths).
 pub fn side(name: &str) -> usize {
-    usize::from(!name.starts_with("left"))
+    let file = Path::new(name)
+        .file_name()
+        .and_then(|f| f.to_str())
+        .unwrap_or(name);
+    usize::from(!file.starts_with("left"))
 }
 
 /// Pairs of image indices: consecutive images of a camera, left and right taken together, and for
@@ -715,4 +721,19 @@ pub fn run(input: &Input, job: &Job) -> Result<serde_json::Value> {
     )?;
     job.log(&format!("wrote {}", input.out.display()));
     Ok(report)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_side_comes_from_the_file_name_also_in_an_absolute_path() {
+        assert_eq!(side("left/left_00001.jpg"), 0);
+        assert_eq!(side("right/right_00001.jpg"), 1);
+        assert_eq!(
+            side("C:/work/a/sessions/s1/data/images/left/left_00001.jpg"),
+            0
+        );
+    }
 }

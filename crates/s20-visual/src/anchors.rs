@@ -3,7 +3,7 @@
 
 use crate::camera::Fisheye;
 use anyhow::Result;
-use kiddo::{KdTree, SquaredEuclidean};
+use kiddo::{ImmutableKdTree, SquaredEuclidean};
 use nalgebra::{Matrix3, SymmetricEigen, Vector3};
 use rayon::prelude::*;
 use std::path::Path;
@@ -26,7 +26,7 @@ pub struct Pose {
 pub struct Cloud {
     pub xyz: Vec<[f64; 3]>,
     pub normal: Vec<[f32; 3]>,
-    tree: KdTree<f64, 3>,
+    tree: ImmutableKdTree<f64, 3>,
     /// each point's local plane, computed once (centre, normal, sigma in f32)
     patches: Vec<OnceLock<Option<[f32; 7]>>>,
 }
@@ -60,7 +60,9 @@ impl Cloud {
     }
 
     pub fn new(xyz: Vec<[f64; 3]>, normal: Vec<[f32; 3]>) -> Self {
-        let tree = (&xyz).into();
+        // balanced: a tree built by inserting the points in the file's order (sorted in space)
+        // made each query of the matching tens of times slower outdoors
+        let tree = ImmutableKdTree::new_from_slice(&xyz);
         let patches = (0..xyz.len()).map(|_| OnceLock::new()).collect();
         Self {
             xyz,
@@ -140,28 +142,44 @@ impl Cloud {
     /// Points within the cylinder from `centre` to `point` (radius growing with range) that lie off
     /// the anchored plane on the camera side (`visual_surface_occlusion.occluders`).
     pub fn occluders(&self, centre: &V3, point: &V3, normal: &V3) -> usize {
-        let (radius, angular, margin, near, step) = (0.02, 0.003, 0.03, 0.3, 0.02);
+        self.occluders_up_to(centre, point, normal, usize::MAX)
+    }
+
+    /// Whether more than one point occludes the anchored point from `centre` (see [`Cloud::occluders`]).
+    pub fn occluded(&self, centre: &V3, point: &V3, normal: &V3) -> bool {
+        self.occluders_up_to(centre, point, normal, 2) >= 2
+    }
+
+    /// [`Cloud::occluders`], counting no further than `limit`.
+    fn occluders_up_to(&self, centre: &V3, point: &V3, normal: &V3, limit: usize) -> usize {
+        let (radius, angular, margin, near) = (0.02, 0.003, 0.03, 0.3);
         let ray = point - centre;
         let length = ray.norm();
         let ray = ray / length;
-        let mut hits: Vec<usize> = Vec::new();
-        let mut t = near;
-        while t < length {
-            hits.extend(self.within(&(centre + ray * t), radius + angular * length));
-            t += step;
-        }
-        hits.sort_unstable();
-        hits.dedup();
         let side = normal.dot(&(centre - point)).signum();
-        hits.iter()
-            .filter(|&&i| {
-                let q = self.point(i) - centre;
-                let along = q.dot(&ray);
-                let lateral = (q - ray * along).norm();
-                let off = side * (q + centre - point).dot(normal);
-                along > near && along < length && lateral < radius + angular * along && off > margin
-            })
-            .count()
+        let inside = |i: usize| {
+            let q = self.point(i) - centre;
+            let along = q.dot(&ray);
+            let lateral = (q - ray * along).norm();
+            let off = side * (q + centre - point).dot(normal);
+            along > near && along < length && lateral < radius + angular * along && off > margin
+        };
+        // balls along the ray, as far apart as the cylinder is wide at its widest and a little
+        // larger than it, hold all of the cylinder (a ball every 2 cm made hundreds of queries a
+        // ray outdoors, with points 10-25 m away)
+        let wide = radius + angular * length;
+        let reach = (wide * wide + wide * wide / 4.).sqrt();
+        let mut found = std::collections::HashSet::new();
+        let mut t = near + wide / 2.;
+        while t - wide / 2. < length {
+            for i in self.within(&(centre + ray * t), reach) {
+                if inside(i) && found.insert(i) && found.len() >= limit {
+                    return found.len();
+                }
+            }
+            t += wide;
+        }
+        found.len()
     }
 }
 

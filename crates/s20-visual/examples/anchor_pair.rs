@@ -22,7 +22,7 @@ fn main() -> Result<()> {
     let t1 = Instant::now();
     let cal = s20_io::calib::load(calib)?;
     let cams = [Fisheye::from(&cal.left), Fisheye::from(&cal.right)];
-    let cam = |n: &str| &cams[usize::from(!n.starts_with("left"))];
+    let cam = |n: &str| &cams[s20_visual::run::side(n)];
     let poses = read_image_poses(imgpose)?;
     let ia = poses.names.iter().position(|n| n == na).unwrap();
     let ib = poses.names.iter().position(|n| n == nb).unwrap();
