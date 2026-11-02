@@ -1065,6 +1065,20 @@ impl App {
         }
     }
 
+    /// Opens `url` in the default browser. eframe is built without its `links` feature (and the
+    /// URL crates it brings), so egui's hyperlinks would not open.
+    fn open_url(&mut self, url: &str) {
+        if let Err(e) = std::process::Command::new("explorer").arg(url).spawn() {
+            self.notify(
+                Level::Error,
+                tr!(
+                    "ブラウザを開けませんでした: {e}",
+                    "Could not open the browser: {e}"
+                ),
+            );
+        }
+    }
+
     /// The version, and where the source is and problems are reported.
     fn about_ui(&mut self, ui: &mut egui::Ui) {
         ui.heading(format!("s20-slam {}", env!("CARGO_PKG_VERSION")));
@@ -1079,26 +1093,33 @@ impl App {
         ui.separator();
         match REPOSITORY {
             Some(url) => {
-                ui.hyperlink_to(
-                    tr!(
-                        "{} ソースとドキュメント（GitHub）",
-                        "{} Source and documentation (GitHub)",
-                        icon::GITHUB_LOGO
+                let links = [
+                    (
+                        tr!(
+                            "{} ソースとドキュメント（GitHub）",
+                            "{} Source and documentation (GitHub)",
+                            icon::GITHUB_LOGO
+                        ),
+                        url.to_string(),
                     ),
-                    url,
-                );
-                ui.hyperlink_to(
-                    tr!("{} 最新版", "{} Latest release", icon::DOWNLOAD_SIMPLE),
-                    format!("{url}/releases/latest"),
-                );
-                ui.hyperlink_to(
-                    tr!(
-                        "{} 不具合の報告・要望（Issues）",
-                        "{} Problems and requests (Issues)",
-                        icon::BUG
+                    (
+                        tr!("{} 最新版", "{} Latest release", icon::DOWNLOAD_SIMPLE),
+                        format!("{url}/releases/latest"),
                     ),
-                    format!("{url}/issues"),
-                );
+                    (
+                        tr!(
+                            "{} 不具合の報告・要望（Issues）",
+                            "{} Problems and requests (Issues)",
+                            icon::BUG
+                        ),
+                        format!("{url}/issues"),
+                    ),
+                ];
+                for (text, link) in links {
+                    if ui.link(text).on_hover_text(&link).clicked() {
+                        self.open_url(&link);
+                    }
+                }
             }
             None => {
                 ui.label(tl(
