@@ -42,6 +42,18 @@ impl EditHistory {
         true
     }
 
+    /// Names session `old` as `new` in every state, as the work folder's were.
+    pub(super) fn rename_session(&mut self, old: &str, new: &str) {
+        for e in self
+            .undo
+            .iter_mut()
+            .chain(self.redo.iter_mut())
+            .chain(std::iter::once(&mut self.written))
+        {
+            e.rename_session(old, new);
+        }
+    }
+
     pub(super) fn can_undo(&self) -> bool {
         !self.undo.is_empty()
     }
@@ -520,6 +532,24 @@ mod tests {
             n += 1;
         }
         assert_eq!(n, EditHistory::LIMIT);
+    }
+
+    #[test]
+    fn a_renamed_session_is_renamed_in_every_state() {
+        let on = |s: &str, n: usize| Edits {
+            loops: vec![(At::on(s, n as f64), At::on("b", 1.0))],
+            ..Default::default()
+        };
+        let mut h = EditHistory::default();
+        h.record(&on("a", 1));
+        h.record(&on("a", 2));
+        h.record(&on("a", 3));
+        h.undo();
+        h.rename_session("a", "park");
+        assert_eq!(h.written, on("park", 2));
+        assert_eq!(h.undo(), Some(on("park", 1)));
+        assert_eq!(h.redo(), Some(on("park", 2)));
+        assert_eq!(h.redo(), Some(on("park", 3)));
     }
 
     #[test]

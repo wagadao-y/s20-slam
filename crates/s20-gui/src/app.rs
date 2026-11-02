@@ -24,7 +24,9 @@ use egui_phosphor::regular as icon;
 use glam::{DMat4, DVec3};
 use s20_pipeline::job::{Job, is_cancelled};
 use s20_pipeline::runlog::PathMask;
-use s20_pipeline::{At, Edits, FolderKind, PointAt, ProcessParams, RunConfig, Step, WorkSettings};
+use s20_pipeline::{
+    At, Edits, FolderKind, NameProblem, PointAt, ProcessParams, RunConfig, Step, WorkSettings,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -465,6 +467,8 @@ pub struct App {
     confirm_replace: Option<(usize, PathBuf)>,
     /// a session to be taken out, waiting for confirmation
     confirm_remove: Option<usize>,
+    /// a session being renamed, and the name typed
+    rename_session: Option<(usize, String)>,
     /// closing the window while processing, waiting for confirmation; and once confirmed
     confirm_exit: bool,
     exit_confirmed: bool,
@@ -777,6 +781,7 @@ impl App {
             new_work: None,
             confirm_replace: None,
             confirm_remove: None,
+            rename_session: None,
             confirm_exit: false,
             exit_confirmed: false,
             window_place: crate::window_place::WindowPlace::load(cc.storage),
@@ -1892,6 +1897,23 @@ impl App {
                         {
                             relink = Some(k);
                         }
+                        if ui
+                            .add_enabled(
+                                idle && !self.processing(),
+                                egui::Button::new(tr!(
+                                    "{}  名前を変える…",
+                                    "{}  Rename…",
+                                    icon::PENCIL_SIMPLE
+                                )),
+                            )
+                            .on_hover_text(tl(
+                                "作業フォルダーでのセッションの名前（生データフォルダーの名前は変わりません）",
+                                "The session's name in the work folder (the raw data folder keeps its name)",
+                            ))
+                            .clicked()
+                        {
+                            self.rename_session = Some((k, sc.name.clone()));
+                        }
                         if k > 0
                             && ui
                                 .add_enabled(
@@ -2182,6 +2204,126 @@ impl App {
         } else if close || r.should_close() {
             self.confirm_remove = None;
         }
+    }
+
+    /// Asks a session's new name, checked as it is typed.
+    fn rename_session_modal(&mut self, ctx: &egui::Context) {
+        let Some((k, mut text)) = self.rename_session.take() else {
+            return;
+        };
+        let Some(cfg) = self.project().filter(|c| k < c.sessions.len()) else {
+            return;
+        };
+        let old = cfg.sessions[k].name.clone();
+        let problem = |t: &str| {
+            let t = t.trim();
+            (t != old).then(|| cfg.session_name_problem(k, t)).flatten()
+        };
+        let (mut rename, mut close) = (false, false);
+        let r = egui::Modal::new(egui::Id::new("rename_session")).show(ctx, |ui| {
+            ui.set_max_width(520.0);
+            ui.label(tr!(
+                "{}  セッション「{old}」の名前",
+                "{}  Name of the session \"{old}\"",
+                icon::PENCIL_SIMPLE
+            ));
+            let edit = ui.add(egui::TextEdit::singleline(&mut text).desired_width(f32::INFINITY));
+            if ui.memory(|m| m.focused().is_none()) {
+                edit.request_focus();
+            }
+            let enter = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            let why = problem(&text);
+            if let Some(p) = why {
+                ui.colored_label(
+                    egui::Color32::from_rgb(240, 160, 60),
+                    match p {
+                        NameProblem::Invalid => tl(
+                            "フォルダー名に使えない文字（\\ / : * ? \" < > | と @）や、空白・ピリオドで終わる名前、CON などの名前は使えません",
+                            "Not usable: characters a folder name cannot have (\\ / : * ? \" < > |, and @), a name ending in a space or a period, or a name such as CON",
+                        ),
+                        NameProblem::Number => tl(
+                            "数字だけの名前は使えません（セッションは番号でも指定できるため）",
+                            "A name of digits only is not usable (sessions can also be given by number)",
+                        ),
+                        NameProblem::Taken => tl(
+                            "ほかのセッションがその名前です",
+                            "Another session has that name",
+                        ),
+                        NameProblem::FolderInUse => tl(
+                            "作業フォルダーの sessions に、外したセッションの結果がその名前で残っています",
+                            "The work folder's sessions folder keeps the results of a removed session by that name",
+                        ),
+                    },
+                );
+            }
+            ui.label(
+                egui::RichText::new(tl(
+                    "作業フォルダーの中のセッションのフォルダーと、修正の中の名前を変えます。結果はそのまま使えます。生データフォルダーの名前は変わりません。",
+                    "Renames the session's folder in the work folder and its name in the corrections. The results stay usable. The raw data folder keeps its name.",
+                ))
+                .weak(),
+            );
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                if ui
+                    .add_enabled(why.is_none(), egui::Button::new(tl("変える", "Rename")))
+                    .clicked()
+                    || (enter && why.is_none())
+                {
+                    rename = true;
+                }
+                if ui.button(tl("キャンセル", "Cancel")).clicked() {
+                    close = true;
+                }
+            });
+        });
+        if rename {
+            self.apply_rename_session(ctx, &cfg, k, text.trim());
+        } else if !(close || r.should_close()) {
+            self.rename_session = Some((k, text));
+        }
+    }
+
+    /// Names session `k` as `name` ([`RunConfig::rename_session`]), and so the view's state.
+    fn apply_rename_session(&mut self, ctx: &egui::Context, cfg: &RunConfig, k: usize, name: &str) {
+        let old = cfg.sessions[k].name.clone();
+        if old == name {
+            return;
+        }
+        // the device calibration reads the sessions' folders too
+        if self.processing() {
+            self.notify(
+                Level::Warn,
+                tl(
+                    "処理中は名前を変えられません（機体の校正も含みます）",
+                    "Cannot rename while processing (including the device calibration)",
+                ),
+            );
+            return;
+        }
+        let mut c = cfg.clone();
+        match c.rename_session(k, name) {
+            Ok(()) => {
+                self.edit_history.rename_session(&old, name);
+                if self.hidden.remove(&old) {
+                    self.hidden.insert(name.to_string());
+                }
+                self.log.push(tr!(
+                    "セッション「{old}」を「{name}」にしました",
+                    "Renamed the session \"{old}\" to \"{name}\""
+                ));
+            }
+            Err(e) => self.notify(
+                Level::Error,
+                tr!(
+                    "名前を変えられませんでした: {e:#}",
+                    "Could not rename it: {e:#}"
+                ),
+            ),
+        }
+        self.reload_edits();
+        self.refresh_steps();
+        self.load_scene(ctx);
     }
 
     /// Whether something is being processed that closing the window would stop.
@@ -3865,6 +4007,7 @@ impl eframe::App for App {
         self.new_work_modal(&ctx);
         self.confirm_replace_modal(&ctx);
         self.confirm_remove_modal(&ctx);
+        self.rename_session_modal(&ctx);
         self.confirm_exit_modal(&ctx);
         if ctx.input(|i| !i.raw.hovered_files.is_empty()) {
             let rect = ctx.content_rect();
@@ -4174,6 +4317,7 @@ mod tests {
             new_work: None,
             confirm_replace: None,
             confirm_remove: None,
+            rename_session: None,
             confirm_exit: false,
             exit_confirmed: false,
             window_place: Default::default(),

@@ -883,6 +883,33 @@ pub struct Edits {
     pub matches: Vec<(PointAt, PointAt)>,
 }
 
+impl Edits {
+    /// Names session `old` as `new` in the corrections; whether any named it.
+    pub fn rename_session(&mut self, old: &str, new: &str) -> bool {
+        let mut changed = false;
+        let mut fix = |s: &mut String| {
+            if s == old {
+                *s = new.to_string();
+                changed = true;
+            }
+        };
+        for (a, b) in self
+            .rtk_exclude
+            .iter_mut()
+            .chain(self.heading_hold.iter_mut())
+            .chain(self.loops.iter_mut())
+        {
+            fix(&mut a.session);
+            fix(&mut b.session);
+        }
+        for (a, b) in &mut self.matches {
+            fix(&mut a.session);
+            fix(&mut b.session);
+        }
+        changed
+    }
+}
+
 /// A saved state of the corrections, kept in the work folder (`edits_revisions/<id>.json`): saved
 /// by the user, or when the optimisation ran with them.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -920,6 +947,100 @@ pub enum Stale {
     Edits,
     /// its settings changed since it ran
     Params,
+}
+
+/// Why a name cannot be a session's ([`RunConfig::session_name_problem`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NameProblem {
+    /// empty, or not a folder name on Windows (or with `@`, which the command line's times use)
+    Invalid,
+    /// digits only: sessions are also named by their number
+    Number,
+    /// another session's
+    Taken,
+    /// the folder in the work folder holds another recording's results (a session taken out)
+    FolderInUse,
+}
+
+/// Whether `name` can be a folder's on Windows, and a session's in the command line's times.
+fn folder_name_ok(name: &str) -> bool {
+    const RESERVED: [&str; 4] = ["CON", "PRN", "AUX", "NUL"];
+    let stem = name
+        .split('.')
+        .next()
+        .unwrap_or("")
+        .trim_end()
+        .to_uppercase();
+    let device = RESERVED.contains(&stem.as_str())
+        || ((stem.starts_with("COM") || stem.starts_with("LPT"))
+            && stem.len() == 4
+            && stem.as_bytes()[3].is_ascii_digit());
+    !name.is_empty()
+        && name == name.trim()
+        && !name.ends_with('.')
+        && !name
+            .chars()
+            .any(|c| c.is_control() || r#"<>:"/\|?*@"#.contains(c))
+        && !device
+}
+
+/// Rewrites text file `path` by `edit`, keeping its modification time: for a change that leaves
+/// what it says (a session's new name), so the results made after it stay current. False when the
+/// file is missing, not text, or unchanged.
+fn rewrite_in_place(path: &Path, edit: impl FnOnce(&str) -> String) -> Result<bool> {
+    let Ok(s) = std::fs::read_to_string(path) else {
+        return Ok(false);
+    };
+    let new = edit(&s);
+    if new == s {
+        return Ok(false);
+    }
+    // written beside it and put in its place, so that a failure leaves the file whole
+    let time = std::fs::metadata(path)?.modified()?;
+    let temp = PathBuf::from(format!("{}.renaming", path.display()));
+    let result = (|| -> Result<()> {
+        std::fs::write(&temp, new)?;
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&temp)?
+            .set_modified(time)?;
+        std::fs::rename(&temp, path)?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temp);
+    }
+    result.with_context(|| format!("rewrite {}", path.display()))?;
+    Ok(true)
+}
+
+/// The text files of the results under `dirs` that may hold the images' paths (not the photos,
+/// the masks, or the Potree octrees).
+fn result_texts(dirs: &[PathBuf]) -> Vec<PathBuf> {
+    const LARGEST: u64 = 64 << 20;
+    let mut out = Vec::new();
+    let mut todo = dirs.to_vec();
+    while let Some(d) = todo.pop() {
+        for e in std::fs::read_dir(&d).into_iter().flatten().flatten() {
+            let p = e.path();
+            let name = e.file_name().to_string_lossy().to_string();
+            match e.metadata() {
+                Ok(m) if m.is_dir() => {
+                    if !(name == "images" || name == "masks" || name.ends_with("_converted")) {
+                        todo.push(p);
+                    }
+                }
+                Ok(m)
+                    if m.len() <= LARGEST
+                        && p.extension().is_some_and(|x| x == "txt" || x == "json") =>
+                {
+                    out.push(p)
+                }
+                _ => {}
+            }
+        }
+    }
+    out
 }
 
 /// A revision id names a file in the revisions folder: digits and dashes only.
@@ -1142,6 +1263,7 @@ pub struct SessionCfg {
 pub struct RunConfig {
     pub sessions: Vec<SessionCfg>,
     pub work: PathBuf,
+    /// the name of the products (`<name>_colorized.laz`): the work folder's, one session or several
     pub name: String,
     /// parameters of the steps
     pub params: ProcessParams,
@@ -1197,14 +1319,13 @@ impl RunConfig {
             let s = c.new_session(raw);
             c.sessions.push(s);
         }
-        c.name = Self::run_name(&c.sessions, &c.work);
         c
     }
 
     /// A run of sessions as listed (in `project.json`).
     pub fn of_sessions(sessions: Vec<SessionCfg>, work: PathBuf) -> Self {
         RunConfig {
-            name: Self::run_name(&sessions, &work),
+            name: folder_name(&work),
             sessions,
             work,
             params: ProcessParams::default(),
@@ -1216,14 +1337,6 @@ impl RunConfig {
             images: false,
             refine: true,
             device_calib: None,
-        }
-    }
-
-    /// The name of the products: of the session for one, else of the work folder.
-    fn run_name(sessions: &[SessionCfg], work: &Path) -> String {
-        match sessions {
-            [s] => s.name.clone(),
-            _ => folder_name(work),
         }
     }
 
@@ -1274,6 +1387,116 @@ impl RunConfig {
         }
         self.sessions[k].raw = raw;
         self.write_project()
+    }
+
+    /// Why session `k` cannot be named `name`, if it cannot.
+    pub fn session_name_problem(&self, k: usize, name: &str) -> Option<NameProblem> {
+        let same = |a: &str, b: &str| a.to_lowercase() == b.to_lowercase();
+        if !folder_name_ok(name) {
+            Some(NameProblem::Invalid)
+        } else if name.bytes().all(|c| c.is_ascii_digit()) {
+            Some(NameProblem::Number)
+        } else if (self.sessions.iter().enumerate()).any(|(j, s)| j != k && same(&s.name, name)) {
+            Some(NameProblem::Taken)
+        } else if !same(&self.sessions[k].name, name)
+            && self.work.join("sessions").join(name).exists()
+        {
+            Some(NameProblem::FolderInUse)
+        } else {
+            None
+        }
+    }
+
+    /// Names session `k` as `name`: its folder in the work folder, the list of the sessions, the
+    /// corrections and their revisions, and the images' paths in the later results. Every result
+    /// stays current (the files rewritten keep their times).
+    pub fn rename_session(&mut self, k: usize, name: &str) -> Result<()> {
+        if let Some(p) = self.session_name_problem(k, name) {
+            bail!("a session cannot be named {name:?}: {p:?}");
+        }
+        let old = self.sessions[k].name.clone();
+        if old == name {
+            return Ok(());
+        }
+        let (from, to) = (self.session_dir(k), self.work.join("sessions").join(name));
+        if from.exists() {
+            std::fs::rename(&from, &to)
+                .with_context(|| format!("rename {} to {}", from.display(), to.display()))?;
+        }
+        self.sessions[k].name = name.to_string();
+        if let Err(e) = self.write_project() {
+            self.sessions[k].name = old;
+            if to.exists() {
+                let _ = std::fs::rename(&to, &from);
+            }
+            return Err(e);
+        }
+        self.rename_references(&old, name)
+    }
+
+    /// Names session `old` as `new` where the work folder refers to it (after its folder).
+    fn rename_references(&self, old: &str, new: &str) -> Result<()> {
+        // the set of all sessions
+        let (from, to) = (
+            format!("../sessions/{old}/data"),
+            format!("../sessions/{new}/data"),
+        );
+        rewrite_in_place(&self.set_file(), |s| {
+            s.lines()
+                .map(|l| match l.strip_prefix(&from) {
+                    Some(rest) if rest.is_empty() || rest.starts_with(char::is_whitespace) => {
+                        format!("{to}{rest}\n")
+                    }
+                    _ => format!("{l}\n"),
+                })
+                .collect()
+        })?;
+        // the corrections, their revisions, and the odometry's record of the heading holds
+        rewrite_in_place(&self.edits_file(), |s| {
+            let Ok(mut e) = serde_json::from_str::<Edits>(s) else {
+                return s.to_string();
+            };
+            if !e.rename_session(old, new) {
+                return s.to_string();
+            }
+            serde_json::to_string_pretty(&e).unwrap_or_else(|_| s.to_string())
+        })?;
+        for mut r in self.revisions() {
+            if r.edits.rename_session(old, new) {
+                self.write_revision(&r)?;
+            }
+        }
+        for j in 0..self.sessions.len() {
+            rewrite_in_place(&self.record_of(Step::Lio, Some(j)), |s| {
+                let Ok(mut v) = serde_json::from_str::<serde_json::Value>(s) else {
+                    return s.to_string();
+                };
+                let hold = &mut v["params"]["heading_hold"];
+                let mut e = Edits {
+                    heading_hold: serde_json::from_value(hold.clone()).unwrap_or_default(),
+                    ..Default::default()
+                };
+                if !e.rename_session(old, new) {
+                    return s.to_string();
+                }
+                *hold = json(&e.heading_hold);
+                serde_json::to_string_pretty(&v).unwrap_or_else(|_| s.to_string())
+            })?;
+        }
+        // the images' paths (several sessions), keeping the coordinate frames recorded for them
+        let (from, to) = (
+            format!("/sessions/{old}/data/"),
+            format!("/sessions/{new}/data/"),
+        );
+        for f in result_texts(&[self.runs(), self.output()]) {
+            let frame = frames::recorded(&self.data(), &f)?;
+            if rewrite_in_place(&f, |s| s.replace(&from, &to))?
+                && let Some(frame) = frame
+            {
+                frames::record(&self.data(), &[&f], Some(frame))?;
+            }
+        }
+        Ok(())
     }
 
     /// The sessions listed in a work folder (`project.json`), if any.
@@ -2375,6 +2598,97 @@ mod tests {
             RunConfig::with_sessions(vec!["x/garden".into(), "y/garden".into()], work.clone());
         assert!(!fewer.done(Step::Extract));
         std::fs::remove_dir_all(&work).unwrap();
+    }
+
+    #[test]
+    fn products_are_named_by_the_work_folder() {
+        let work = PathBuf::from("y/site");
+        let one = RunConfig::new("x/room".into(), work.clone());
+        assert_eq!(one.colored(), work.join("output/site_colorized.laz"));
+        let two = RunConfig::with_sessions(vec!["x/room".into(), "x/hall".into()], work.clone());
+        assert_eq!(two.uncolored(), work.join("output/site_uncolorized.laz"));
+    }
+
+    #[test]
+    fn a_renamed_session_keeps_its_results_and_corrections() {
+        let base = std::env::temp_dir().join(format!("s20_rename_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let work = base.join("work");
+        let mut c = RunConfig::with_sessions(vec!["x/room".into(), "x/hall".into()], work.clone());
+        c.save_sessions().unwrap();
+        for k in 0..2 {
+            std::fs::create_dir_all(c.session_runs(k)).unwrap();
+            std::fs::write(c.lio_file_of(k), "lio").unwrap();
+        }
+        std::fs::create_dir_all(c.data()).unwrap();
+        std::fs::write(
+            c.set_file(),
+            "# session data directory, shift added to its times (s)\n\
+             ../sessions/room/data 0\n../sessions/hall/data 60\n",
+        )
+        .unwrap();
+        let e = Edits {
+            loops: vec![(At::on("room", 1.0), At::on("hall", 2.0))],
+            heading_hold: vec![(At::on("hall", 3.0), At::on("hall", 4.0))],
+            ..Default::default()
+        };
+        c.save_edits(&e).unwrap();
+        c.save_revision("before", false, &e).unwrap();
+        c.write_record(Step::Lio, Some(1), true).unwrap();
+        std::fs::create_dir_all(c.runs()).unwrap();
+        let image = |s: &str| {
+            format!(
+                "{}/data/../sessions/{s}/data/images/left/left_1.jpg 1\n",
+                work.display()
+            )
+        };
+        std::fs::write(c.refined_poses(), image("room") + &image("hall")).unwrap();
+        let enu = CoordinateFrame::local_enu([38., 141., 40.]).unwrap();
+        frames::record(&c.data(), &[&c.refined_poses()], Some(enu)).unwrap();
+        let time = |p: &Path| std::fs::metadata(p).unwrap().modified().unwrap();
+        let before = [c.set_file(), c.edits_file(), c.refined_poses()].map(|p| time(&p));
+
+        // names that cannot be
+        for bad in ["", " park", "a/b", "a@1", "CON", "com1.txt", "x."] {
+            assert_eq!(
+                c.session_name_problem(0, bad),
+                Some(NameProblem::Invalid),
+                "{bad:?}"
+            );
+        }
+        assert_eq!(c.session_name_problem(0, "12"), Some(NameProblem::Number));
+        assert_eq!(c.session_name_problem(0, "Hall"), Some(NameProblem::Taken));
+        std::fs::create_dir_all(work.join("sessions/old")).unwrap();
+        assert_eq!(
+            c.session_name_problem(0, "old"),
+            Some(NameProblem::FolderInUse)
+        );
+        assert_eq!(c.session_name_problem(0, "Room"), None);
+
+        c.rename_session(1, "park").unwrap();
+        assert!(!work.join("sessions/hall").exists());
+        assert_eq!(std::fs::read_to_string(c.lio_file_of(1)).unwrap(), "lio");
+        let listed = RunConfig::of_sessions(RunConfig::open_work(&work).unwrap(), work.clone());
+        assert_eq!(listed.sessions[1].name, "park");
+        assert!(listed.set_current());
+        let renamed = Edits {
+            loops: vec![(At::on("room", 1.0), At::on("park", 2.0))],
+            heading_hold: vec![(At::on("park", 3.0), At::on("park", 4.0))],
+            ..Default::default()
+        };
+        assert_eq!(listed.edits(), renamed);
+        assert_eq!(listed.revisions()[0].edits, renamed);
+        assert_eq!(listed.heading_hold_of(1), [(3.0, 4.0)]);
+        assert_eq!(listed.staleness(Step::Lio), None);
+        let poses = std::fs::read_to_string(listed.refined_poses()).unwrap();
+        assert_eq!(poses, image("room") + &image("park"));
+        assert_eq!(
+            frames::recorded(&listed.data(), &listed.refined_poses()).unwrap(),
+            Some(enu)
+        );
+        let after = [c.set_file(), c.edits_file(), c.refined_poses()].map(|p| time(&p));
+        assert_eq!(after, before);
+        std::fs::remove_dir_all(&base).unwrap();
     }
 
     #[test]
