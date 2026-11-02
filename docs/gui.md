@@ -1,134 +1,136 @@
-# GUI の使い方
+# Using the GUI
 
-`s20-gui.exe` の機能を画面ごとにまとめます。基本の流れは [README](../README_jp.md) を参照してください。
+[日本語](gui_jp.md)
 
-## 作業フォルダー
+What `s20-gui.exe` does, screen by screen. For the basic flow, see the [README](../README.md).
 
-起動すると最初の画面で、新しい作業フォルダーを作るか、作業フォルダーを開くか、最近の作業フォルダーから選びます。画面上部の「ファイル」でも作成・開く・閉じる（最初の画面に戻る）ができます。
+## Work folder
 
-作業フォルダーには、処理の途中結果（`data/`、`runs/`）、成果物（`output/`）、設定（`settings.json`）、軌跡の修正（`s20_edits.json`）が入ります。点と画像は複製せず、生データの bag を読み込み専用で直接読みます。そのため、生データは処理中ずっと同じ場所に置いておいてください（`data/source.txt` にパスとサイズを記録し、変わっていれば抽出し直すよう知らせます）。
+The start screen offers **New work folder…**, opening a work folder, or one of the recent work folders. **File** at the top also creates, opens and closes one (back to the start screen).
 
-表示用の索引は `cache/preview/` にあり、アプリの終了後なら削除しても構いません（次に開いたときに作り直します）。
+A work folder holds the intermediate results (`data/`, `runs/`), the products (`output/`), the settings (`settings.json`) and the trajectory corrections (`s20_edits.json`). Points and images are not copied: the app reads the raw data's bag directly, read only. Keep the raw data in the same place while you work on it (`data/source.txt` records its path and size, and the app tells you to import again if they change).
 
-## 画面の構成
+The display index is in `cache/preview/`. You can delete it when the app is closed; it is made again the next time.
 
-- **左パネル**：セッションと工程の一覧、「処理設定」。見出しの « で畳み、左端の帯で開きます。
-- **上部ツールバー**：プレビューの切り替え、全体表示、右パネル（「表示」「軌跡」「画像」）の開閉。
-- **時刻バー**（下部）：選んでいる時刻。◀▶ ボタンや左右キー（Shift で 1 秒）で送ります。右の欄に時刻を打ち込むこともできます。
-- **ステータスバー**（最下部）：描画点数と設定上限、読み込み状態。
-- **ログ**：画面右下のボタンで開閉します。処理エラーがあると赤く示します。
+## The window
 
-保存・元に戻す、入力の誤り、処理の完了・失敗などは、ビューの右下に数秒間表示します（処理ログにも残ります。クリックで閉じます）。
+- **Left panel**: the sessions, the steps and **Processing settings**. Fold it with « in its header, open it again from the strip on the left edge.
+- **Toolbar** (top): the preview, **Show all**, and the right panel (**Display**, **Trajectory**, **Images**).
+- **Time bar** (bottom): the time chosen. Step it with the ◀▶ buttons or the left and right keys (1 s with Shift), or type a time in the box on the right.
+- **Status bar** (very bottom): points drawn and the limit, loading state.
+- **Log**: opened and closed with the button at the bottom right. It turns red when processing fails.
 
-## 処理設定
+Saving, undo, input errors, and processing finishing or failing are shown at the bottom right of the view for a few seconds (they stay in the processing log; click to close).
 
-GNSS（使わない／機体の RTK／PPK）は左パネルの「処理設定」で選びます。屋内／屋外・出力形式（LAZ／LAS）・重力の補正・詳細パラメータなどは「その他の設定…」（または「処理」→「処理設定」）にあります。設定は作業フォルダーの `settings.json` に保存し、新しい作業フォルダーは最後に使った設定から始まります。
+## Processing settings
 
-屋内と屋外で違うのは LIO の 4 つの値（間引き、地図のボクセル、最小距離、LiDAR の重み）だけです。軌跡の最適化・PPK・点群・着色は同じ設定です。
+The GNSS (none / the device's RTK / PPK) is chosen in **Processing settings** in the left panel. Indoor / outdoor, the output format (LAZ / LAS), the gravity correction, the detailed parameters and so on are in **Other settings…** (or **Process → Processing settings…**). The settings are saved in the work folder's `settings.json`; a new work folder starts from the last settings used.
 
-## 工程の実行
+Indoor and outdoor differ only in four LIO values (downsampling, the map's voxel, the minimum range, the LiDAR weight). The trajectory optimisation, PPK, point cloud and colouring use the same settings.
 
-| 工程 | 内容 |
+## Running the steps
+
+| Step | What it does |
 |---|---|
-| 抽出 | bag の索引（点・画像の位置）、IMU・GNSS の表 |
-| オドメトリ（LIO） | LiDAR と IMU の密結合オドメトリ |
-| 軌跡の最適化 | IMU・点群の面・GNSS・ループで全体を最適化 |
-| 点群生成 | 通り抜け判定、面への投影、通過物の除去 |
-| 軌跡・画像姿勢の出力 | trajectory.txt／las、ImgPose.txt |
-| 画像の姿勢合わせ | 画像ごとの姿勢を点群に合わせて微調整 |
-| 着色 | カメラ画像で点群に色を付ける |
-| 画像の出力 | オプション。PointClouds Studio と同じ形式と COLMAP 形式 |
+| Import | The bag's index (where the points and images are), the IMU and GNSS tables |
+| Odometry (LIO) | Tightly coupled LiDAR–inertial odometry |
+| Trajectory optimization | The whole trajectory optimised with the IMU, the planes of the cloud, GNSS and loops |
+| Point cloud | Free-space test, projection onto surfaces, removal of things passing by |
+| Trajectory and image pose export | trajectory.txt / las, ImgPose.txt |
+| Image pose refinement | Each image's pose adjusted to the cloud |
+| Colorization | The cloud coloured from the camera images |
+| Image export | Optional. In PointClouds Studio's layout and as a COLMAP model |
 
-「未完了・未反映の工程から実行」で、必要な工程だけを順に実行します。各工程の ▷ からは、その工程だけ、またはその工程から最後までを実行し直せます（前に未完了の工程があればそこから。メニューに実行する範囲を示します）。
+**Run from unfinished or unapplied steps** runs only the steps needed, in order. Each step's ▷ reruns that step alone, or from it to the end (from an earlier unfinished step if there is one; the menu shows what will run).
 
-前の工程（軌跡の最適化は修正内容も）より古い結果は「未反映」として黄色の ↻ と理由（設定の変更・軌跡の修正・前の工程のやり直し）を表示します。表示中のプレビューが未反映の結果に基づくときは、ステータスバーにも示します。
+A result older than an earlier step's (or, for the trajectory optimisation, than the corrections) is "unapplied": a yellow ↻ with the reason (settings changed, trajectory corrected, an earlier step redone). The status bar also says so when the preview shown is based on an unapplied result.
 
-処理中にウィンドウを閉じようとすると、中断して終了するか確認します。
+Closing the window while processing asks whether to cancel and exit.
 
-## プレビュー
+## Preview
 
-ツールバーの「プレビュー」で切り替えます。まだ作られていないものは選べません。
+Chosen with **Preview** in the toolbar. What has not been made yet cannot be chosen.
 
-| プレビュー | 内容 |
+| Preview | What it shows |
 |---|---|
-| スキャン点群（機体） | 機体が撮影中に推定した軌跡（生データの `frame_pose.txt`）で生の点を配置。取り込み直後から選べます |
-| スキャン点群（LIO） | LIO の軌跡で配置 |
-| スキャン点群（最適化後） | 最適化した軌跡で配置。軌跡を作り直すとすぐ反映します |
-| 出力点群（着色前） | 点群生成の結果 |
-| 出力点群（着色済み） | 着色の結果。着色前と見比べると、色が付かずに落ちた点が分かります |
+| Scan point cloud (device) | The raw points placed by the trajectory the device estimated while recording (the raw data's `frame_pose.txt`). Available right after the import |
+| Scan point cloud (LIO) | Placed by the LIO trajectory |
+| Scan point cloud (optimized) | Placed by the optimised trajectory. Follows the trajectory as soon as it is made again |
+| Output point cloud (uncolored) | The result of the point cloud step |
+| Output point cloud (colored) | The result of the colouring. Compared with the uncoloured one, it shows the points dropped for lack of a colour |
 
-操作：左ドラッグで回転、右ドラッグで移動、ホイールで拡大縮小、ダブルクリックでその点を回転の中心にします。全体表示はボタンです。プレビューを切り替えても、時刻の印と倍率を保ち、その時刻の姿勢に合わせて視点を移します。
+Mouse: left drag rotates, right drag moves, the wheel zooms, a double click makes that point the centre of rotation. **Show all** fits the whole cloud. Switching the preview keeps the time mark and the zoom, and moves the view to the pose at that time.
 
-右パネル「表示」の設定：
+The **Display** settings in the right panel:
 
-- **点の色**：着色（カメラ画像の色）・反射強度・高さ・セッション・単色。スキャン点群と出力点群で別々に覚えます。高さの範囲は、凡例の両端の値で変えられ、「画面内に合わせる」で見えている点に、「自動」で元に戻します。
-- **表示範囲**：スキャン点群を、選んだ時刻の前後（±秒）だけ、または開始から選んだ時刻までに絞ります。
-- **点の大きさを自動調整**：Potree の adaptive と同じく、描いている点の間隔に合わせて点を大きくします。スキャン点群では既定で切っています。
-- **描画点数**（既定 500 万点）：画面全体に描く点の上限です。全体の粗い点を常に残し、拡大・移動すると必要な細部を裏で読み込みます。
+- **Point colors**: colorized (the camera images' colours), reflectivity, height, session, plain. Remembered separately for the scan and output point clouds. The height range can be changed at the legend's ends; **Fit to view** fits it to the points visible, **Auto** goes back.
+- **Range**: limits the scan point cloud to some seconds around the time chosen, or from the start to the time chosen.
+- **Adjust the point size automatically**: as Potree's adaptive size, makes the points larger to the spacing of the points drawn. Off by default for the scan point clouds.
+- **Drawn points** (5 million by default): the most points drawn on the whole screen. Coarse points of the whole cloud always stay; zooming and moving loads the details needed in the background.
 
-出力点群は Potree の 8 分木を読みます。8 分木がないか元の点群より古いときは、開くときに作ります（約 1 億点で約 40 秒）。
+The output point cloud is read from a Potree octree. When there is none, or it is older than the cloud, it is made when opened (about 40 seconds for 100 million points).
 
-## 品質の確認
+## Checking the quality
 
-軌跡の最適化は、区間ごと（約 0.1 秒）の品質を `opt_quality.txt` に書きます。
+The trajectory optimisation writes the quality of each section (about 0.1 s) to `opt_quality.txt`:
 
-- 面のずれ（RMS と、面に乗った点の割合）
-- IMU との不整合（事前積分の χ²／自由度）
-- RTK 残差（水平・鉛直）
-- 補正量（1 秒間の動きがオドメトリからどれだけ直されたか。回転と移動）
+- plane misfit (RMS, and the share of points on planes)
+- disagreement with the IMU (the preintegration's χ² per degree of freedom)
+- RTK residuals (horizontal, vertical)
+- correction (how much the odometry's motion over 1 s was corrected, in rotation and translation)
 
-右パネル「軌跡」の「色分け」で指標を選ぶと、軌跡を緑〜赤で塗り、問題のありそうな区間（1 秒平均の上位で、互いに 5 秒以上離れたもの）を一覧にします。クリックするとその場所へ移動して印を付けます。赤にする値は変えられます。時刻バーも同じ色で塗り、問題のありそうな区間を上の三角、ループの時刻を下の点で示します。
+Choosing a metric in **Color by** in the right panel's **Trajectory** paints the trajectory from green to red and lists the sections that look wrong (the highest 1 s averages, at least 5 s apart). Clicking one moves there and marks it. The value shown red can be changed. The time bar is painted in the same colours, with the listed sections as triangles above and the loops' times as dots below.
 
-時刻バーか、軌跡の Ctrl+クリックで時刻を選ぶと、その時刻のカメラ画像（左右）を右パネル「画像」に表示します。
+Choosing a time on the time bar, or with Ctrl+click on the trajectory, shows the camera images (left and right) of that time in the right panel's **Images**.
 
-## 軌跡の修正
+## Correcting the trajectory
 
-右パネル「軌跡」の「修正」に、種類ごとの一覧があります。「＋ 追加」を押してから、軌跡を 2 回クリックします（区間は始点と終点、ループは同じ場所を通った 2 つの時刻）。Esc で取り消します。
+The right panel's **Trajectory** has a list of each kind under **Corrections**. Press **Add**, then click the trajectory twice (a section's start and end; for a loop, two times it passed the same place). Esc cancels.
 
-| 種類 | 色 | 使いどころ |
+| Kind | Colour | When to use it |
 |---|---|---|
-| GNSS を使わない区間 | 紫 | その区間の RTK／PPK の測位を使いません。誤 FIX や、建物・木の下の悪い測位に |
-| 方位を IMU に任せる区間 | 水色 | その区間では LIO が方位とジャイロのバイアスを LiDAR で更新せず、IMU の予測のまま保ちます。丸い丘（同心円の園路や円形の柵）や特徴のない斜面で、LiDAR が方位を少しずつ引きずる場合に |
-| ループ | 黄 | 同じ場所を通った 2 つの時刻を合わせます。「始点＝終点」のボタンもあります |
+| Sections without GNSS | purple | The RTK / PPK positions in the section are not used. For false fixes, and bad positions under buildings or trees |
+| Sections with heading held to the IMU | light blue | In the section, LIO does not update the heading and the gyro bias from the LiDAR, and keeps the IMU's prediction. For round hills (concentric paths, round fences) and featureless slopes where the LiDAR slowly drags the heading |
+| Loops | yellow | Joins two times at the same place. There is also a **Start = end** button |
 
-- 置いた修正の両端の印は、軌跡に沿ってドラッグで動かせます。区間か印をクリックして選び、Delete で消します。一覧の行を選ぶと、両端の時刻を数値で直せ、⌖ でその時刻へ移ります。
-- 「修正を反映する」は、方位の区間を変えたときは LIO から、それ以外は軌跡の最適化だけをやり直します。
-- GNSS の測位点（白：使用、橙：妥当性判定で不採用、紫：除外）は右パネル「表示」で軌跡に重ねられます。印にマウスを載せると、その解の状態と採用・不採用の理由を表示します。
-- 修正は変更のたびに `s20_edits.json` に書きます。Ctrl+Z／Ctrl+Y（Ctrl+Shift+Z）で元に戻す・やり直す（200 回まで）。Ctrl+S（「編集」→「修正を保存」）で、その時点の修正をリビジョンとして `edits_revisions/` に残します。軌跡の最適化を実行したときも、前のリビジョンと違えば自動で残します。「修正の履歴」で名前を変え、前の内容に戻し、削除できます。
+- The marks at a correction's ends can be dragged along the trajectory. Click a section or a mark to select it, and Delete removes it. Selecting a row of the list lets you type the times of its ends; ⌖ goes to that time.
+- **Apply the corrections** redoes the trajectory optimisation, or from LIO when heading sections changed.
+- The GNSS positions (white: used, orange: rejected by the validity check, purple: excluded) can be drawn over the trajectory from the right panel's **Display**. Hovering over one shows the solution's state and why it was used or not.
+- The corrections are written to `s20_edits.json` at each change. Ctrl+Z / Ctrl+Y (Ctrl+Shift+Z) undo and redo (up to 200 times). Ctrl+S (**Edit → Save corrections**) keeps the corrections as a revision in `edits_revisions/`; running the trajectory optimisation also keeps one when they differ from the previous revision. **Correction history** renames them, goes back to one, and deletes them.
 
-## 複数セッション
+## Several sessions
 
-同じ場所を何回かに分けて撮ったデータは、「セッションを追加…」で生データフォルダーを足すと、1 つの軌跡と点群にまとめます。抽出と LIO はセッションごと（`sessions/<セッション名>/`）に行い、軌跡の最適化から後を全セッションで 1 回行います。
+Recordings of the same place made in several parts are joined into one trajectory and cloud by adding their raw folders with **Add session…**. The import and LIO run per session (`sessions/<session name>/`), and the trajectory optimisation and the later steps once for all the sessions.
 
-- GNSS（RTK／PPK）があれば、それでセッション同士を合わせます。
-- GNSS がない（屋内など）ときは、最初のセッションを基準に、セッションをまたぐループ（軌跡を 2 回クリック）か、点の対応（2 つのセッションの同じ特徴をクリック）で残りをつなぎます。同じ地点を通っていればループが手軽です。軌跡が近づかないときは点の対応を、離れた場所で 2 組以上使います。
-- 最初の配置のあとは、セッション内やセッション間で同じ場所を通ったところを自動で見つけ、点群どうしで合わせます（再訪。「処理設定」→「軌跡の最適化」→「再訪」、既定で有効。[処理の仕組み](processing.md)）。そのため、ループは配置に要る分だけで足ります。ループは、2 つのセッションが同じ場所で同じ向きを見ている時刻に置くと合いやすくなります。
-- 前のバージョンで作った作業フォルダーは、再訪がオフのまま読み込まれます（結果が変わらないように）。使うときは「再訪を使う」をオンにして、最適化をやり直してください。
-- 点の対応を追加している間は、クリックで拾う点をポインタの位置に、セッション名とカメラからの距離で示します（奥の点を拾いそうなときは距離で分かります）。置いた点は P1、P2… の印で、印をクリックして選び、同じセッションの別の点へドラッグして付け直し、Delete で消します。一覧はセッションの組ごとで、各組の 2 点の今のずれを示します。
+- With GNSS (RTK / PPK), the sessions are placed by it.
+- Without GNSS (indoors and so on), the first session is the reference, and the others are connected to it by loops across sessions (two clicks on the trajectory) or point matches (clicks on the same feature in two sessions). Loops are easier when the paths pass the same spot. When they do not come close, use point matches, two pairs or more, far apart.
+- After the first placement, places passed again, within and across sessions, are found and registered cloud to cloud (revisits: **Processing settings → Trajectory optimization → Revisits**, on by default; see [How it works](processing.md), in Japanese). So loops are needed only for the placement. A loop fits best at times when the two sessions see the same place in the same direction.
+- Work folders made by earlier versions open with revisits off (so their results do not change). To use them, turn on **Use revisits** and run the optimisation again.
+- While adding point matches, the point a click would pick is shown at the pointer with its session's name and its distance from the camera (the distance tells you when it would pick a point behind). The points placed are marked P1, P2…; click a mark to select it, drag it onto another point of the same session to move it, Delete removes it. The list is by pairs of sessions, with each pair's current gap.
 
-セッション名は、はじめは生データフォルダーの名前です。セッションの行の「⋯」→「名前を変える…」で変えられます（セッションが 1 つでも）。作業フォルダーの中のセッションのフォルダーと、修正の中の名前を書き換え、結果はそのまま使えます。生データフォルダーの名前は変わりません。出力の点群の名前は `pointcloud_colorized.laz` などに決まっていて、セッション名や作業フォルダー名によりません。
+A session's name is at first its raw folder's name. **⋯ → Rename…** on the session's row changes it (also with one session). The session's folder in the work folder and its name in the corrections are renamed, and the results stay usable. The raw folder keeps its name. The output clouds have fixed names (`pointcloud_colorized.laz` and so on), whatever the session's or the work folder's name.
 
-## 生データを見る
+## Viewing the raw data
 
-「ツール」→「生データを見る…」（またはセッションの行の「⋯」→「生データを見る…」）で、セッションの生データフォルダーを読み取りだけで開きます。
+**Tools → View raw data…** (or **⋯ → View raw data…** on a session's row) opens the session's raw folder, read only.
 
-- **ファイル**：処理に使うファイルの有無と大きさ。
-- **トピック**：bag のトピックごとの型・件数・開始・終了・平均頻度・最大間隔（ふだんの 10 倍を超える間隔は黄色）。
-- **メッセージ**：メッセージの一覧と、選んだメッセージの全フィールド（bag に埋め込まれた定義で読みます）。「この時刻へ」で時刻バーをそのメッセージの時刻に動かします。
-- **GNSS**：`ROVER_PPKRAW.bin` と `BASE.BIN` を復号し、観測の時間範囲と頻度、途切れ、衛星数（システム別）と信号強度、サイクルスリップ、基準局の位置、測位の状態（FIX・FLOAT・DGPS・単独）を時間軸のグラフで示します。
+- **Files**: whether the files used in processing are there, and their sizes.
+- **Topics**: per topic of the bag, the type, count, start, end, mean rate and largest gap (gaps over 10 times the usual are yellow).
+- **Messages**: the list of messages, and every field of the one selected (read with the definitions embedded in the bag). **Go to this time** moves the time bar to that message's time.
+- **GNSS**: decodes `ROVER_PPKRAW.bin` and `BASE.BIN` and shows, on a time axis, the observations' time span and rate, gaps, satellites (per system) and signal strength, cycle slips, the base station's position, and the solution state (FIX, FLOAT, DGPS, single).
 
-外付け HDD の大きな bag（20 GB 程度）では、初回の索引の読み込みに 1 分以上かかることがあります。
+With a large bag (around 20 GB) on an external HDD, reading the index the first time can take over a minute.
 
-## 機体の校正
+## Device calibration
 
-「ツール」→「機体の校正」で、同じ機体で処理済みの作業フォルダーを何本か選ぶと、カメラの取り付け・魚眼・主点を求め直した校正ファイルを作ります。以後の画像姿勢の出力・姿勢合わせ・着色はこの校正を使います。屋外と屋内（近距離）の撮影を両方含めて求めるのがおすすめです（屋外だけでは、取り付け位置の数 mm の差が決まりません）。
+**Tools → Device calibration…** with several work folders of the same device, already processed, makes a calibration file with the cameras' mounting, fisheye and principal points solved again. Image pose export, image pose refinement and colouring then use it. Include both outdoor recordings and indoor ones up close (outdoors alone, the last few mm of the mounting are not determined).
 
-## スクリーンショット（確認用）
+## Screenshots (for checking)
 
 ```
-s20-gui --smoke-screenshot out.png --work <作業フォルダー> [--raw <生データ>] [--smoke-start <extract|lio|opt|cloud|export|colorize>]
+s20-gui --smoke-screenshot out.png --work <work folder> [--raw <raw folder>] [--smoke-start <extract|lio|opt|cloud|export|colorize>]
         [--smoke-points n] [--smoke-view scans|cloud|uncolored] [--smoke-trajectory device|lio|opt] [--smoke-adaptive 0|1]
         [--smoke-zoom f] [--smoke-metric n] [--smoke-goto-worst] [--smoke-lang en|ja]
 ```
 
-（指定した工程を実行してから）プレビューの画面を保存して終了します。
+Saves the preview (after running the step given) and exits.

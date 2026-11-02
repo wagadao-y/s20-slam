@@ -73,7 +73,7 @@ GNSS を使うと、座標は現場付近を原点に、X＝東、Y＝北、Z＝
 - **丸い丘や特徴のない斜面で方位がずれる**：その区間を「方位を IMU に任せる区間」に追加します。
 - **生データを確かめたい**：「ツール」→「生データを見る…」で、bag のトピック・メッセージや GNSS の観測を確認できます。
 
-詳しくは [GUI の使い方](docs/gui.md) を参照してください。
+詳しくは [GUI の使い方](docs/gui_jp.md) を参照してください。
 
 ## コマンドライン
 
@@ -85,12 +85,12 @@ s20 help                                                        # すべての�
 
 ## ドキュメント
 
-- [GUI の使い方](docs/gui.md)
-- [コマンドライン](docs/cli.md)
+- [GUI の使い方](docs/gui_jp.md)
+- [コマンドライン](docs/cli_jp.md)
 - [処理の仕組み](docs/processing.md)
 - [PPK](docs/ppk.md)
-- [検証結果](docs/validation.md)
-- [既知の課題](docs/known-issues.md)
+- [検証結果](docs/validation_jp.md)
+- [既知の課題](docs/known-issues_jp.md)
 
 ## ソースからのビルド
 

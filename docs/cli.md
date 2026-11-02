@@ -1,81 +1,83 @@
-# コマンドライン（`s20`）
+# Command line (`s20`)
 
-GUI と同じ処理をコマンドラインで実行します。すべてのコマンドとオプションは `s20 help` で表示します。
+[日本語](cli_jp.md)
 
-## 一括処理
+The same processing as the GUI, from the command line. `s20 help` shows every command and option.
+
+## All the steps at once
 
 ```
-s20 run <生データフォルダー> <作業フォルダー> [--outdoor | --params file.json] [--no_rtk] [--ppk] [--no_color]
-        [--las] [--images] [--no_refine] [--device_calibration file.yaml] [--redo] [--until 工程]
-s20 run <生データ1>,<生データ2>,... <作業フォルダー> --outdoor   # 複数セッション
+s20 run <raw folder> <work folder> [--outdoor | --params file.json] [--no_rtk] [--ppk] [--no_color]
+        [--las] [--images] [--no_refine] [--device_calibration file.yaml] [--redo] [--until step]
+s20 run <raw 1>,<raw 2>,... <work folder> --outdoor   # several sessions
 ```
 
-工程は extract → lio → opt → cloud → export → refine → colorize の順です。
+The steps are extract → lio → opt → cloud → export → refine → colorize.
 
-| オプション | |
+| Option | |
 |---|---|
-| `--outdoor` | 屋外の設定（既定は屋内） |
-| `--params` | GUI で保存した設定（`settings.json` の詳細パラメータ） |
-| `--no_rtk` | 機体の RTK を使わない（既定では FIX があれば使う） |
-| `--ppk` | PPK を計算して使う（[PPK](ppk.md)） |
-| `--no_color` | 着色しない |
-| `--las` | 点群を LAS で出力する（既定は LAZ） |
-| `--images` | 着色のあと、姿勢合わせ後の写真を `output/images`（PointClouds Studio と同じ形式）に、COLMAP のモデルを横に出力する |
-| `--no_refine` | 画像の姿勢合わせをしない |
-| `--device_calibration` | 機体の校正（`calibrate-device` で作ったもの）を、メーカーの校正ファイル（出荷時の `calibration.yaml`）の代わりに使う |
-| `--redo` | 抽出と LIO があってもやり直す |
-| `--until` | その工程で止める |
+| `--outdoor` | Outdoor settings (indoor by default) |
+| `--params` | Settings saved by the GUI (the detailed parameters of `settings.json`) |
+| `--no_rtk` | Do not use the device's RTK (by default it is used when there are fixes) |
+| `--ppk` | Compute and use PPK ([PPK](ppk.md), in Japanese) |
+| `--no_color` | Do not colour |
+| `--las` | Write the clouds as LAS (LAZ by default) |
+| `--images` | After colouring, write the photos with their refined poses to `output/images` (in PointClouds Studio's layout) and a COLMAP model beside them |
+| `--no_refine` | Do not refine the image poses |
+| `--device_calibration` | Use the device calibration (made by `calibrate-device`) instead of the maker's factory calibration file (`calibration.yaml`) |
+| `--redo` | Redo the import and LIO even when they are there |
+| `--until` | Stop after that step |
 
-複数セッションでは、抽出と LIO をセッションごとに `<作業フォルダー>/sessions/<生データのフォルダー名>/` で行い（足したセッションだけ実行します）、軌跡の最適化から後を全セッションで 1 回行います。
+With several sessions, the import and LIO run per session in `<work folder>/sessions/<session name>/` (at first the raw folder's name; only the sessions added are run), and the trajectory optimisation and the later steps once for all the sessions.
 
-## 工程ごとの実行
+## One step at a time
 
 ```
-s20 extract  <生データ> <data>                                  # bag の索引（点・画像の位置）と IMU・GNSS
-s20 lio      <data> runs/lio.txt [--indoor] [--hold a:b]        # オドメトリ。--hold：方位を IMU に任せる区間（秒、繰り返し可）
+s20 extract  <raw folder> <data>                                # the bag's index (where the points and images are), IMU and GNSS
+s20 lio      <data> runs/lio.txt [--indoor] [--hold a:b]        # odometry. --hold: a section with the heading held to the IMU (s, repeatable)
 s20 opt      <data> runs/lio.txt runs/opt.txt [--rtk] [--ppk runs/ppk.json] [--rtk_exclude a:b] [--loop a:b|start-end]
 s20 cloud    <data> runs/opt.txt out/cloud.laz [--config params.json]
-s20 export   <data> runs/opt.txt out --calib <生データ>/info/calibration.yaml
+s20 export   <data> runs/opt.txt out --calib <raw folder>/info/calibration.yaml
 s20 refine-images --data <data> --imgpose runs/ImgPose.txt --calib calibration.yaml --cloud out/cloud.laz runs/ImgPose_refined.txt
 s20 colorize out/cloud.laz out/cloud_col.laz --images <data>/images --imgpose runs/ImgPose.txt --calib calibration.yaml
 ```
 
-- 時刻は、セッションの最初のスキャンからの秒です。負の値は終わりからの秒です。複数セッションでは `セッション名@秒` か `番号@秒` で指定します。
-- `opt` に複数の LIO の軌跡をカンマ区切りで渡すと、複数セッションとして解きます（`data` に `sessions.txt` と連結した `imu.npy`／`gnss.npy` が必要です。`s20 run` が作ります）。GNSS がないときは、最初のセッションを基準に、セッションをまたぐループか `--match [session:]x,y,z=[session:]x,y,z`（同じ特徴の座標、セッションの組ごとに 2 組以上）で残りを置きます。
-- `opt` は再訪（[処理の仕組み](processing.md)）を使います。`--no_revisits` で使いません。`--revisit_dist m`（組にする距離）、`--revisit_inliers f`（重なりの下限）、`--revisit_path_sd k`（道沿いの標準偏差の倍率）、`--robust sd` などで設定を変えられます。`s20 eval-revisits <data> <opt_knots.txt> [out.csv]` は、軌跡の同じ場所の組を位置合わせし直して、二重の幅を組ごとに CSV に書きます。
-- `cloud` の `--config` は点群の設定の JSON です。ない項目は既定値になります。
-- `colorize` の画像は、`<data>/images` にファイルがあればそれを、なければ bag の中の JPEG を読みます。
+- Times are seconds from the session's first scan; negative values are seconds back from its end. With several sessions, give `<session name>@<s>` or `<number>@<s>`.
+- `opt` given several LIO trajectories, separated by commas, solves them as several sessions (`data` needs `sessions.txt` and the joined `imu.npy` / `gnss.npy`, which `s20 run` makes). Without GNSS, the first session is the reference, and the others are placed by loops across sessions or `--match [session:]x,y,z=[session:]x,y,z` (coordinates of the same feature, two pairs or more per pair of sessions).
+- `opt` uses revisits ([How it works](processing.md), in Japanese); `--no_revisits` turns them off. `--revisit_dist m` (the distance to pair places), `--revisit_inliers f` (the least overlap), `--revisit_path_sd k` (the factor of the standard deviation along the path), `--robust sd` and others change the settings. `s20 eval-revisits <data> <opt_knots.txt> [out.csv]` registers the trajectory's pairs of the same place again and writes the width of the doubling per pair to a CSV.
+- `cloud`'s `--config` is a JSON of the point cloud settings; missing items take the defaults.
+- `colorize` reads the images from `<data>/images` when the files are there, else the JPEGs in the bag.
 
-## そのほか
+## Other commands
 
 ```
-s20 ppk <生データ> runs/ppk.json [オプション]                  # PPK 測位（PPK のページを参照）
-s20 calibrate-device <作業フォルダー>... --out calibration.yaml  # 処理済みの作業フォルダーから機体の校正を作る（GUI の「機体の校正」）
-s20 export-colmap <着色済み点群> <出力> --data <data> --imgpose ImgPose.txt --calib calibration.yaml   # 3DGS 用の COLMAP モデル
-s20 images   <data> <フォルダー>                                # カメラ画像（JPEG）を bag から書き出す
-s20 convert  in.las out.laz                                     # LAS と LAZ の変換（拡張子で判断）
-s20 potree   <in.las|laz> [--no_rgb] [--gps_time]               # Potree 2.0 の 8 分木を作る
-s20 eval-traj <推定.txt> <基準.txt>                             # 軌跡の評価（ATE、1／5／30 秒の相対誤差、跳び）
-s20 cut-raw <生データ> <出力> [--from 秒] --to 秒               # 撮影の一部を、短い生データフォルダーとして切り出す（テスト用）
-s20 licenses                                                    # ライセンスの表示
+s20 ppk <raw folder> runs/ppk.json [options]                    # PPK positioning (see the PPK page)
+s20 calibrate-device <work folder>... --out calibration.yaml    # a device calibration from processed work folders (the GUI's Device calibration)
+s20 export-colmap <coloured cloud> <output> --data <data> --imgpose ImgPose.txt --calib calibration.yaml   # a COLMAP model for 3DGS
+s20 images   <data> <folder>                                    # write the camera images (JPEG) from the bag
+s20 convert  in.las out.laz                                     # convert between LAS and LAZ (by the extension)
+s20 potree   <in.las|laz> [--no_rgb] [--gps_time]               # make a Potree 2.0 octree
+s20 eval-traj <estimate.txt> <reference.txt>                    # evaluate a trajectory (ATE, relative errors over 1 / 5 / 30 s, jumps)
+s20 cut-raw <raw folder> <output> [--from s] --to s             # cut part of a recording out as a short raw folder (for tests)
+s20 licenses                                                    # show the licenses
 ```
 
-`cut-raw` の時刻は bag の最初のスキャンからの秒です。切り出すのは `all_*.bag` だけで、ほかのファイル（`info/`、`frame_pose.txt`、`BASE.BIN` など）はそのままコピーします。LIO は最初の 2 秒が静止していることを前提に初期化するので、`--from` は機体が動き出す数秒前にしてください。本体の軌跡（`frame_pose.txt`）は bag より早く始まることがあり、その時刻は目安になりません。抽出した IMU で動き出しを確かめてください。
+`cut-raw`'s times are seconds from the bag's first scan. Only `all_*.bag` is cut; the other files (`info/`, `frame_pose.txt`, `BASE.BIN` and so on) are copied as they are. LIO initialises assuming the first 2 seconds are still, so put `--from` a few seconds before the device starts moving. The device's own trajectory (`frame_pose.txt`) may start earlier than the bag, so its times are no guide; check when the motion starts in the imported IMU.
 
-点群のファイルは拡張子で LAS と LAZ を切り替えます（`.laz` なら圧縮）。読み込みはどちらも受け付けます。
+Point cloud files are LAS or LAZ by their extension (`.laz` is compressed). Both are read.
 
-## COLMAP 形式の出力（3D Gaussian Splatting 用）
+## COLMAP output (for 3D Gaussian Splatting)
 
-`export-colmap`（または `s20 run --images`）は、撮影を COLMAP のモデルとして書き出します。外部の 3DGS ツールに渡すためのものです。
+`export-colmap` (or `s20 run --images`) writes the recording as a COLMAP model, for external 3DGS tools.
 
-| 出力 | 中身 |
+| Output | Contents |
 |---|---|
-| `images/left/`、`images/right/` | 記録された JPEG（再圧縮しません） |
-| `sparse/0/cameras.txt` | 左右のカメラ。S20 の魚眼多項式に当てはめた `OPENCV_FISHEYE`（Kannala-Brandt） |
-| `sparse/0/images.txt` | 画像の姿勢 |
-| `sparse/0/points3D.txt` | 着色済み点群を間引いた初期点（既定 50 万点） |
-| `masks/` | 光軸から `--max_angle`（85°）より外の画面の隅（校正を当てはめていない範囲） |
-| `gauge.txt` | Z 軸が上、単位はメートル |
-| `export.json` | 当てはめの誤差、点の数 |
+| `images/left/`, `images/right/` | The recorded JPEGs (not recompressed) |
+| `sparse/0/cameras.txt` | The left and right cameras: `OPENCV_FISHEYE` (Kannala-Brandt) fitted to the S20's fisheye polynomial |
+| `sparse/0/images.txt` | The images' poses |
+| `sparse/0/points3D.txt` | Initial points thinned from the coloured cloud (500,000 by default) |
+| `masks/` | The image corners beyond `--max_angle` (85°) from the optical axis (outside the range the calibration was fitted to) |
+| `gauge.txt` | Z up, metres |
+| `export.json` | The fit's error, the number of points |
 
-Kannala-Brandt は S20 の多項式と完全には一致しません。当てはめの誤差は RMS で 0.1〜0.2 px 程度です。
+Kannala-Brandt does not match the S20's polynomial exactly. The fit's error is about 0.1–0.2 px RMS.

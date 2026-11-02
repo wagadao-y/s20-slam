@@ -1,66 +1,68 @@
-# 検証結果
+# Validation
 
-作者の S20 1 台で撮ったデータでの結果です。データは公開していません。比較の「Python 版」は、このアプリの前に作った作者の Python の試作（LIO → ポーズグラフ → BA）です。
+[日本語](validation_jp.md)
 
-## 屋内（住宅、650 秒）
+Results on data recorded with the author's one S20. The data is not published. The "Python version" compared is the author's Python prototype made before this app (LIO → pose graph → BA).
 
-参照の軌跡は、PointClouds Studio で処理した軌跡を初期値に BA で詰めたものです。
+## Indoors (a house, 650 s)
 
-| | 姿勢由来の誤差 | 面の厚み | 1 秒の誤差 最大 | 5 秒の誤差 最大 | 60 秒の誤差 中央値 |
+The reference trajectory is a BA refined from the trajectory processed by PointClouds Studio.
+
+| | Pose-induced error | Surface thickness | 1 s error, max | 5 s error, max | 60 s error, median |
 |---|---:|---:|---:|---:|---:|
-| Python 版（LIO→PGO→BA×3） | 3.42 mm | 9.84 mm | 37.5 cm | 42.8 cm | 3.2 cm |
-| s20-slam（LIO＋軌跡の最適化） | 3.15 mm | 9.15 mm | 3.5 cm | 5.0 cm | 1.4 cm |
+| Python version (LIO→PGO→BA×3) | 3.42 mm | 9.84 mm | 37.5 cm | 42.8 cm | 3.2 cm |
+| s20-slam (LIO + trajectory optimisation) | 3.15 mm | 9.15 mm | 3.5 cm | 5.0 cm | 1.4 cm |
 
-画像の整合（LiDAR とは独立。魚眼画像の SIFT 対応のエピポーラ誤差の中央値）：
+Image consistency (independent of the LiDAR: the median epipolar error of SIFT matches in the fisheye images):
 
-| | 隣接 | 再訪問 |
+| | Neighbours | Revisits |
 |---|---:|---:|
-| PointClouds Studio の軌跡を初期値にした BA（参照） | 2.44 px | 2.62 px |
-| Python 版 | 2.58 px | 2.87 px |
+| BA from PointClouds Studio's trajectory (reference) | 2.44 px | 2.62 px |
+| Python version | 2.58 px | 2.87 px |
 | s20-slam | 2.28 px | 2.62 px |
 
-ループの効果：地図の保持を短くしてわざと壊した LIO（始点と終点が 2.1 m ずれ、正しい軌跡との差 最大 1.4 m）が、「始点＝終点」のループ 1 つで、始点と終点の差 0.9 cm、正しい軌跡との差 RMS 1.0 cm（最大 4.9 cm）になりました。
+The effect of a loop: a LIO broken on purpose by keeping the map shorter (start and end 2.1 m apart, up to 1.4 m from the true trajectory) came, with one **Start = end** loop, to 0.9 cm between start and end and 1.0 cm RMS from the true trajectory (4.9 cm at most).
 
-## 屋外（公園、RTK あり）
+## Outdoors (a park, with RTK)
 
-この節の数値は、重力の補正などを入れる前の版で測ったものです。
+The numbers in this section were measured with a version before the gravity correction and other changes.
 
-1100 秒の撮影：
+An 1100 s recording:
 
-| | RTK 残差 水平 | 鉛直 | 3D の 95% | 姿勢由来の誤差 |
+| | RTK residual, horizontal | Vertical | 3D, 95% | Pose-induced error |
 |---|---:|---:|---:|---:|
-| Python 版（BA＋RTK） | 27.4 mm | 18.3 mm | 57.0 mm | 2.71 mm |
-| s20-slam（RTK） | 14.8 mm | 19.6 mm | 42.6 mm | 2.54 mm |
+| Python version (BA + RTK) | 27.4 mm | 18.3 mm | 57.0 mm | 2.71 mm |
+| s20-slam (RTK) | 14.8 mm | 19.6 mm | 42.6 mm | 2.54 mm |
 
-誤 FIX を含む撮影：RTK 残差 水平／鉛直／3D の 95% は、Python 版 30.9／16.0／61.4 mm、s20-slam 12.9／19.4／41.2 mm（妥当性判定で 14213 エポック中 9815 を採用）。
+A recording with false fixes: RTK residuals horizontal / vertical / 3D 95% of 30.9 / 16.0 / 61.4 mm for the Python version, 12.9 / 19.4 / 41.2 mm for s20-slam (the validity check used 9815 of 14213 epochs).
 
-2 セッションの統合（RTK あり）。Python 版はポーズグラフでセッション間のループを入れてから BA、s20-slam はループなしで、各セッションを RTK に合わせたうえで面の結合で同時に解きます：
+Two sessions joined (with RTK). The Python version adds loops across the sessions in a pose graph, then runs BA; s20-slam uses no loops, fitting each session to RTK and solving them together with the plane coupling:
 
-| | RTK 残差 水平 | 鉛直 | 3D の 95% | 姿勢由来の誤差 | 重なりの剛体残差 | 面のずれ 中央値／90% |
+| | RTK residual, horizontal | Vertical | 3D, 95% | Pose-induced error | Rigid residual of the overlap | Plane misfit, median / 90% |
 |---|---:|---:|---:|---:|---:|---:|
-| Python 版 | 27.4 mm | 17.0 mm | 56.3 mm | 2.72 mm | 1.1 cm | 0.4／1.4 mm |
-| s20-slam | 14.1 mm | 19.0 mm | 41.6 mm | 2.69 mm | 0.8 cm | 0.4／1.4 mm |
+| Python version | 27.4 mm | 17.0 mm | 56.3 mm | 2.72 mm | 1.1 cm | 0.4 / 1.4 mm |
+| s20-slam | 14.1 mm | 19.0 mm | 41.6 mm | 2.69 mm | 0.8 cm | 0.4 / 1.4 mm |
 
-PPK（30 分の撮影、始点＝終点のループあり）：PPK との水平のずれは 99% で 33 mm 以内、ループは 6.5 mm で閉じました。
+PPK (a 30-minute recording with a **Start = end** loop): 99% within 33 mm of PPK horizontally, and the loop closed to 6.5 mm.
 
-## 処理時間とサイズ
+## Processing time and size
 
-屋内 650 秒、`s20 run` 一括、RTX 3060：
+Indoors, 650 s, `s20 run` all at once, RTX 3060:
 
-| 工程 | 時間 |
+| Step | Time |
 |---|---:|
-| 抽出（bag 全体の走査） | 21 秒 |
-| LIO | 15 秒 |
-| 軌跡の最適化 | 1 分 38 秒 |
-| 点群生成（観測 9500 万 → 3030 万点） | 207 秒 |
-| 着色（GPU） | 216 秒 |
+| Import (a pass over the whole bag) | 21 s |
+| LIO | 15 s |
+| Trajectory optimisation | 1 min 38 s |
+| Point cloud (95 million observations → 30.3 million points) | 207 s |
+| Colouring (GPU) | 216 s |
 
-作業フォルダーは 704 MB です。CPU だけの場合、点群生成と着色はそれぞれ 417 秒と 465 秒でした。
+The work folder is 704 MB. With the CPU only, the point cloud and the colouring took 417 s and 465 s.
 
-LAZ の圧縮：着色済みの 1962 万点で 0.94 GB → 0.39 GB、4.5 秒。法線（float）が縮みにくく、LAS の 4 割ほど残ります。出力は PDAL と PotreeConverter 2 で読めることを確かめています。
+LAZ compression: 19.62 million coloured points, 0.94 GB → 0.39 GB in 4.5 s. The normals (floats) compress poorly, so about 40% of the LAS remains. The output has been checked to read in PDAL and PotreeConverter 2.
 
-## 分かったこと
+## Findings
 
-- 面の結合を入れると収束が速くなり精度も上がりますが、IMU の重みが緩いと、狭い場所での短い往復（約 0.5 m）が潰れます。IMU の雑音を実機相当（ジャイロ 2e-4 rad/s/√Hz、加速度 0.005 m/s²/√Hz）に締めると保たれます。
-- 面を固定して交互に解くだけでは、軌跡全体の上下のような低周波の変形がほとんど動きません。RTK を効かせるには、面と軌跡の結合が要ります。
-- 屋外に屋内の細かい LIO の値を使うと局所の精度は上がりますが、全体の方位のずれが増え、処理は約 2 倍になります。1 つの値で屋内・屋外の両方に合うものはなく、プリセットを分けています。
+- The plane coupling converges faster and is more accurate, but with a loose IMU weight, short back-and-forth motions in narrow places (about 0.5 m) are flattened. Tightening the IMU noise to the real device's (gyro 2e-4 rad/s/√Hz, accelerometer 0.005 m/s²/√Hz) keeps them.
+- Solving alternately with the planes fixed hardly moves low-frequency deformations such as the whole trajectory tilting up or down. For RTK to act, the planes and the trajectory need to be coupled.
+- Indoor's fine LIO values used outdoors improve the local accuracy but increase the overall heading drift and roughly double the processing time. No single set of values fits both indoors and outdoors, so the presets are separate.

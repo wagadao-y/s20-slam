@@ -1,28 +1,30 @@
-# 既知の課題
+# Known issues
 
-分かっている課題と、今後の予定です。
+[日本語](known-issues_jp.md)
 
-## 精度
+The issues known so far, and what is planned.
 
-- **LIO の大きな方位ドリフト**：特徴の少ない丸い丘などで、LIO 単体の方位が一定の向きに引きずられ、30 分で十数 m ずれることがあります。GNSS があれば軌跡の最適化で吸収できますが、GNSS のない現場ではそのまま点群の歪みになります。今は「方位を IMU に任せる区間」を手動で指定して対処します。
-- **前に通った場所に戻ったときの跳び**：長い撮影で、ずれた古い地図に戻ると、位置合わせの残差が大きくなり、軌跡が跳ぶか引きずられることがあります。
-- **拘束の弱い区域の収束**：植生ばかりの区域では、最適化の最終段の反復ごとに軌跡が数 cm ずつ動き続け、収束判定に届かないことがあります。
-- **鉛直の系統的なずれ**：PPK との差は水平でほぼ 1 cm 以内ですが、鉛直は区間ごとに数 cm ずれます。
-- **誤 FIX の検出**：本物の誤 FIX での検証はまだ少ないです。
-- **点群のもやと面の厚さ**：PointClouds Studio で処理した点群と比べ、物の縁のもや（面から数 cm 浮いた点）がやや多く残ります。
+## Accuracy
 
-## 機能
+- **Large heading drift of LIO**: on round hills with few features, LIO's heading alone can be dragged one way, over ten metres in 30 minutes. With GNSS the trajectory optimisation absorbs it, but without GNSS it distorts the cloud. For now, mark the section as a **section with heading held to the IMU** by hand.
+- **Jumps on returning to a place passed before**: in long recordings, returning to an old part of the map that has drifted can leave large registration residuals, and the trajectory may jump or be dragged.
+- **Convergence where constraints are weak**: in areas of vegetation only, the trajectory can keep moving a few cm at each iteration of the optimisation's last stage and not reach the convergence test.
+- **Systematic vertical offsets**: the difference from PPK is mostly within 1 cm horizontally, but vertically it shifts by a few cm from section to section.
+- **Detecting false fixes**: it has been checked on few real false fixes so far.
+- **Haze and thickness of surfaces**: compared with a cloud processed by PointClouds Studio, a little more haze (points a few cm off the surface) remains at the edges of things.
 
-- **ループの自動検出**：「再訪」は、ずれが約 2 m までの同じ場所を見つけて合わせます。それより大きくずれた場所や、始点と終点が同じ撮影の大きく離れた始点と終点は、手で指定してください（「始点＝終点」）。
-- **GNSS のない複数セッション**：セッションの最初の配置は、セッションをまたぐループか点の対応を手で指定する必要があります。林の中の小道のように道沿いの組しかない場所では、再訪を使っても数十 cm のずれが残ることがあります。
-- **IMU と LiDAR の時刻ずれ**の推定がありません。
-- **3DGS 向けの撮影**（0.5 秒間隔、遠景と近景）での確認はこれからです。
+## Features
 
-## 安定性
+- **Finding loops automatically**: revisits find and join the same place when it is off by up to about 2 m. Places off by more, and the start and end of a recording that starts and ends at the same place when they are far apart, need to be given by hand (**Start = end**).
+- **Several sessions without GNSS**: the first placement of the sessions needs loops across sessions or point matches given by hand. Where the pairs are only along a path, as a trail in a wood, a few tens of cm can remain even with revisits.
+- **Time offset between the IMU and the LiDAR** is not estimated.
+- **Recordings for 3DGS** (0.5 s intervals, far and near views) are still to be checked.
 
-- **GPU のエラー**：wgpu の検証エラーやメモリ不足で、処理が「内部エラー」で止まる可能性があります（作者のデータでは起きていません）。
-- **通しの回帰テスト**：工程を通しで確かめる自動テストはまだありません。
+## Stability
 
-## 動作確認の範囲
+- **GPU errors**: a wgpu validation error or running out of memory could stop processing with an "internal error" (it has not happened with the author's data).
+- **End-to-end regression tests**: there are no automatic tests that run the steps through yet.
 
-作者の S20 1 台、Windows 11、RTX 3060 で確かめています。ほかの機体（ファームウェアや校正の違い）では、加速度計のバイアスの初期値（詳細パラメータの `ba0`）などが合わない可能性があります。うまくいかないときは、Issue で生データの構成（「ツール」→「生データを見る…」の「ファイル」「トピック」）とログを添えて知らせてください。ログは作業フォルダーの `logs/` にあります。ログのパスは作業フォルダーからの相対パスで、ユーザーのフォルダーは `~` と書かれます。
+## What it has been tested on
+
+One S20 (the author's), Windows 11, RTX 3060. On other devices (other firmware or calibration), the initial accelerometer bias (`ba0` in the detailed parameters) and other values may not fit. If it does not work, please open an Issue with the raw data's layout (**Files** and **Topics** in **Tools → View raw data…**) and the log. The logs are in the work folder's `logs/`. Paths in the log are relative to the work folder, and your user folder is written `~`.

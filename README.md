@@ -83,12 +83,10 @@ s20 help                                                 # every command and opt
 
 ## Documentation
 
-The detailed documentation is in Japanese:
-
 - [GUI guide](docs/gui.md)
 - [Command line](docs/cli.md)
-- [How it works](docs/processing.md)
-- [PPK](docs/ppk.md)
+- [How it works](docs/processing.md) (in Japanese)
+- [PPK](docs/ppk.md) (in Japanese)
 - [Validation](docs/validation.md)
 - [Known issues](docs/known-issues.md)
 
