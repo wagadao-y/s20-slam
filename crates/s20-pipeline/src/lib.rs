@@ -2061,17 +2061,24 @@ impl RunConfig {
         self.write_project()?;
         std::fs::create_dir_all(self.runs())?;
         std::fs::create_dir_all(self.output())?;
-        for k in self.units(step) {
-            if missing && self.done_of(step, k) {
-                continue;
-            }
+        let units: Vec<Option<usize>> = (self.units(step).into_iter())
+            .filter(|&k| !(missing && self.done_of(step, k)))
+            .collect();
+        for (i, &k) in units.iter().enumerate() {
             if let (Some(k), true) = (k, self.multi()) {
                 job.log(&format!("-- {}", self.sessions[k].name));
                 std::fs::create_dir_all(self.session_runs(k))?;
             }
+            // several sessions run one after another on the step's bar
+            let n = units.len() as f64;
+            let part = if units.len() > 1 {
+                job.part(i as f64 / n, (i + 1) as f64 / n)
+            } else {
+                job.clone()
+            };
             let previous = self.previous_result(step, k);
             self.write_record(step, k, false)?;
-            if let Err(e) = self.run_step_inner(step, k.unwrap_or(0), job) {
+            if let Err(e) = self.run_step_inner(step, k.unwrap_or(0), &part) {
                 self.restore_result(step, k, previous, job);
                 return Err(e);
             }
