@@ -20,15 +20,15 @@ The steps are extract → lio → opt → cloud → export → refine → colori
 | `--params` | Settings saved by the GUI (the detailed parameters of `settings.json`) |
 | `--no_rtk` | Do not use the device's RTK (by default it is used when there are fixes) |
 | `--ppk` | Compute and use PPK ([PPK](ppk.md), in Japanese) |
-| `--no_color` | Do not colour |
-| `--las` | Write the clouds as LAS (LAZ by default) |
-| `--images` | After colouring, write the photos with their refined poses to `output/images` (in PointClouds Studio's layout) and a COLMAP model beside them |
+| `--no_color` | Do not color |
+| `--las` | Write the point clouds as LAS (LAZ by default) |
+| `--images` | After coloring, write the photos with their refined poses to `output/images` (in PointClouds Studio's layout) and a COLMAP model beside them |
 | `--no_refine` | Do not refine the image poses |
 | `--device_calibration` | Use the device calibration (made by `calibrate-device`) instead of the maker's factory calibration file (`calibration.yaml`) |
 | `--redo` | Redo the import and LIO even when they are there |
 | `--until` | Stop after that step |
 
-With several sessions, the import and LIO run per session in `<work folder>/sessions/<session name>/` (at first the raw folder's name; only the sessions added are run), and the trajectory optimisation and the later steps once for all the sessions.
+With several sessions, the import and LIO run per session in `<work folder>/sessions/<session name>/` (at first the raw folder's name; only the sessions added are run), and the trajectory optimization and the later steps once for all the sessions.
 
 ## One step at a time
 
@@ -53,16 +53,17 @@ s20 colorize out/cloud.laz out/cloud_col.laz --images <data>/images --imgpose ru
 ```
 s20 ppk <raw folder> runs/ppk.json [options]                    # PPK positioning (see the PPK page)
 s20 calibrate-device <work folder>... --out calibration.yaml    # a device calibration from processed work folders (the GUI's Device calibration)
-s20 export-colmap <coloured cloud> <output> --data <data> --imgpose ImgPose.txt --calib calibration.yaml   # a COLMAP model for 3DGS
+s20 export-colmap <colored point cloud> <output> --data <data> --imgpose ImgPose.txt --calib calibration.yaml   # a COLMAP model for 3DGS
 s20 images   <data> <folder>                                    # write the camera images (JPEG) from the bag
 s20 convert  in.las out.laz                                     # convert between LAS and LAZ (by the extension)
 s20 potree   <in.las|laz> [--no_rgb] [--gps_time]               # make a Potree 2.0 octree
 s20 eval-traj <estimate.txt> <reference.txt>                    # evaluate a trajectory (ATE, relative errors over 1 / 5 / 30 s, jumps)
 s20 cut-raw <raw folder> <output> [--from s] --to s             # cut part of a recording out as a short raw folder (for tests)
 s20 licenses                                                    # show the licenses
+s20 version                                                     # show the version (also --version)
 ```
 
-`cut-raw`'s times are seconds from the bag's first scan. Only `all_*.bag` is cut; the other files (`info/`, `frame_pose.txt`, `BASE.BIN` and so on) are copied as they are. LIO initialises assuming the first 2 seconds are still, so put `--from` a few seconds before the device starts moving. The device's own trajectory (`frame_pose.txt`) may start earlier than the bag, so its times are no guide; check when the motion starts in the imported IMU.
+`cut-raw`'s times are seconds from the bag's first scan. Only `all_*.bag` is cut; the other files (`info/`, `frame_pose.txt`, `BASE.BIN` and so on) are copied as they are. LIO initializes assuming the first 2 seconds are still, so put `--from` a few seconds before the device starts moving. The device's own trajectory (`frame_pose.txt`) may start earlier than the bag, so its times are no guide; check when the motion starts in the imported IMU.
 
 Point cloud files are LAS or LAZ by their extension (`.laz` is compressed). Both are read.
 
@@ -75,9 +76,9 @@ Point cloud files are LAS or LAZ by their extension (`.laz` is compressed). Both
 | `images/left/`, `images/right/` | The recorded JPEGs (not recompressed) |
 | `sparse/0/cameras.txt` | The left and right cameras: `OPENCV_FISHEYE` (Kannala-Brandt) fitted to the S20's fisheye polynomial |
 | `sparse/0/images.txt` | The images' poses |
-| `sparse/0/points3D.txt` | Initial points thinned from the coloured cloud (500,000 by default) |
+| `sparse/0/points3D.txt` | Initial points thinned from the colored point cloud (500,000 by default) |
 | `masks/` | The image corners beyond `--max_angle` (85°) from the optical axis (outside the range the calibration was fitted to) |
-| `gauge.txt` | Z up, metres |
+| `gauge.txt` | Z up, meters |
 | `export.json` | The fit's error, the number of points |
 
 Kannala-Brandt does not match the S20's polynomial exactly. The fit's error is about 0.1–0.2 px RMS.

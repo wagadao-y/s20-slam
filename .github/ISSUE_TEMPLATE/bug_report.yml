@@ -1,0 +1,62 @@
+name: Problem report / 不具合の報告
+description: Something went wrong or the result looks wrong. 処理が失敗した、結果がおかしいとき。
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        English or Japanese is fine. 日本語でも英語でも構いません。
+
+        Before attaching a log or screenshots, please look through them: the log keeps the raw data folder's path (its name may say where you recorded), and **Tools → View raw data… → GNSS** shows the base station's latitude and longitude. Hide what you do not want to make public.
+        ログや画面を添える前に、中身を見てください。ログには生データフォルダーのパスが残ります（フォルダー名で撮影場所が分かることがあります）。「ツール」→「生データを見る…」→「GNSS」には基準局の緯度・経度が出ます。公開したくないところは伏せてください。
+  - type: input
+    id: version
+    attributes:
+      label: Version / バージョン
+      description: "**Help → About** / 「ヘルプ」→「このアプリについて」"
+      placeholder: "0.1.5"
+    validations:
+      required: true
+  - type: dropdown
+    id: preset
+    attributes:
+      label: Preset / プリセット
+      options:
+        - Indoor / 屋内
+        - Outdoor / 屋外
+  - type: dropdown
+    id: gnss
+    attributes:
+      label: GNSS
+      options:
+        - Not used / 使わない
+        - The device's RTK / 機体の RTK
+        - PPK
+  - type: input
+    id: sessions
+    attributes:
+      label: Sessions / セッション数
+      placeholder: "1"
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened / 起きたこと
+      description: |
+        The step, what you did and what you saw (an error message, a screenshot of the result).
+        どの工程で、何をして、どうなったか（エラーの文言、結果の画面など）。
+    validations:
+      required: true
+  - type: textarea
+    id: raw
+    attributes:
+      label: The raw data's layout / 生データの構成
+      description: |
+        Screenshots of the **Files** and **Topics** tabs of **Tools → View raw data…**. Most useful when it fails in the import or LIO.
+        「ツール」→「生データを見る…」の「ファイル」「トピック」の画面。抽出や LIO で失敗するときに特に役立ちます。
+  - type: textarea
+    id: log
+    attributes:
+      label: Log / ログ
+      description: |
+        Attach the log from the work folder's `logs/` (drag the file here). Your user folder is written `~` in it.
+        作業フォルダーの `logs/` にあるログを添えてください（ここにファイルをドラッグ）。ユーザーのフォルダーは `~` と書かれます。

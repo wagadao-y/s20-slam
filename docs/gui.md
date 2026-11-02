@@ -22,11 +22,13 @@ The display index is in `cache/preview/`. You can delete it when the app is clos
 
 Saving, undo, input errors, and processing finishing or failing are shown at the bottom right of the view for a few seconds (they stay in the processing log; click to close).
 
+**Help → About** shows the version, and links to the source, the latest release and problem reports (Issues).
+
 ## Processing settings
 
 The GNSS (none / the device's RTK / PPK) is chosen in **Processing settings** in the left panel. Indoor / outdoor, the output format (LAZ / LAS), the gravity correction, the detailed parameters and so on are in **Other settings…** (or **Process → Processing settings…**). The settings are saved in the work folder's `settings.json`; a new work folder starts from the last settings used.
 
-Indoor and outdoor differ only in four LIO values (downsampling, the map's voxel, the minimum range, the LiDAR weight). The trajectory optimisation, PPK, point cloud and colouring use the same settings.
+Indoor and outdoor differ only in four LIO values (downsampling, the map's voxel, the minimum range, the LiDAR weight). The trajectory optimization, PPK, point cloud and coloring use the same settings.
 
 ## Running the steps
 
@@ -34,16 +36,16 @@ Indoor and outdoor differ only in four LIO values (downsampling, the map's voxel
 |---|---|
 | Import | The bag's index (where the points and images are), the IMU and GNSS tables |
 | Odometry (LIO) | Tightly coupled LiDAR–inertial odometry |
-| Trajectory optimization | The whole trajectory optimised with the IMU, the planes of the cloud, GNSS and loops |
+| Trajectory optimization | The whole trajectory optimized with the IMU, the planes of the point cloud, GNSS and loops |
 | Point cloud | Free-space test, projection onto surfaces, removal of things passing by |
 | Trajectory and image pose export | trajectory.txt / las, ImgPose.txt |
-| Image pose refinement | Each image's pose adjusted to the cloud |
-| Colorization | The cloud coloured from the camera images |
+| Image pose refinement | Each image's pose adjusted to the point cloud |
+| Colorization | The point cloud colored from the camera images |
 | Image export | Optional. In PointClouds Studio's layout and as a COLMAP model |
 
 **Run from unfinished or unapplied steps** runs only the steps needed, in order. Each step's ▷ reruns that step alone, or from it to the end (from an earlier unfinished step if there is one; the menu shows what will run).
 
-A result older than an earlier step's (or, for the trajectory optimisation, than the corrections) is "unapplied": a yellow ↻ with the reason (settings changed, trajectory corrected, an earlier step redone). The status bar also says so when the preview shown is based on an unapplied result.
+A result older than an earlier step's (or, for the trajectory optimization, than the corrections) is "unapplied": a yellow ↻ with the reason (settings changed, trajectory corrected, an earlier step redone). The status bar also says so when the preview shown is based on an unapplied result.
 
 Closing the window while processing asks whether to cancel and exit.
 
@@ -55,31 +57,31 @@ Chosen with **Preview** in the toolbar. What has not been made yet cannot be cho
 |---|---|
 | Scan point cloud (device) | The raw points placed by the trajectory the device estimated while recording (the raw data's `frame_pose.txt`). Available right after the import |
 | Scan point cloud (LIO) | Placed by the LIO trajectory |
-| Scan point cloud (optimized) | Placed by the optimised trajectory. Follows the trajectory as soon as it is made again |
+| Scan point cloud (optimized) | Placed by the optimized trajectory. Follows the trajectory as soon as it is made again |
 | Output point cloud (uncolored) | The result of the point cloud step |
-| Output point cloud (colored) | The result of the colouring. Compared with the uncoloured one, it shows the points dropped for lack of a colour |
+| Output point cloud (colored) | The result of the coloring. Compared with the uncolored one, it shows the points dropped for lack of a color |
 
-Mouse: left drag rotates, right drag moves, the wheel zooms, a double click makes that point the centre of rotation. **Show all** fits the whole cloud. Switching the preview keeps the time mark and the zoom, and moves the view to the pose at that time.
+Mouse: left drag rotates, right drag moves, the wheel zooms, a double click makes that point the center of rotation. **Show all** fits the whole point cloud. Switching the preview keeps the time mark and the zoom, and moves the view to the pose at that time.
 
 The **Display** settings in the right panel:
 
-- **Point colors**: colorized (the camera images' colours), reflectivity, height, session, plain. Remembered separately for the scan and output point clouds. The height range can be changed at the legend's ends; **Fit to view** fits it to the points visible, **Auto** goes back.
+- **Point colors**: colorized (the camera images' colors), reflectivity, height, session, plain. Remembered separately for the scan and output point clouds. The height range can be changed at the legend's ends; **Fit to view** fits it to the points visible, **Auto** goes back.
 - **Range**: limits the scan point cloud to some seconds around the time chosen, or from the start to the time chosen.
 - **Adjust the point size automatically**: as Potree's adaptive size, makes the points larger to the spacing of the points drawn. Off by default for the scan point clouds.
-- **Drawn points** (5 million by default): the most points drawn on the whole screen. Coarse points of the whole cloud always stay; zooming and moving loads the details needed in the background.
+- **Drawn points** (5 million by default): the most points drawn on the whole screen. Coarse points of the whole point cloud always stay; zooming and moving loads the details needed in the background.
 
-The output point cloud is read from a Potree octree. When there is none, or it is older than the cloud, it is made when opened (about 40 seconds for 100 million points).
+The output point cloud is read from a Potree octree. When there is none, or it is older than the point cloud, it is made when opened (about 40 seconds for 100 million points).
 
 ## Checking the quality
 
-The trajectory optimisation writes the quality of each section (about 0.1 s) to `opt_quality.txt`:
+The trajectory optimization writes the quality of each section (about 0.1 s) to `opt_quality.txt`:
 
 - plane misfit (RMS, and the share of points on planes)
 - disagreement with the IMU (the preintegration's χ² per degree of freedom)
 - RTK residuals (horizontal, vertical)
 - correction (how much the odometry's motion over 1 s was corrected, in rotation and translation)
 
-Choosing a metric in **Color by** in the right panel's **Trajectory** paints the trajectory from green to red and lists the sections that look wrong (the highest 1 s averages, at least 5 s apart). Clicking one moves there and marks it. The value shown red can be changed. The time bar is painted in the same colours, with the listed sections as triangles above and the loops' times as dots below.
+Choosing a metric in **Color by** in the right panel's **Trajectory** paints the trajectory from green to red and lists the sections that look wrong (the highest 1 s averages, at least 5 s apart). Clicking one moves there and marks it. The value shown red can be changed. The time bar is painted in the same colors, with the listed sections as triangles above and the loops' times as dots below.
 
 Choosing a time on the time bar, or with Ctrl+click on the trajectory, shows the camera images (left and right) of that time in the right panel's **Images**.
 
@@ -87,28 +89,28 @@ Choosing a time on the time bar, or with Ctrl+click on the trajectory, shows the
 
 The right panel's **Trajectory** has a list of each kind under **Corrections**. Press **Add**, then click the trajectory twice (a section's start and end; for a loop, two times it passed the same place). Esc cancels.
 
-| Kind | Colour | When to use it |
+| Kind | Color | When to use it |
 |---|---|---|
 | Sections without GNSS | purple | The RTK / PPK positions in the section are not used. For false fixes, and bad positions under buildings or trees |
 | Sections with heading held to the IMU | light blue | In the section, LIO does not update the heading and the gyro bias from the LiDAR, and keeps the IMU's prediction. For round hills (concentric paths, round fences) and featureless slopes where the LiDAR slowly drags the heading |
 | Loops | yellow | Joins two times at the same place. There is also a **Start = end** button |
 
 - The marks at a correction's ends can be dragged along the trajectory. Click a section or a mark to select it, and Delete removes it. Selecting a row of the list lets you type the times of its ends; ⌖ goes to that time.
-- **Apply the corrections** redoes the trajectory optimisation, or from LIO when heading sections changed.
+- **Apply the corrections** redoes the trajectory optimization, or from LIO when heading sections changed.
 - The GNSS positions (white: used, orange: rejected by the validity check, purple: excluded) can be drawn over the trajectory from the right panel's **Display**. Hovering over one shows the solution's state and why it was used or not.
-- The corrections are written to `s20_edits.json` at each change. Ctrl+Z / Ctrl+Y (Ctrl+Shift+Z) undo and redo (up to 200 times). Ctrl+S (**Edit → Save corrections**) keeps the corrections as a revision in `edits_revisions/`; running the trajectory optimisation also keeps one when they differ from the previous revision. **Correction history** renames them, goes back to one, and deletes them.
+- The corrections are written to `s20_edits.json` at each change. Ctrl+Z / Ctrl+Y (Ctrl+Shift+Z) undo and redo (up to 200 times). Ctrl+S (**Edit → Save corrections**) keeps the corrections as a revision in `edits_revisions/`; running the trajectory optimization also keeps one when they differ from the previous revision. **Correction history** renames them, goes back to one, and deletes them.
 
 ## Several sessions
 
-Recordings of the same place made in several parts are joined into one trajectory and cloud by adding their raw folders with **Add session…**. The import and LIO run per session (`sessions/<session name>/`), and the trajectory optimisation and the later steps once for all the sessions.
+Recordings of the same place made in several parts are joined into one trajectory and point cloud by adding their raw folders with **Add session…**. The import and LIO run per session (`sessions/<session name>/`), and the trajectory optimization and the later steps once for all the sessions.
 
 - With GNSS (RTK / PPK), the sessions are placed by it.
 - Without GNSS (indoors and so on), the first session is the reference, and the others are connected to it by loops across sessions (two clicks on the trajectory) or point matches (clicks on the same feature in two sessions). Loops are easier when the paths pass the same spot. When they do not come close, use point matches, two pairs or more, far apart.
-- After the first placement, places passed again, within and across sessions, are found and registered cloud to cloud (revisits: **Processing settings → Trajectory optimization → Revisits**, on by default; see [How it works](processing.md), in Japanese). So loops are needed only for the placement. A loop fits best at times when the two sessions see the same place in the same direction.
-- Work folders made by earlier versions open with revisits off (so their results do not change). To use them, turn on **Use revisits** and run the optimisation again.
+- After the first placement, places passed again, within and across sessions, are found and registered by matching their point clouds (revisits: **Processing settings → Trajectory optimization → Revisits**, on by default; see [How it works](processing.md), in Japanese). So loops are needed only for the placement. A loop fits best at times when the two sessions see the same place in the same direction.
+- Work folders made by earlier versions open with revisits off (so their results do not change). To use them, turn on **Use revisits** and run the optimization again.
 - While adding point matches, the point a click would pick is shown at the pointer with its session's name and its distance from the camera (the distance tells you when it would pick a point behind). The points placed are marked P1, P2…; click a mark to select it, drag it onto another point of the same session to move it, Delete removes it. The list is by pairs of sessions, with each pair's current gap.
 
-A session's name is at first its raw folder's name. **⋯ → Rename…** on the session's row changes it (also with one session). The session's folder in the work folder and its name in the corrections are renamed, and the results stay usable. The raw folder keeps its name. The output clouds have fixed names (`pointcloud_colorized.laz` and so on), whatever the session's or the work folder's name.
+A session's name is at first its raw folder's name. **⋯ → Rename…** on the session's row changes it (also with one session). The session's folder in the work folder and its name in the corrections are renamed, and the results stay usable. The raw folder keeps its name. The output point clouds have fixed names (`pointcloud_colorized.laz` and so on), whatever the session's or the work folder's name.
 
 ## Viewing the raw data
 
@@ -123,7 +125,7 @@ With a large bag (around 20 GB) on an external HDD, reading the index the first 
 
 ## Device calibration
 
-**Tools → Device calibration…** with several work folders of the same device, already processed, makes a calibration file with the cameras' mounting, fisheye and principal points solved again. Image pose export, image pose refinement and colouring then use it. Include both outdoor recordings and indoor ones up close (outdoors alone, the last few mm of the mounting are not determined).
+**Tools → Device calibration…** with several work folders of the same device, already processed, makes a calibration file with the cameras' mounting, fisheye and principal points solved again. Image pose export, image pose refinement and coloring then use it. Include both outdoor recordings and indoor ones up close (outdoors alone, the last few mm of the mounting are not determined).
 
 ## Screenshots (for checking)
 

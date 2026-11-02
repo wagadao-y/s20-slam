@@ -9,6 +9,11 @@ use args::Args;
 
 fn main() -> Result<()> {
     let mut a = Args::from_env();
+    // an option, not a command: positional() skips it
+    if a.flag("--version") {
+        println!("s20 {}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
     let cmd = a.positional().unwrap_or_default();
     let job = Job::stderr();
     match cmd.as_str() {
@@ -148,7 +153,7 @@ fn main() -> Result<()> {
                     "--calib",
                     "<calibration.yaml with the device correction>",
                 )?,
-                cloud: req(&mut a, "--cloud", "<uncoloured cloud .las/.laz>")?,
+                cloud: req(&mut a, "--cloud", "<uncolored cloud .las/.laz>")?,
                 step: a.get("--step", 12)?,
                 holdout: a.get("--holdout", 0.2)?,
                 max_size: a.get("--max_size", 1800)?,
@@ -220,7 +225,7 @@ fn main() -> Result<()> {
                 calib: req(&mut a, "--calib", "<the device's calibration.yaml>")?,
                 points: a.get("--points", 500_000)?,
                 max_angle: a.get("--max_angle", 85.)?,
-                cloud: PathBuf::from(a.positional_req("coloured .las/.laz")?),
+                cloud: PathBuf::from(a.positional_req("colored .las/.laz")?),
                 out: PathBuf::from(a.positional_req("output folder")?),
             };
             threads(&mut a)?;
@@ -266,8 +271,18 @@ fn main() -> Result<()> {
             a.finish()?;
             eval::run(&est, &rf, align_s)?;
         }
+        "version" => {
+            a.finish()?;
+            println!("s20 {}", env!("CARGO_PKG_VERSION"));
+        }
         "" | "help" | "--help" => {
-            println!("{}", USAGE);
+            println!(
+                "s20 {}
+
+{}",
+                env!("CARGO_PKG_VERSION"),
+                USAGE
+            );
         }
         c => bail!("unknown command {c}"),
     }
@@ -767,16 +782,17 @@ const USAGE: &str = "usage:
       [--systems gps,glo,gal,bds,qzs] [--frequencies 3] [--estimate_ionosphere] [--estimate_troposphere]
       [--phase_snr_error 0] [--prefer_base_l2c]
   s20 licenses
+  s20 version
   s20 run <raw folder>[,<raw folder>...] <work folder> [--outdoor | --params file.json] [--no_rtk] [--no_color]
       [--redo] [--ppk] [--las] [--images] [--no_refine] [--device_calibration file.yaml] [--until step]
       (extract -> lio -> opt -> cloud -> export -> refine -> colorize; RTK is used when the receiver has fixes;
-       refine: every image's pose refined against the cloud for the colouring, and the cameras solved from
+       refine: every image's pose refined against the cloud for the coloring, and the cameras solved from
        the recording, or with --device_calibration (made by calibrate-cameras) used in place of the maker's;
        extraction and odometry are reused when present unless --redo; --params: parameters saved from the GUI;
-       point clouds are written as .laz, or .las with --las; --images: after the colouring, the photos with
+       point clouds are written as .laz, or .las with --las; --images: after the coloring, the photos with
        their refined poses in output/images as PointClouds Studio's and a COLMAP model beside them (output/sparse/0,
        masks, gauge.txt: the output folder opens as a dataset in Gaussian Splatting tools); several raw folders: sessions of one place,
-       kept in <work folder>/sessions/<raw folder name>; --until: stop after that step)
+       kept in <work folder>/sessions/<session name> (at first the raw folder's name); --until: stop after that step)
   s20 extract <raw folder> <data folder>   (indices of the points and images in the bag; IMU, GNSS)
   s20 images <data folder> <output folder>   (the camera JPEGs from the bag, as <side>/<side>_NNNNN.jpg)
   s20 temp <raw folder> <data folder>   (LiDAR core temperature from the info bag into temp.npy)
@@ -815,20 +831,20 @@ const USAGE: &str = "usage:
        points no image sees are dropped; made in squares split while one would take more than --tile_memory
        (0.5) of the memory available, the same result; --tile_memory 0: all at once; the coordinate
        frames are recorded in --data, the folder holding --images by default)
-  s20 refine-images --data <session data folder> --imgpose ImgPose.txt --calib calibration.yaml --cloud <uncoloured .las|laz>
+  s20 refine-images --data <session data folder> --imgpose ImgPose.txt --calib calibration.yaml --cloud <uncolored .las|laz>
       <out ImgPose.txt> [--fit_camera <out calibration.yaml> [--device_calibration]] [--step n] [--holdout f]
       [--max_size px] [--features n] [--gate px] [--search px] [--ratio r] [--tracks <out ImgPose.txt>] [--threads n]
       (every image's pose turned and moved a little so that features anchored on the cloud agree across
-       consecutive, simultaneous and seconds-apart images, for the colouring; --tracks: also the matches of
-       more pairs (two apart, the other camera's neighbouring frames, revisits) joined into tracks and
+       consecutive, simultaneous and seconds-apart images, for the coloring; --tracks: also the matches of
+       more pairs (two apart, the other camera's neighboring frames, revisits) joined into tracks and
        adjusted with free points held near the cloud's planes, the left and right images of a frame moving
        together, written there: the images agree with one another, for Gaussian Splatting; the trajectory
        and the cloud stay; --fit_camera also
        solves the cameras' mounts, fisheye angles and principal points and writes them as a calibration to
-       colour with, moving them freely from a maker's calibration, or with --device_calibration only a little
+       color with, moving them freely from a maker's calibration, or with --device_calibration only a little
        from one calibrate-cameras made; a report beside the output with the held-out residuals, overall and per image)
   s20 calibrate-device <work folder>... --out <calibration.yaml> [--threads n]
-      (calibrate-cameras from processed work folders of one device, as the GUI's 機体の校正: the image poses
+      (calibrate-cameras from processed work folders of one device, as the GUI's Device calibration: the image poses
        with the maker's calibration, the mounts, fisheye angles and principal points solved with them;
        the calibration to use with s20 run --device_calibration, and a report beside it)
   s20 calibrate-cameras <manifest.json> <out folder> [--check] [--step n] [--threads n]
@@ -836,7 +852,7 @@ const USAGE: &str = "usage:
        \"calib\", \"cloud\"} per recording, all with the same maker calibration; the mounts, fisheye angles and
        principal points are solved with every image's pose; <out>/calibration.yaml and report.json; --check
        also checks each recording with the cameras solved from the others)
-  s20 export-colmap <coloured .las|laz> <out folder> --data <session data folder> --imgpose ImgPose.txt
+  s20 export-colmap <colored .las|laz> <out folder> --data <session data folder> --imgpose ImgPose.txt
       --calib calibration.yaml [--points n] [--max_angle deg] [--threads n]
       (a COLMAP model for 3D Gaussian Splatting: images/ as recorded, sparse/0 with each camera as
        OPENCV_FISHEYE fitted to the S20 fisheye, the image poses and the cloud thinned to --points (500,000)
@@ -844,6 +860,6 @@ const USAGE: &str = "usage:
        gauge.txt (metric, z up) and export.json with the fit's error)
   s20 convert <in.las|laz> <out.las|laz>   (LAS <-> LAZ by extension; s20's layout: RGB, classification, normals)
   s20 potree <in.las|laz> [--no_rgb] [--gps_time]   (the Potree 2.0 octree, BROTLI, into <in>_converted as
-      PotreeConverter's: positions, intensities and colours, and the GPS times with --gps_time; run and the GUI
+      PotreeConverter's: positions, intensities and colors, and the GPS times with --gps_time; run and the GUI
       write it for the output clouds, export for trajectory.las with the times)
 ";

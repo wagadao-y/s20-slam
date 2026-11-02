@@ -797,7 +797,7 @@ fn raw_files_ui(ui: &mut egui::Ui, raw: &Path) {
 /// The topics of a bag; returns the one clicked.
 fn topics_ui(ui: &mut egui::Ui, bag: &RawBag, current: usize) -> Option<usize> {
     let mut chosen = None;
-    ui.weak(tl("時刻は bag の最初の記録からの秒。最大間隔は、隣り合うメッセージの記録時刻の差の最大（欠けている区間の目安）", "Times in seconds from the bag's first record. Max gap is the largest difference between neighbouring messages' record times (a hint of missing sections)"));
+    ui.weak(tl("時刻は bag の最初の記録からの秒。最大間隔は、隣り合うメッセージの記録時刻の差の最大（欠けている区間の目安）", "Times in seconds from the bag's first record. Max gap is the largest difference between neighboring messages' record times (a hint of missing sections)"));
     egui::ScrollArea::both()
         .id_salt("raw_topics")
         .auto_shrink([false, false])

@@ -11,11 +11,11 @@ The reference trajectory is a BA refined from the trajectory processed by PointC
 | | Pose-induced error | Surface thickness | 1 s error, max | 5 s error, max | 60 s error, median |
 |---|---:|---:|---:|---:|---:|
 | Python version (LIO→PGO→BA×3) | 3.42 mm | 9.84 mm | 37.5 cm | 42.8 cm | 3.2 cm |
-| s20-slam (LIO + trajectory optimisation) | 3.15 mm | 9.15 mm | 3.5 cm | 5.0 cm | 1.4 cm |
+| s20-slam (LIO + trajectory optimization) | 3.15 mm | 9.15 mm | 3.5 cm | 5.0 cm | 1.4 cm |
 
 Image consistency (independent of the LiDAR: the median epipolar error of SIFT matches in the fisheye images):
 
-| | Neighbours | Revisits |
+| | Neighbors | Revisits |
 |---|---:|---:|
 | BA from PointClouds Studio's trajectory (reference) | 2.44 px | 2.62 px |
 | Python version | 2.58 px | 2.87 px |
@@ -53,13 +53,13 @@ Indoors, 650 s, `s20 run` all at once, RTX 3060:
 |---|---:|
 | Import (a pass over the whole bag) | 21 s |
 | LIO | 15 s |
-| Trajectory optimisation | 1 min 38 s |
+| Trajectory optimization | 1 min 38 s |
 | Point cloud (95 million observations → 30.3 million points) | 207 s |
-| Colouring (GPU) | 216 s |
+| Coloring (GPU) | 216 s |
 
-The work folder is 704 MB. With the CPU only, the point cloud and the colouring took 417 s and 465 s.
+The work folder is 704 MB. With the CPU only, the point cloud and the coloring took 417 s and 465 s.
 
-LAZ compression: 19.62 million coloured points, 0.94 GB → 0.39 GB in 4.5 s. The normals (floats) compress poorly, so about 40% of the LAS remains. The output has been checked to read in PDAL and PotreeConverter 2.
+LAZ compression: 19.62 million colored points, 0.94 GB → 0.39 GB in 4.5 s. The normals (floats) compress poorly, so about 40% of the LAS remains. The output has been checked to read in PDAL and PotreeConverter 2.
 
 ## Findings
 

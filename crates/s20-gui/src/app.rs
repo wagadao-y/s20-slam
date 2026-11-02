@@ -454,6 +454,8 @@ pub struct App {
     height_clip: [Option<f64>; 2],
     processing_settings_open: bool,
     help_open: bool,
+    /// the window with the version and where to report problems
+    about_open: bool,
     /// the license window, and whether it shows the third-party licenses (else the NOTICE)
     licenses_open: bool,
     licenses_third_party: bool,
@@ -773,6 +775,7 @@ impl App {
             height_clip: [None; 2],
             processing_settings_open: false,
             help_open: false,
+            about_open: false,
             licenses_open: false,
             licenses_third_party: false,
             confirm_preset: None,
@@ -3582,8 +3585,8 @@ impl App {
                 )
             } else {
                 tl(
-                    "「未完了の工程から実行」を押してください",
-                    "Press \"Run from unfinished steps\"",
+                    "「未完了・未反映の工程から実行」を押してください",
+                    "Press \"Run from unfinished or unapplied steps\"",
                 )
             };
             ui.painter().text(
@@ -4309,6 +4312,7 @@ mod tests {
             height_clip: [None; 2],
             processing_settings_open: false,
             help_open: false,
+            about_open: false,
             licenses_open: false,
             licenses_third_party: false,
             confirm_preset: None,

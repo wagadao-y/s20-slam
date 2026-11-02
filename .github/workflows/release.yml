@@ -1,7 +1,7 @@
 name: Release
 
 # Pushing a tag v<version> (the workspace version in Cargo.toml) builds the executables,
-# zips them with the licenses and READMEs, and attaches the zip and its SHA-256 to a draft release.
+# zips them with the licenses, READMEs and docs, and attaches the zip and its SHA-256 to a draft release.
 # Check the draft, edit its notes and publish it on GitHub.
 
 on:
@@ -29,12 +29,17 @@ jobs:
             echo "::error::tag $GITHUB_REF_NAME does not match the version $version in Cargo.toml"
             exit 1
           fi
+      # the tag is pushed with its commit, before CI has tested it
+      - name: Test
+        run: cargo test --workspace --locked
       - name: Build
         shell: bash
         run: |
           # the source paths kept for panic messages without the runner's folders
           sysroot=$(cygpath -w "$(rustc --print sysroot)")
           export RUSTFLAGS="--remap-path-prefix=$sysroot=/rust --remap-path-prefix=$USERPROFILE\\.cargo\\registry\\src=/cargo --remap-path-prefix=$USERPROFILE\\.cargo\\git\\checkouts=/cargo-git --remap-path-prefix=$GITHUB_WORKSPACE=/s20-slam --remap-path-prefix=$USERPROFILE=/home"
+          # the repository's page, linked from Help → About
+          export S20_REPOSITORY="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
           cargo build --release --locked -p s20-gui -p s20-cli
       - name: Zip
         shell: pwsh
@@ -42,6 +47,8 @@ jobs:
           $name = "s20-slam-$env:GITHUB_REF_NAME"
           New-Item -ItemType Directory $name | Out-Null
           Copy-Item target/release/s20-gui.exe, target/release/s20.exe, LICENSE, NOTICE, THIRD-PARTY-LICENSES.txt, README.md, README_jp.md $name
+          # the documentation, so that the READMEs' links work in the zip
+          Copy-Item -Recurse docs $name
           Compress-Archive -Path $name -DestinationPath "$name-windows-x64.zip"
           # the checksum in the format of sha256sum, for checking the download
           $hash = (Get-FileHash "$name-windows-x64.zip" -Algorithm SHA256).Hash.ToLower()

@@ -446,13 +446,13 @@ const LABELS: &[(&str, &str, [&str; 2], [&str; 2])] = &[
     (
         "lio",
         "num_neighbors",
-        ["共分散の近傍点数", "Neighbours for covariances"],
+        ["共分散の近傍点数", "Neighbors for covariances"],
         ["", ""],
     ),
     (
         "lio",
         "search7",
-        ["隣のボクセルも探す", "Search the neighbouring voxels"],
+        ["隣のボクセルも探す", "Search the neighboring voxels"],
         [
             "対応点を、点の入るボクセルと面で接する 6 つのボクセルからも探します。既定はオフ",
             "Also looks for correspondences in the 6 voxels sharing a face with the point's voxel. Off by default",
@@ -839,7 +839,7 @@ const LABELS: &[(&str, &str, [&str; 2], [&str; 2])] = &[
         ["組にする距離 (m)", "Pair distance (m)"],
         [
             "部分地図の中心がこの距離以内なら位置合わせします",
-            "Submaps whose centres are within this distance are registered",
+            "Submaps whose centers are within this distance are registered",
         ],
     ),
     (
@@ -1757,7 +1757,7 @@ const LABELS: &[(&str, &str, [&str; 2], [&str; 2])] = &[
         ["露出補正の時間窓 (s)", "Exposure correction window (s)"],
         [
             "前後の画像の利得の平均で割って、隣の画像との段差と左右のカメラの差だけを直します（日向・木陰の明るさは写真のまま）。0 で全画像にそろえます",
-            "Divides by the mean gain of the images before and after, correcting only steps between neighbouring images and the difference between the left and right cameras (sun and shade stay as photographed). 0 matches all images",
+            "Divides by the mean gain of the images before and after, correcting only steps between neighboring images and the difference between the left and right cameras (sun and shade stay as photographed). 0 matches all images",
         ],
     ),
     (
@@ -1796,7 +1796,7 @@ const LABELS: &[(&str, &str, [&str; 2], [&str; 2])] = &[
         ],
         [
             "遠くの地面のように浅い角度で見る面は、z バッファの隣のセルの距離の傾きの分だけ隠れの判定を許します",
-            "Surfaces seen at a shallow angle, like distant ground, get occlusion tolerance by the slope of the distances of neighbouring z-buffer cells",
+            "Surfaces seen at a shallow angle, like distant ground, get occlusion tolerance by the slope of the distances of neighboring z-buffer cells",
         ],
     ),
 ];
