@@ -9,7 +9,7 @@ The same processing as the GUI, from the command line. `s20 help` shows every co
 ```
 s20 run <raw folder> <work folder> [--outdoor | --params file.json] [--no_rtk] [--ppk] [--no_color]
         [--las] [--images] [--no_refine] [--device_calibration file.yaml] [--redo] [--until step]
-s20 run <raw 1>,<raw 2>,... <work folder> --outdoor   # several sessions
+s20 run <raw 1>,<raw 2>,... <work folder> --outdoor   # multiple sessions
 ```
 
 The steps are extract → lio → opt → cloud → export → refine → colorize.
@@ -28,7 +28,7 @@ The steps are extract → lio → opt → cloud → export → refine → colori
 | `--redo` | Redo the import and LIO even when they are there |
 | `--until` | Stop after that step |
 
-With several sessions, the import and LIO run per session in `<work folder>/sessions/<session name>/` (at first the raw folder's name; only the sessions added are run), and the trajectory optimization and the later steps once for all the sessions.
+With multiple sessions, the import and LIO run per session in `<work folder>/sessions/<session name>/` (at first the raw folder's name; only the sessions added are run), and the trajectory optimization and the later steps once for all the sessions.
 
 ## One step at a time
 
@@ -42,8 +42,8 @@ s20 refine-images --data <data> --imgpose runs/ImgPose.txt --calib calibration.y
 s20 colorize out/cloud.laz out/cloud_col.laz --images <data>/images --imgpose runs/ImgPose.txt --calib calibration.yaml
 ```
 
-- Times are seconds from the session's first scan; negative values are seconds back from its end. With several sessions, give `<session name>@<s>` or `<number>@<s>`.
-- `opt` given several LIO trajectories, separated by commas, solves them as several sessions (`data` needs `sessions.txt` and the joined `imu.npy` / `gnss.npy`, which `s20 run` makes). Without GNSS, the first session is the reference, and the others are placed by loops across sessions or `--match [session:]x,y,z=[session:]x,y,z` (coordinates of the same feature, two pairs or more per pair of sessions).
+- Times are seconds from the session's first scan; negative values are seconds back from its end. With multiple sessions, give `<session name>@<s>` or `<number>@<s>`.
+- `opt` given multiple LIO trajectories, separated by commas, solves them as multiple sessions (`data` needs `sessions.txt` and the joined `imu.npy` / `gnss.npy`, which `s20 run` makes). Without GNSS, the first session is the reference, and the others are placed by loops across sessions or `--match [session:]x,y,z=[session:]x,y,z` (coordinates of the same feature, two pairs or more per pair of sessions).
 - `opt` uses revisits ([How it works](processing.md), in Japanese); `--no_revisits` turns them off. `--revisit_dist m` (the distance to pair places), `--revisit_inliers f` (the least overlap), `--revisit_path_sd k` (the factor of the standard deviation along the path), `--robust sd` and others change the settings. `s20 eval-revisits <data> <opt_knots.txt> [out.csv]` registers the trajectory's pairs of the same place again and writes the width of the doubling per pair to a CSV.
 - `cloud`'s `--config` is a JSON of the point cloud settings; missing items take the defaults.
 - `colorize` reads the images from `<data>/images` when the files are there, else the JPEGs in the bag.

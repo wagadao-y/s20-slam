@@ -13,7 +13,7 @@ A post-processing app for the **SHARE SLAM S20**. From the S20's raw recording f
 - **Trajectory**: LiDAR–inertial odometry, then a global optimization with the IMU, the planes of the point cloud and, outdoors, the device's RTK or PPK computed from `BASE.BIN` / `ROVER_PPKRAW.bin` (the positioning engine is built in).
 - **Point cloud**: passers-by, cars, mirror images and haze removed, surfaces sharpened, then colored from the two fisheye cameras. Written as LAZ / LAS with a Potree 2.0 octree beside it.
 - **Checking and fixing**: preview the scans and the output point cloud, color the trajectory by quality, and fix problem sections yourself (loops, sections without GNSS, sections with the heading held to the IMU).
-- **Several sessions** of the same place joined into one trajectory and point cloud.
+- **Multiple sessions** of the same place joined into one trajectory and point cloud.
 - **Images for 3D Gaussian Splatting**: the photos with refined poses as a COLMAP model.
 
 ## Download
@@ -68,6 +68,15 @@ Once you have processed a few recordings of your device, **Tools → Device cali
 - Choose some processed work folders. Include both outdoor recordings and indoor ones that see things up close (the last few mm of the mounting are only determined close up). Each recording takes 2-4 minutes.
 - Once saved, it is used for every recording of the same device. Recordings already processed use it when redone from **Trajectory and image pose export**.
 
+## Multiple sessions
+
+To join recordings of the same place made in multiple sessions, add the other raw folders with **Add session…** in the left panel. They are optimized together as one trajectory and point cloud.
+
+- **With RTK or PPK** (outdoors): the sessions are placed by GNSS. Nothing more is needed.
+- **Without GNSS** (indoors and so on): the first session is the reference, and each other session needs to be connected to it once. In the right panel's **Trajectory**, add a **loop** at a place both sessions passed (click both trajectories there), or **point matches** on the same features. A session not connected yet shows **Not connected** in the session list. After that, places passed again are found automatically (revisits).
+
+See [Multiple sessions](docs/gui.md#multiple-sessions) in the GUI guide for more.
+
 ## If the result is wrong
 
 - **The trajectory drifts or the point cloud is doubled**: open **Trajectory** in the right panel, color it by a quality metric and look at the listed sections. Add a **loop** where you passed the same place twice (or **Start = end**), then **Apply the corrections**.
@@ -81,13 +90,13 @@ See the [GUI guide](docs/gui.md) for more.
 
 ```
 s20 run <raw folder> <work folder> [--outdoor] [--ppk] [--no_rtk] [--no_color] [--las] [--images]
-s20 run <raw 1>,<raw 2>,... <work folder> --outdoor      # several sessions of one place
+s20 run <raw 1>,<raw 2>,... <work folder> --outdoor      # multiple sessions of one place
 s20 help                                                 # every command and option
 ```
 
 ## Feedback
 
-s20-slam has been tested on one S20 only (see [Known issues](docs/known-issues.md)). Problems, questions and requests are welcome as [Issues](../../issues). For a problem, please include the version (**Help → About**) and the log in the work folder's `logs/`.
+s20-slam was made for my own use and has been tested on one S20 only (see [Known issues](docs/known-issues.md)), so support is best effort. Problems, questions and requests are welcome as [Issues](../../issues), though replies may take time. For a problem, please include the version (**Help → About**) and the log in the work folder's `logs/`.
 
 ## Documentation
 

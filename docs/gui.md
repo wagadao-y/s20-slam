@@ -100,9 +100,9 @@ The right panel's **Trajectory** has a list of each kind under **Corrections**. 
 - The GNSS positions (white: used, orange: rejected by the validity check, purple: excluded) can be drawn over the trajectory from the right panel's **Display**. Hovering over one shows the solution's state and why it was used or not.
 - The corrections are written to `s20_edits.json` at each change. Ctrl+Z / Ctrl+Y (Ctrl+Shift+Z) undo and redo (up to 200 times). Ctrl+S (**Edit → Save corrections**) keeps the corrections as a revision in `edits_revisions/`; running the trajectory optimization also keeps one when they differ from the previous revision. **Correction history** renames them, goes back to one, and deletes them.
 
-## Several sessions
+## Multiple sessions
 
-Recordings of the same place made in several parts are joined into one trajectory and point cloud by adding their raw folders with **Add session…**. The import and LIO run per session (`sessions/<session name>/`), and the trajectory optimization and the later steps once for all the sessions.
+Recordings of the same place made in multiple sessions are joined into one trajectory and point cloud by adding their raw folders with **Add session…**. The import and LIO run per session (`sessions/<session name>/`), and the trajectory optimization and the later steps once for all the sessions.
 
 - With GNSS (RTK / PPK), the sessions are placed by it.
 - Without GNSS (indoors and so on), the first session is the reference, and the others are connected to it by loops across sessions (two clicks on the trajectory) or point matches (clicks on the same feature in two sessions). Loops are easier when the paths pass the same spot. When they do not come close, use point matches, two pairs or more, far apart.

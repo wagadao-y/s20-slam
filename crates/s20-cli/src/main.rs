@@ -791,7 +791,7 @@ const USAGE: &str = "usage:
        extraction and odometry are reused when present unless --redo; --params: parameters saved from the GUI;
        point clouds are written as .laz, or .las with --las; --images: after the coloring, the photos with
        their refined poses in output/images as PointClouds Studio's and a COLMAP model beside them (output/sparse/0,
-       masks, gauge.txt: the output folder opens as a dataset in Gaussian Splatting tools); several raw folders: sessions of one place,
+       masks, gauge.txt: the output folder opens as a dataset in Gaussian Splatting tools); multiple raw folders: sessions of one place,
        kept in <work folder>/sessions/<session name> (at first the raw folder's name); --until: stop after that step)
   s20 extract <raw folder> <data folder>   (indices of the points and images in the bag; IMU, GNSS)
   s20 images <data folder> <output folder>   (the camera JPEGs from the bag, as <side>/<side>_NNNNN.jpg)
@@ -815,7 +815,7 @@ const USAGE: &str = "usage:
       [--edits s20_edits.json] [--no_revisits] [--revisit_len s] [--revisit_dist m] [--revisit_inliers f] [--revisit_path_sd k] [--revisit_min_weak r] [--robust sd]
       [--ppk ppk.json[,ppk.json...]] [--match [session:]x,y,z=[session:]x,y,z]
       (times: seconds from the first scan of a session, [session@]t with the session's name or number; negative: from its end;
-       several sessions without --rtk / --ppk: the first is the reference, the others are placed by loops between sessions
+       multiple sessions without --rtk / --ppk: the first is the reference, the others are placed by loops between sessions
        or by --match, the same feature picked in both sessions' odometry worlds, two pairs or more for a session pair) [--no_couple] [--couple 1,1,1] [--cg_tol x] [--loop_cg_tol x] [--cg_max n] [--extra_iters n] [--rmin m] [--rmax m] [--imu_shift s] [--threads n]
   s20 cloud <data folder> <traj.txt> <out.las|laz> [--config params.json] [--trim_still m] [--rmax m] [--threads n]
       (free space on 2 cm and 1 cm voxels, isolated points, projection onto planes of all observations,

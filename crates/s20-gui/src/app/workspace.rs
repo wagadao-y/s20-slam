@@ -2080,11 +2080,11 @@ impl Preview {
         match self {
             Self::ScansDevice => tl(
                 "生のスキャンを、機体が撮影中に推定して保存した軌跡（frame_pose.txt）で                 そのまま配置する（複数セッションは横に並べる）。軌跡の記録がない区間の点は出さない",
-                "Places the raw scans as they are with the trajectory the device estimated and saved while recording (frame_pose.txt) (several sessions side by side). Points in sections without a recorded trajectory are left out",
+                "Places the raw scans as they are with the trajectory the device estimated and saved while recording (frame_pose.txt) (multiple sessions side by side). Points in sections without a recorded trajectory are left out",
             ),
             Self::ScansLio => tl(
                 "生のスキャンを LIO の軌跡で配置する（複数セッションは横に並べる）",
-                "Places the raw scans with the LIO trajectory (several sessions side by side)",
+                "Places the raw scans with the LIO trajectory (multiple sessions side by side)",
             ),
             Self::ScansOpt => tl(
                 "生のスキャンを最適化した軌跡で配置する",

@@ -16,7 +16,7 @@ The issues known so far, and what is planned.
 ## Features
 
 - **Finding loops automatically**: revisits find and join the same place when it is off by up to about 2 m. Places off by more, and the start and end of a recording that starts and ends at the same place when they are far apart, need to be given by hand (**Start = end**).
-- **Several sessions without GNSS**: the first placement of the sessions needs loops across sessions or point matches given by hand. Where the pairs are only along a path, as a trail in a wood, a few tens of cm can remain even with revisits.
+- **Multiple sessions without GNSS**: the first placement of the sessions needs loops across sessions or point matches given by hand. Where the pairs are only along a path, as a trail in a wood, a few tens of cm can remain even with revisits.
 - **Time offset between the IMU and the LiDAR** is not estimated.
 - **Recordings for 3DGS** (0.5 s intervals, far and near views) are still to be checked.
 
