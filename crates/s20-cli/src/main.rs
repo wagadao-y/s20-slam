@@ -699,16 +699,12 @@ fn run(a: &mut Args, job: &Job) -> Result<()> {
     let no_refine = a.flag("--no_refine");
     let device = a.get_str("--device_calibration")?;
     let params = a.get_str("--params")?;
-    let name = a.get_str("--name")?;
     let until = a.get_str("--until")?;
     let raw = a.positional_req("raw folder (comma separated: one per session)")?;
     let work = PathBuf::from(a.positional_req("work folder")?);
     a.finish()?;
     let raws: Vec<PathBuf> = raw.split(',').map(PathBuf::from).collect();
     let mut cfg = s20_pipeline::RunConfig::with_sessions(raws, work);
-    if let Some(n) = name {
-        cfg.name = n;
-    }
     cfg.params = match params {
         Some(f) => s20_pipeline::ProcessParams::from_json(
             &std::fs::read_to_string(&f).with_context(|| format!("read {f}"))?,
@@ -772,7 +768,7 @@ const USAGE: &str = "usage:
       [--phase_snr_error 0] [--prefer_base_l2c]
   s20 licenses
   s20 run <raw folder>[,<raw folder>...] <work folder> [--outdoor | --params file.json] [--no_rtk] [--no_color]
-      [--redo] [--name name] [--ppk] [--las] [--images] [--no_refine] [--device_calibration file.yaml] [--until step]
+      [--redo] [--ppk] [--las] [--images] [--no_refine] [--device_calibration file.yaml] [--until step]
       (extract -> lio -> opt -> cloud -> export -> refine -> colorize; RTK is used when the receiver has fixes;
        refine: every image's pose refined against the cloud for the colouring, and the cameras solved from
        the recording, or with --device_calibration (made by calibrate-cameras) used in place of the maker's;

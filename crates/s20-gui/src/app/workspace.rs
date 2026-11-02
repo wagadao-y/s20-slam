@@ -1990,13 +1990,13 @@ impl Preview {
                 "Places the raw scans with the optimized trajectory",
             ),
             Self::OutputUncolored => tl(
-                "点群生成で出力した点群（output フォルダーの *_uncolorized）。\
+                "点群生成で出力した点群（output フォルダーの pointcloud_uncolorized）。\
                  着色で色が付かずに落ちる点も含む",
-                "The point cloud written by the point cloud step (*_uncolorized in the output folder). Includes the points colorization drops for lack of a color",
+                "The point cloud written by the point cloud step (pointcloud_uncolorized in the output folder). Includes the points colorization drops for lack of a color",
             ),
             Self::Output => tl(
-                "着色で出力した点群（output フォルダーの *_colorized）",
-                "The point cloud written by colorization (*_colorized in the output folder)",
+                "着色で出力した点群（output フォルダーの pointcloud_colorized）",
+                "The point cloud written by colorization (pointcloud_colorized in the output folder)",
             ),
         }
     }

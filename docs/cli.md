@@ -6,7 +6,7 @@ GUI と同じ処理をコマンドラインで実行します。すべてのコ�
 
 ```
 s20 run <生データフォルダー> <作業フォルダー> [--outdoor | --params file.json] [--no_rtk] [--ppk] [--no_color]
-        [--las] [--images] [--no_refine] [--device_calibration file.yaml] [--name 名前] [--redo] [--until 工程]
+        [--las] [--images] [--no_refine] [--device_calibration file.yaml] [--redo] [--until 工程]
 s20 run <生データ1>,<生データ2>,... <作業フォルダー> --outdoor   # 複数セッション
 ```
 

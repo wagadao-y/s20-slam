@@ -133,12 +133,13 @@ pub fn calibrate(works: &[RunConfig], job: &Job) -> Result<(String, serde_json::
             tracks: None,
             out: PathBuf::new(),
         };
-        job.log(&format!("{}: collecting observations", cfg.name));
+        let name = crate::folder_name(&cfg.work);
+        job.log(&format!("{name}: collecting observations"));
         let part = job.part(
             0.9 * i as f64 / works.len() as f64,
             0.9 * (i + 1) as f64 / works.len() as f64,
         );
-        recordings.push((cfg.name.clone(), s20_visual::run::collect(&input, &part)?));
+        recordings.push((name, s20_visual::run::collect(&input, &part)?));
     }
     job.log("solving the cameras with every image's pose");
     job.report("device calibration", 9, 10);

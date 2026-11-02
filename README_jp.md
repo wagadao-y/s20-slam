@@ -50,8 +50,8 @@ exe にはコード署名がないため、初回の起動で「Windows によ�
 
 | ファイル | |
 |---|---|
-| `<作業フォルダー名>_colorized.laz` | 着色済みの点群（法線つき） |
-| `<作業フォルダー名>_uncolorized.laz` | 着色前の点群 |
+| `pointcloud_colorized.laz` | 着色済みの点群（法線つき） |
+| `pointcloud_uncolorized.laz` | 着色前の点群 |
 | `*_converted/` | 点群と軌跡の Potree 2.0 の 8 分木 |
 | `trajectory.txt`、`trajectory.las` | 軌跡（GPS 時刻つき） |
 | `coordinate_frame.json` | GNSS を使ったとき：ローカル座標の原点 |

@@ -50,8 +50,8 @@ The language is chosen from the menu bar (English / 日本語). Until then it fo
 
 | File | |
 |---|---|
-| `<work folder name>_colorized.laz` | The coloured point cloud (with normals) |
-| `<work folder name>_uncolorized.laz` | The cloud before colouring |
+| `pointcloud_colorized.laz` | The coloured point cloud (with normals) |
+| `pointcloud_uncolorized.laz` | The cloud before colouring |
 | `*_converted/` | Potree 2.0 octrees of the clouds and the trajectory |
 | `trajectory.txt`, `trajectory.las` | The trajectory (with GPS times) |
 | `coordinate_frame.json` | When GNSS was used: the origin of the local coordinates |

@@ -1263,8 +1263,6 @@ pub struct SessionCfg {
 pub struct RunConfig {
     pub sessions: Vec<SessionCfg>,
     pub work: PathBuf,
-    /// the name of the products (`<name>_colorized.laz`): the work folder's, one session or several
-    pub name: String,
     /// parameters of the steps
     pub params: ProcessParams,
     /// use RTK when the receiver has fixes
@@ -1325,7 +1323,6 @@ impl RunConfig {
     /// A run of sessions as listed (in `project.json`).
     pub fn of_sessions(sessions: Vec<SessionCfg>, work: PathBuf) -> Self {
         RunConfig {
-            name: folder_name(&work),
             sessions,
             work,
             params: ProcessParams::default(),
@@ -1653,13 +1650,15 @@ impl RunConfig {
     fn cloud_ext(&self) -> &'static str {
         if self.laz { "laz" } else { "las" }
     }
+    /// The cloud of the point cloud step, by a fixed name: the work folder can be renamed or moved.
     pub fn uncolored(&self) -> PathBuf {
         self.output()
-            .join(format!("{}_uncolorized.{}", self.name, self.cloud_ext()))
+            .join(format!("pointcloud_uncolorized.{}", self.cloud_ext()))
     }
+    /// The coloured cloud, by a fixed name as [`RunConfig::uncolored`].
     pub fn colored(&self) -> PathBuf {
         self.output()
-            .join(format!("{}_colorized.{}", self.name, self.cloud_ext()))
+            .join(format!("pointcloud_colorized.{}", self.cloud_ext()))
     }
 
     /// The sessions a step runs for: each session for [`Step::per_session`], else one (`None`).
@@ -2545,7 +2544,6 @@ mod tests {
         );
         let names: Vec<&str> = c.sessions.iter().map(|s| s.name.as_str()).collect();
         assert_eq!(names, ["garden", "garden_2", "room"]);
-        assert_eq!(c.name, format!("s20_sessions_run_{}", std::process::id()));
         assert_eq!(
             c.lio_file_of(1),
             work.join("sessions/garden_2/runs/lio.txt")
@@ -2601,12 +2599,17 @@ mod tests {
     }
 
     #[test]
-    fn products_are_named_by_the_work_folder() {
+    fn products_have_fixed_names() {
         let work = PathBuf::from("y/site");
         let one = RunConfig::new("x/room".into(), work.clone());
-        assert_eq!(one.colored(), work.join("output/site_colorized.laz"));
-        let two = RunConfig::with_sessions(vec!["x/room".into(), "x/hall".into()], work.clone());
-        assert_eq!(two.uncolored(), work.join("output/site_uncolorized.laz"));
+        assert_eq!(one.colored(), work.join("output/pointcloud_colorized.laz"));
+        let mut two =
+            RunConfig::with_sessions(vec!["x/room".into(), "x/hall".into()], work.clone());
+        two.laz = false;
+        assert_eq!(
+            two.uncolored(),
+            work.join("output/pointcloud_uncolorized.las")
+        );
     }
 
     #[test]
