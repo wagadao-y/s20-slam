@@ -1786,10 +1786,10 @@ impl RunConfig {
                 v
             }
             // the tracks' adjustment after the refinement (2: their points, 3: and the points matched
-            // along the epipolar lines): older refinements are rerun
+            // along the epipolar lines, 4: over wider pairs too, 5: joined without repeating an image): older refinements are rerun
             Step::Refine => match &self.device_calib {
-                Some(d) => serde_json::json!({"device_calibration": file_digest(d), "tracks": 3}),
-                None => serde_json::json!({"fit_camera": true, "tracks": 3}),
+                Some(d) => serde_json::json!({"device_calibration": file_digest(d), "tracks": 5}),
+                None => serde_json::json!({"fit_camera": true, "tracks": 5}),
             },
             Step::Lio => {
                 // without hold intervals as before, keeping older records current

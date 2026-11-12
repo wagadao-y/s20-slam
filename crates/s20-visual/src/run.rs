@@ -317,7 +317,8 @@ fn write_poses(path: &Path, rows: &[Vec<String>], poses: &[Pose]) -> Result<()> 
 }
 
 /// The features matched along the epipolar lines over the pairs of `f` with the adjusted `poses`,
-/// joined into tracks (a feature of one image at most once in a track); their anchors are unset.
+/// joined into tracks in the pairs' order (the nearest pairs first): a match that would put two
+/// features of one image into a track is left out; the anchors are unset.
 fn free_tracks(
     f: &FreeInput,
     poses: &[Pose],
@@ -383,11 +384,34 @@ fn free_tracks(
         }
         i
     }
+    // each root's images, kept sorted; a merge that would repeat an image is skipped
+    let mut images: Vec<Vec<usize>> = nodes.iter().map(|&(image, _)| vec![image]).collect();
     for (x, y) in edges {
         let (rx, ry) = (find(&mut parent, x), find(&mut parent, y));
-        if rx != ry {
-            parent[rx.max(ry)] = rx.min(ry);
+        if rx == ry {
+            continue;
         }
+        let (a, b) = (&images[rx], &images[ry]);
+        let (mut i, mut j, mut clash) = (0, 0, false);
+        while i < a.len() && j < b.len() {
+            match a[i].cmp(&b[j]) {
+                std::cmp::Ordering::Less => i += 1,
+                std::cmp::Ordering::Greater => j += 1,
+                std::cmp::Ordering::Equal => {
+                    clash = true;
+                    break;
+                }
+            }
+        }
+        if clash {
+            continue;
+        }
+        let (keep, gone) = (rx.min(ry), rx.max(ry));
+        let mut merged = std::mem::take(&mut images[gone]);
+        merged.extend_from_slice(&images[keep]);
+        merged.sort_unstable();
+        images[keep] = merged;
+        parent[gone] = keep;
     }
     let mut groups: HashMap<usize, Vec<usize>> = HashMap::new();
     for k in 0..nodes.len() {
@@ -633,7 +657,29 @@ pub fn collect(input: &Input, job: &Job) -> Result<Collected> {
                 None => Vec::new(),
             })
             .collect();
-        Some((meets, pairs.iter().map(|&(a, b, _)| (a, b)).collect()))
+        // the pairs of the guided matching, and for the epipolar search only (the poses are not
+        // adjusted with them) a camera's images three to six apart: wider baselines for the near
+        // surfaces the laser missed
+        let mut free_pairs: Vec<(usize, usize)> = pairs.iter().map(|&(a, b, _)| (a, b)).collect();
+        let mut seen: HashSet<(usize, usize)> = free_pairs
+            .iter()
+            .map(|&(a, b)| (a.min(b), a.max(b)))
+            .collect();
+        for s in 0..2 {
+            let mut v: Vec<usize> = (0..poses.names.len())
+                .filter(|&i| side(&poses.names[i]) == s && feats[i].is_some())
+                .collect();
+            v.sort_by(|&a, &b| poses.times[a].total_cmp(&poses.times[b]));
+            for k in 3..=6 {
+                for w in v.windows(k + 1) {
+                    let (a, b) = (w[0], w[k]);
+                    if poses.times[b] - poses.times[a] < 6. && seen.insert((a.min(b), a.max(b))) {
+                        free_pairs.push((a, b));
+                    }
+                }
+            }
+        }
+        Some((meets, free_pairs))
     } else {
         None
     };
