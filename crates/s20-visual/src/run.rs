@@ -2,9 +2,10 @@
 //! refine every image's pose, then (with `tracks`) adjust the matches joined into tracks with
 //! their points held near the cloud, and write the corrected `ImgPose.txt` with a report.
 
-use crate::anchors::{Cloud, Pose, V3, ZGrid, zgrid};
+use crate::anchors::{Cloud, Pose, V3, ZGrid, associate, zgrid};
 use crate::bundle;
 use crate::camera::Fisheye;
+use crate::epipolar;
 use crate::pairs::{Features, ImagePoses, Obs, View, features, observe_guided, read_image_poses};
 use crate::refine::{
     Cameras, Correction, Prepared, Settings, apply, mounted, pose_row, prepare, refine_camera,
@@ -48,6 +49,10 @@ pub struct Input {
     /// poses to this file: the images agree with one another (for Gaussian Splatting), while `out`,
     /// each image fitted to the cloud, is for the colouring
     pub tracks: Option<PathBuf>,
+    /// with `tracks`: also every track triangulated with those poses, written to this file with how
+    /// well it is determined (see [`write_track_points`]): image points for the surfaces the laser
+    /// missed, to start Gaussian Splatting from where the cloud has none
+    pub track_points: Option<PathBuf>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -311,6 +316,180 @@ fn write_poses(path: &Path, rows: &[Vec<String>], poses: &[Pose]) -> Result<()> 
     std::fs::write(path, text).with_context(|| path.display().to_string())
 }
 
+/// The features matched along the epipolar lines over the pairs of `f` with the adjusted `poses`,
+/// joined into tracks (a feature of one image at most once in a track); their anchors are unset.
+fn free_tracks(
+    f: &FreeInput,
+    poses: &[Pose],
+    cams: &[Fisheye; 2],
+    intrinsic: &[crate::refine::Intrinsic; 2],
+    names: &[String],
+) -> Vec<bundle::Track> {
+    // from 30 cm to a little beyond where the ray meets the cloud (6 m where it does not)
+    let (near, gate, ratio) = (0.3, 4., 0.75);
+    let matches: Vec<((usize, usize), (usize, usize))> = f
+        .pairs
+        .par_iter()
+        .flat_map_iter(|&(a, b)| {
+            let found = match (&f.feats[a], &f.feats[b]) {
+                (Some(fa), Some(fb)) => {
+                    let sa = epipolar::Side {
+                        pose: poses[a],
+                        cam: &cams[side(&names[a])],
+                        features: fa,
+                    };
+                    let sb = epipolar::Side {
+                        pose: poses[b],
+                        cam: &cams[side(&names[b])],
+                        features: fb,
+                    };
+                    let far = |m: &[Option<f64>], i: usize| m[i].map_or(6., |d| d * 1.05 + 0.1);
+                    let (ma, mb) = (&f.meets[a], &f.meets[b]);
+                    epipolar::match_epipolar(
+                        &sa,
+                        &sb,
+                        &|i| far(ma, i),
+                        &|j| far(mb, j),
+                        near,
+                        gate,
+                        ratio,
+                    )
+                }
+                _ => Vec::new(),
+            };
+            found.into_iter().map(move |(i, j)| ((a, i), (b, j)))
+        })
+        .collect();
+    // union-find over (image, feature)
+    let mut id: HashMap<(usize, usize), usize> = HashMap::new();
+    let mut nodes: Vec<(usize, usize)> = Vec::new();
+    let mut parent: Vec<usize> = Vec::new();
+    let mut edges: Vec<(usize, usize)> = Vec::with_capacity(matches.len());
+    for &(x, y) in &matches {
+        let mut node = |k: (usize, usize)| -> usize {
+            *id.entry(k).or_insert_with(|| {
+                nodes.push(k);
+                parent.push(parent.len());
+                parent.len() - 1
+            })
+        };
+        let (nx, ny) = (node(x), node(y));
+        edges.push((nx, ny));
+    }
+    fn find(parent: &mut [usize], mut i: usize) -> usize {
+        while parent[i] != i {
+            parent[i] = parent[parent[i]];
+            i = parent[i];
+        }
+        i
+    }
+    for (x, y) in edges {
+        let (rx, ry) = (find(&mut parent, x), find(&mut parent, y));
+        if rx != ry {
+            parent[rx.max(ry)] = rx.min(ry);
+        }
+    }
+    let mut groups: HashMap<usize, Vec<usize>> = HashMap::new();
+    for k in 0..nodes.len() {
+        let r = find(&mut parent, k);
+        groups.entry(r).or_default().push(k);
+    }
+    let mut roots: Vec<usize> = groups.keys().copied().collect();
+    roots.sort_unstable();
+    roots
+        .into_iter()
+        .filter_map(|r| {
+            let m = &groups[&r];
+            let mut images: Vec<usize> = m.iter().map(|&k| nodes[k].0).collect();
+            images.sort_unstable();
+            if images.len() < 2 || images.windows(2).any(|w| w[0] == w[1]) {
+                return None;
+            }
+            Some(bundle::Track {
+                sightings: m
+                    .iter()
+                    .map(|&k| {
+                        let (image, feature) = nodes[k];
+                        let s = side(&names[image]);
+                        bundle::Sighting::new(
+                            image,
+                            f.feats[image].as_ref().unwrap().uv[feature],
+                            &cams[s],
+                            &intrinsic[s],
+                        )
+                    })
+                    .collect(),
+                anchor: V3::zeros(),
+                normal: V3::zeros(),
+                held: false,
+            })
+        })
+        .collect()
+}
+
+/// Every track of `sets` triangulated with `poses` (in the poses' and the cloud's frame), one line
+/// each: position, sightings, the time between its first and last image (s; short for anything seen
+/// only while passing once, such as the operator), the widest angle between its rays (degrees), the
+/// bearing residuals' median and largest (pixel-equivalents), the nearest sighting camera (m), the
+/// distance to the nearest cloud point (m; to where its features met the cloud without `cloud`) and
+/// the set it came from (0: the guided matches the poses were adjusted with, 1: matched along the
+/// epipolar lines). Returns how many were written and how many lie more than 5 cm from the cloud.
+pub fn write_track_points(
+    path: &Path,
+    sets: &[&[bundle::Track]],
+    poses: &[Pose],
+    times: &[f64],
+    cloud: Option<&Cloud>,
+) -> Result<(usize, usize)> {
+    let points: Vec<(bundle::TrackPoint, usize, f64)> = sets
+        .iter()
+        .enumerate()
+        .flat_map(|(set, tracks)| {
+            tracks
+                .par_iter()
+                .filter_map(|t| {
+                    let p = bundle::track_point(t, poses)?;
+                    let d = cloud.map_or(p.to_anchor, |c| c.distance(&p.x));
+                    Some((p, set, d))
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    let mut text = String::with_capacity(points.len() * 96);
+    text.push_str(
+        "# x y z sightings span_s angle_deg residual_median_px residual_max_px nearest_m to_cloud_m set\n",
+    );
+    let mut off = 0;
+    for (p, set, to_cloud) in &points {
+        let (lo, hi) = p
+            .images
+            .iter()
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), &i| {
+                (lo.min(times[i]), hi.max(times[i]))
+            });
+        if *to_cloud > 0.05 {
+            off += 1;
+        }
+        writeln!(
+            text,
+            "{:.5} {:.5} {:.5} {} {:.2} {:.2} {:.2} {:.2} {:.3} {:.3} {}",
+            p.x.x,
+            p.x.y,
+            p.x.z,
+            p.sightings,
+            hi - lo,
+            p.angle_deg,
+            p.residual_median,
+            p.residual_max,
+            p.nearest,
+            to_cloud,
+            set
+        )?;
+    }
+    std::fs::write(path, text).with_context(|| path.display().to_string())?;
+    Ok((points.len(), off))
+}
+
 /// An observation of the refinement (and of its checks): of its pairs, on a plane of the cloud.
 fn for_refinement(o: &Obs, k: Kind) -> bool {
     k != Kind::Track && o.planar()
@@ -338,6 +517,17 @@ pub struct Collected {
     /// images in some pair
     pub used: Vec<usize>,
     pub pairs: usize,
+    /// with `track_points`: what the matching along the epipolar lines needs after the adjustment
+    pub free: Option<FreeInput>,
+}
+
+/// The features, pairs and cloud kept for the matching along the epipolar lines
+/// ([`crate::epipolar`]), with each feature's depth where its ray meets the cloud (none: missed).
+pub struct FreeInput {
+    pub feats: Vec<Option<Features>>,
+    pub meets: Vec<Vec<Option<f64>>>,
+    pub pairs: Vec<(usize, usize)>,
+    pub cloud: Cloud,
 }
 
 pub fn collect(input: &Input, job: &Job) -> Result<Collected> {
@@ -427,7 +617,26 @@ pub fn collect(input: &Input, job: &Job) -> Result<Collected> {
             o.into_iter().map(move |o| (o, kind))
         })
         .collect();
-    drop(feats);
+    let free_parts = if input.track_points.is_some() {
+        let meets: Vec<Vec<Option<f64>>> = (0..poses.names.len())
+            .into_par_iter()
+            .map(|i| match &feats[i] {
+                Some(f) => {
+                    let cam = &cams[side(&poses.names[i])];
+                    f.uv.iter()
+                        .map(|&uv| {
+                            associate(uv, &grids[i], &poses.poses[i], cam, &cloud)
+                                .map(|an| (an.point - poses.poses[i].p).norm())
+                        })
+                        .collect()
+                }
+                None => Vec::new(),
+            })
+            .collect();
+        Some((meets, pairs.iter().map(|&(a, b, _)| (a, b)).collect()))
+    } else {
+        None
+    };
     job.check()?;
     // the refinement's observations first, in their order without the tracks, so that it and its
     // hold-out are as they were
@@ -471,6 +680,12 @@ pub fn collect(input: &Input, job: &Job) -> Result<Collected> {
         chain,
         used,
         pairs: pairs.len(),
+        free: free_parts.map(|(meets, pairs)| FreeInput {
+            feats,
+            meets,
+            pairs,
+            cloud,
+        }),
     })
 }
 
@@ -485,6 +700,7 @@ pub fn run(input: &Input, job: &Job) -> Result<serde_json::Value> {
         chain,
         used,
         pairs,
+        free,
     } = collect(input, job)?;
     // the refinement keeps to its pairs and to the features on planes; the rest is for the tracks
     let train: Vec<bool> = held
@@ -573,6 +789,24 @@ pub fn run(input: &Input, job: &Job) -> Result<serde_json::Value> {
             .map(|i| sol.pose(frame[i], &start[i]))
             .collect();
         write_poses(tracks_out, &poses.rows, &solved)?;
+        if let Some(points_out) = &input.track_points {
+            let started = std::time::Instant::now();
+            let loose = match &free {
+                Some(f) => free_tracks(f, &solved, &cams, &camera.intrinsic, &poses.names),
+                None => Vec::new(),
+            };
+            job.log(&format!(
+                "{} tracks matched along the epipolar lines ({:.1} s)",
+                loose.len(),
+                started.elapsed().as_secs_f64()
+            ));
+            let cloud = free.as_ref().map(|f| &f.cloud);
+            let (n, off) =
+                write_track_points(points_out, &[&tracks, &loose], &solved, &poses.times, cloud)?;
+            job.log(&format!(
+                "{n} track points written ({off} more than 5 cm from the cloud)"
+            ));
+        }
         let (b0, p0) = bundle::check(&tracks, &refined);
         let (b1, p1) = bundle::check(&tracks, &solved);
         let share = |v: &[f64], over: f64| {

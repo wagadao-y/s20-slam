@@ -76,6 +76,14 @@ impl Cloud {
         V3::from(self.xyz[i])
     }
 
+    /// The distance from `p` to the nearest cloud point (m).
+    pub fn distance(&self, p: &V3) -> f64 {
+        self.tree
+            .nearest_one::<SquaredEuclidean>(&[p.x, p.y, p.z])
+            .distance
+            .sqrt()
+    }
+
     fn within(&self, p: &V3, r: f64) -> Vec<usize> {
         self.tree
             .within_unsorted::<SquaredEuclidean>(&[p.x, p.y, p.z], r * r)

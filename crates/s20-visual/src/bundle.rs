@@ -235,6 +235,65 @@ pub fn triangulate(t: &Track, poses: &[Pose]) -> Option<V3> {
     a.try_inverse().map(|i| i * b)
 }
 
+/// A track triangulated with `poses`, with what tells how well it is determined (for the image
+/// points written beside the COLMAP model: surfaces the laser missed, such as those too close to it).
+pub struct TrackPoint {
+    pub x: V3,
+    pub sightings: usize,
+    /// the bearing residuals' median and largest (pixel-equivalents)
+    pub residual_median: f64,
+    pub residual_max: f64,
+    /// the widest angle between two sightings' rays (degrees): small for short baselines, whose
+    /// points spread along the rays
+    pub angle_deg: f64,
+    /// the nearest sighting camera's distance to the point (m)
+    pub nearest: f64,
+    /// the distance to where its features met the cloud (m), and whether that was on a plane: far
+    /// when the rays went through a hole in the cloud to a surface behind
+    pub to_anchor: f64,
+    pub planar: bool,
+    /// the sightings' images (indices into `poses`)
+    pub images: Vec<usize>,
+}
+
+/// `t` triangulated with `poses` (none when its rays are nearly parallel or the point is behind a
+/// sighting camera).
+pub fn track_point(t: &Track, poses: &[Pose]) -> Option<TrackPoint> {
+    let x = triangulate(t, poses)?;
+    let mut res = Vec::with_capacity(t.sightings.len());
+    let mut rays = Vec::with_capacity(t.sightings.len());
+    let mut nearest = f64::INFINITY;
+    for s in &t.sightings {
+        let p = &poses[s.image];
+        let (r, v) = s.residual(p, &x);
+        if v.dot(&s.bearing) <= 0. {
+            return None;
+        }
+        res.push(r.norm());
+        rays.push((p.r * s.bearing).normalize());
+        nearest = nearest.min(v.norm());
+    }
+    let mut angle: f64 = 0.;
+    for i in 0..rays.len() {
+        for j in i + 1..rays.len() {
+            angle = angle.max(rays[i].dot(&rays[j]).clamp(-1., 1.).acos());
+        }
+    }
+    let mut sorted = res;
+    sorted.sort_by(f64::total_cmp);
+    Some(TrackPoint {
+        x,
+        sightings: t.sightings.len(),
+        residual_median: sorted[sorted.len() / 2],
+        residual_max: sorted[sorted.len() - 1],
+        angle_deg: angle.to_degrees(),
+        nearest,
+        to_anchor: (x - t.anchor).norm(),
+        planar: t.planar(),
+        images: t.sightings.iter().map(|s| s.image).collect(),
+    })
+}
+
 /// The held-out tracks (three sightings or more) triangulated with `poses`: every sighting's
 /// bearing residual (pixel-equivalents) and every point's distance to its plane (m; of the tracks
 /// on a plane).
@@ -758,6 +817,69 @@ mod tests {
         let back = after_poses[10].r * truth[10].r.transpose();
         assert!(Rotation3::from_matrix_unchecked(back).angle() < 2e-4);
         assert!((after_poses[10].p - truth[10].p).norm() < 2e-3);
+    }
+
+    #[test]
+    fn a_track_point_is_its_rays_meeting_point_with_its_spread_and_distance_to_the_cloud() {
+        let cam = camera();
+        let (poses, _, _) = scene();
+        // a point in front of the wall, which the cloud missed: its features met the wall behind
+        let x = V3::new(1.2, 2.5, 1.0);
+        let wall = V3::new(1.2, 4., 0.9);
+        let sightings: Vec<Sighting> = poses
+            .iter()
+            .enumerate()
+            .filter_map(|(i, p)| {
+                let l = look(p, &x)?;
+                Some(Sighting::new(
+                    i,
+                    cam.project([l.x, l.y, l.z]),
+                    &cam,
+                    &[0.; 4],
+                ))
+            })
+            .collect();
+        let n = sightings.len();
+        assert!(n >= 6, "{n}");
+        let t = Track {
+            sightings,
+            anchor: wall,
+            normal: V3::new(0., 1., 0.),
+            held: false,
+        };
+        let p = track_point(&t, &poses).unwrap();
+        assert!((p.x - x).norm() < 1e-6, "{:?}", p.x);
+        assert_eq!(p.sightings, n);
+        assert!(p.residual_max < 1e-3, "{}", p.residual_max);
+        assert!((p.to_anchor - (x - wall).norm()).abs() < 1e-6);
+        assert!(p.planar);
+        // the widest angle is that of the farthest-apart cameras seeing it
+        let rays: Vec<V3> = t
+            .sightings
+            .iter()
+            .map(|s| (x - poses[s.image].p).normalize())
+            .collect();
+        let widest = rays
+            .iter()
+            .flat_map(|a| rays.iter().map(move |b| a.dot(b).clamp(-1., 1.).acos()))
+            .fold(0., f64::max)
+            .to_degrees();
+        assert!(
+            (p.angle_deg - widest).abs() < 1e-3,
+            "{} {widest}",
+            p.angle_deg
+        );
+        let nearest = t
+            .sightings
+            .iter()
+            .map(|s| (x - poses[s.image].p).norm())
+            .fold(f64::INFINITY, f64::min);
+        assert!((p.nearest - nearest).abs() < 1e-6);
+        // seen by one camera only from behind: none
+        let mut behind = poses.clone();
+        let s0 = t.sightings[0].image;
+        behind[s0].p = x + (x - poses[s0].p);
+        assert!(track_point(&t, &behind).is_none());
     }
 
     #[test]

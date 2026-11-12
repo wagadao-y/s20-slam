@@ -1607,6 +1607,12 @@ impl RunConfig {
     pub fn tracked_poses(&self) -> PathBuf {
         self.runs().join("ImgPose-3dgs.txt")
     }
+    /// [`Step::Refine`]'s tracks triangulated with [`RunConfig::tracked_poses`], with how well each
+    /// is determined: image points where the cloud has none, copied to the output by
+    /// [`Step::Images`] as `image_points.txt`.
+    pub fn tracked_points(&self) -> PathBuf {
+        self.runs().join("track-points.txt")
+    }
     /// The cameras [`Step::Refine`] solved from the recording (without a device calibration).
     pub fn refined_calib(&self) -> PathBuf {
         self.runs().join("calibration-refined.yaml")
@@ -1771,16 +1777,19 @@ impl RunConfig {
             },
             Step::Images => {
                 let mut v = serde_json::json!({"refined_poses": self.refine, "colmap": true});
-                // the COLMAP model of the tracks' poses: older exports are redone
+                // the COLMAP model of the tracks' poses, and their points beside it: older exports
+                // are redone
                 if self.refine {
                     v["colmap_poses"] = "tracks".into();
+                    v["image_points"] = true.into();
                 }
                 v
             }
-            // the tracks' adjustment after the refinement: older refinements are rerun
+            // the tracks' adjustment after the refinement (2: their points, 3: and the points matched
+            // along the epipolar lines): older refinements are rerun
             Step::Refine => match &self.device_calib {
-                Some(d) => serde_json::json!({"device_calibration": file_digest(d), "tracks": 1}),
-                None => serde_json::json!({"fit_camera": true, "tracks": 1}),
+                Some(d) => serde_json::json!({"device_calibration": file_digest(d), "tracks": 3}),
+                None => serde_json::json!({"fit_camera": true, "tracks": 3}),
             },
             Step::Lio => {
                 // without hold intervals as before, keeping older records current
@@ -2223,6 +2232,7 @@ impl RunConfig {
                     calib_out: self.device_calib.is_none().then(|| self.refined_calib()),
                     camera_prior: s20_visual::run::CameraPrior::MAKER,
                     tracks: Some(self.tracked_poses()),
+                    track_points: Some(self.tracked_points()),
                     out: self.refined_poses(),
                 };
                 s20_visual::run::run(&input, &job.named(step.key()))?;
@@ -2245,6 +2255,17 @@ impl RunConfig {
                     &self.output(),
                     &job.named(step.key()),
                 )?;
+                // the tracks' points beside the COLMAP model (image points where the cloud has
+                // none); an older copy goes when there are none
+                let points = self.tracked_points();
+                let copy = self.output().join("image_points.txt");
+                if colmap.is_some() && points.exists() {
+                    std::fs::copy(&points, &copy)
+                        .with_context(|| format!("copy to {}", copy.display()))?;
+                } else if copy.exists() {
+                    std::fs::remove_file(&copy)
+                        .with_context(|| format!("remove {}", copy.display()))?;
+                }
             }
             Step::Colorize => {
                 let (imgpose, calib) = self.colour_inputs();

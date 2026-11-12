@@ -168,6 +168,7 @@ fn main() -> Result<()> {
                     s20_visual::run::CameraPrior::MAKER
                 },
                 tracks: a.get_str("--tracks")?.map(PathBuf::from),
+                track_points: a.get_str("--track_points")?.map(PathBuf::from),
                 out: PathBuf::from(a.positional_req("output ImgPose.txt")?),
             };
             threads(&mut a)?;
@@ -613,6 +614,7 @@ fn calibrate_cameras(
             calib_out: None,
             camera_prior: s20_visual::run::CameraPrior::MAKER,
             tracks: None,
+            track_points: None,
         };
         job.log(&format!("{name}: collecting observations"));
         let c = s20_visual::run::collect(
@@ -791,7 +793,8 @@ const USAGE: &str = "usage:
        extraction and odometry are reused when present unless --redo; --params: parameters saved from the GUI;
        point clouds are written as .laz, or .las with --las; --images: after the coloring, the photos with
        their refined poses in output/images as PointClouds Studio's and a COLMAP model beside them (output/sparse/0,
-       masks, gauge.txt: the output folder opens as a dataset in Gaussian Splatting tools); multiple raw folders: sessions of one place,
+       masks, gauge.txt: the output folder opens as a dataset in Gaussian Splatting tools; output/image_points.txt:
+       the photos' feature tracks triangulated, image points where the cloud has none); multiple raw folders: sessions of one place,
        kept in <work folder>/sessions/<session name> (at first the raw folder's name); --until: stop after that step)
   s20 extract <raw folder> <data folder>   (indices of the points and images in the bag; IMU, GNSS)
   s20 images <data folder> <output folder>   (the camera JPEGs from the bag, as <side>/<side>_NNNNN.jpg)
@@ -833,12 +836,14 @@ const USAGE: &str = "usage:
        frames are recorded in --data, the folder holding --images by default)
   s20 refine-images --data <session data folder> --imgpose ImgPose.txt --calib calibration.yaml --cloud <uncolored .las|laz>
       <out ImgPose.txt> [--fit_camera <out calibration.yaml> [--device_calibration]] [--step n] [--holdout f]
-      [--max_size px] [--features n] [--gate px] [--search px] [--ratio r] [--tracks <out ImgPose.txt>] [--threads n]
+      [--max_size px] [--features n] [--gate px] [--search px] [--ratio r] [--tracks <out ImgPose.txt> [--track_points <out .txt>]] [--threads n]
       (every image's pose turned and moved a little so that features anchored on the cloud agree across
        consecutive, simultaneous and seconds-apart images, for the coloring; --tracks: also the matches of
        more pairs (two apart, the other camera's neighboring frames, revisits) joined into tracks and
        adjusted with free points held near the cloud's planes, the left and right images of a frame moving
-       together, written there: the images agree with one another, for Gaussian Splatting; the trajectory
+       together, written there: the images agree with one another, for Gaussian Splatting; --track_points:
+       the tracks triangulated with those poses, with how well each is determined (sightings, time span,
+       ray angle, residuals, distance to the cloud): image points where the cloud has none; the trajectory
        and the cloud stay; --fit_camera also
        solves the cameras' mounts, fisheye angles and principal points and writes them as a calibration to
        color with, moving them freely from a maker's calibration, or with --device_calibration only a little

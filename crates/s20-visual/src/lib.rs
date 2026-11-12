@@ -6,6 +6,7 @@ pub mod bundle;
 pub mod calibrate;
 pub mod camera;
 pub mod colmap;
+pub mod epipolar;
 pub mod image;
 pub mod joint;
 pub mod matching;

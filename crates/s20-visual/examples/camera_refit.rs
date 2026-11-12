@@ -42,6 +42,7 @@ fn main() -> Result<()> {
             calib_out: None,
             camera_prior: s20_visual::run::CameraPrior::MAKER,
             tracks: None,
+            track_points: None,
         };
         let c = collect(&input, &job)?;
         eprintln!(

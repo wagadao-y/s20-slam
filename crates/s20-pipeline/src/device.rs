@@ -131,6 +131,7 @@ pub fn calibrate(works: &[RunConfig], job: &Job) -> Result<(String, serde_json::
             calib_out: None,
             camera_prior: s20_visual::run::CameraPrior::MAKER,
             tracks: None,
+            track_points: None,
             out: PathBuf::new(),
         };
         let name = crate::folder_name(&cfg.work);
