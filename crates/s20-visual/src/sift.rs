@@ -1,5 +1,5 @@
 //! SIFT keypoints and descriptors, following OpenCV's implementation (4.x `sift.simd.hpp`): the
-//! image doubled first, 3 layers per octave from sigma 1.6, contrast threshold 0.04, edge ratio 10,
+//! image doubled first, 3 layers per octave from sigma 1.6, contrast threshold 0.04 (by default), edge ratio 10,
 //! 36-bin orientations with peaks above 80 % of the highest, 4x4x8 descriptors clipped at 0.2 and
 //! stored as bytes (x512).
 
@@ -9,7 +9,8 @@ use rayon::prelude::*;
 const LAYERS: usize = 3;
 const SIGMA: f32 = 1.6;
 const INIT_SIGMA: f32 = 0.5;
-const CONTRAST: f32 = 0.04;
+/// OpenCV's default contrast threshold
+pub const CONTRAST: f32 = 0.04;
 const EDGE: f32 = 10.;
 const BORDER: usize = 5;
 const MAX_STEPS: usize = 5;
@@ -195,7 +196,14 @@ fn pyramid(img: &Gray) -> Pyramid {
 }
 
 /// Sub-pixel refinement and the contrast and edge tests (OpenCV's adjustLocalExtrema).
-fn refine(dog: &[Gray], octave: usize, layer0: usize, x0: usize, y0: usize) -> Option<Keypoint> {
+fn refine(
+    dog: &[Gray],
+    octave: usize,
+    layer0: usize,
+    x0: usize,
+    y0: usize,
+    contrast: f32,
+) -> Option<Keypoint> {
     let img_scale = 1. / 255.;
     let (ds, d2s, dxs) = (img_scale * 0.5, img_scale, img_scale * 0.25);
     let (mut layer, mut x, mut y) = (layer0 as isize, x0 as isize, y0 as isize);
@@ -273,7 +281,7 @@ fn refine(dog: &[Gray], octave: usize, layer0: usize, x0: usize, y0: usize) -> O
     ];
     let contr =
         at(c, x, y) * img_scale + 0.5 * (grad[0] * sol[0] + grad[1] * sol[1] + grad[2] * sol[2]);
-    if contr.abs() * (LAYERS as f32) < CONTRAST {
+    if contr.abs() * (LAYERS as f32) < contrast {
         return None;
     }
     let v2 = at(c, x, y) * 2.;
@@ -513,8 +521,18 @@ fn descriptor(img: &Gray, kp: &Keypoint) -> [u8; 128] {
 
 /// Keypoints (in `img` pixels) and descriptors, the `max_features` strongest.
 pub fn detect(img: &Gray, max_features: usize) -> (Vec<Keypoint>, Vec<[u8; 128]>) {
+    detect_with(img, max_features, CONTRAST)
+}
+
+/// [`detect`] with another contrast threshold (lower: also the faint features, such as a wooden
+/// floor's).
+pub fn detect_with(
+    img: &Gray,
+    max_features: usize,
+    contrast: f32,
+) -> (Vec<Keypoint>, Vec<[u8; 128]>) {
     let pyr = pyramid(img);
-    let threshold = (0.5 * CONTRAST / LAYERS as f32 * 255.).floor();
+    let threshold = (0.5 * contrast / LAYERS as f32 * 255.).floor();
     let mut kps: Vec<Keypoint> = (0..pyr.dog.len())
         .into_par_iter()
         .flat_map(|o| {
@@ -558,7 +576,7 @@ pub fn detect(img: &Gray, max_features: usize) -> (Vec<Keypoint>, Vec<[u8; 128]>
                                     && v <= n.px[k]
                                     && around.iter().all(|&d| v <= at(p, d) && v <= at(n, d))
                             };
-                            if ext && let Some(kp) = refine(dog, o, l, x, y) {
+                            if ext && let Some(kp) = refine(dog, o, l, x, y, contrast) {
                                 found.push(kp);
                             }
                         }

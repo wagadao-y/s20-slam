@@ -16,9 +16,15 @@ pub struct Features {
     pub desc: Vec<[u8; 128]>,
 }
 
-/// SIFT on the image scaled to `max_size` on its long side, keypoints back in full pixels, those
-/// within 80 degrees of the axis.
-pub fn features(jpeg: &[u8], cam: &Fisheye, max_size: usize, count: usize) -> Result<Features> {
+/// SIFT on the image scaled to `max_size` on its long side (with the contrast threshold
+/// `contrast`), keypoints back in full pixels, those within 80 degrees of the axis.
+pub fn features(
+    jpeg: &[u8],
+    cam: &Fisheye,
+    max_size: usize,
+    count: usize,
+    contrast: f32,
+) -> Result<Features> {
     let full = image::decode(jpeg)?;
     let s = (max_size as f64 / full.w.max(full.h) as f64).min(1.);
     let (w, h) = (
@@ -26,7 +32,7 @@ pub fn features(jpeg: &[u8], cam: &Fisheye, max_size: usize, count: usize) -> Re
         ((full.h as f64) * s).round() as usize,
     );
     let small = image::resize_area(&full, w, h);
-    let (kps, desc) = sift::detect(&small, count);
+    let (kps, desc) = sift::detect_with(&small, count, contrast);
     let (sx, sy) = (w as f64 / full.w as f64, h as f64 / full.h as f64);
     let limit = 80f64.to_radians().cos();
     let mut f = Features {

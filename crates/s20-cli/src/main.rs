@@ -141,7 +141,14 @@ fn main() -> Result<()> {
                     a.get_str(k)?.with_context(|| format!("{k} {what}"))?,
                 ))
             };
-            let input = s20_visual::run::Input {
+            // other features for the epipolar search (each setting not given is the refinement's),
+            // read before the output, a positional argument
+            let (size, count, contrast) = (
+                a.get_str("--track_max_size")?,
+                a.get_str("--track_features")?,
+                a.get_str("--track_contrast")?,
+            );
+            let mut input = s20_visual::run::Input {
                 data: req(&mut a, "--data", "<session data folder with images.txt>")?,
                 imgpose: req(
                     &mut a,
@@ -158,6 +165,7 @@ fn main() -> Result<()> {
                 holdout: a.get("--holdout", 0.2)?,
                 max_size: a.get("--max_size", 1800)?,
                 features: a.get("--features", 8000)?,
+                contrast: a.get("--contrast", s20_visual::sift::CONTRAST)?,
                 gate: a.get("--gate", 25.)?,
                 search: a.get("--search", 80.)?,
                 ratio: a.get("--ratio", 0.75)?,
@@ -169,8 +177,22 @@ fn main() -> Result<()> {
                 },
                 tracks: a.get_str("--tracks")?.map(PathBuf::from),
                 track_points: a.get_str("--track_points")?.map(PathBuf::from),
+                track_features: None,
                 out: PathBuf::from(a.positional_req("output ImgPose.txt")?),
             };
+            if size.is_some() || count.is_some() || contrast.is_some() {
+                input.track_features = Some(s20_visual::run::FeatureSettings {
+                    max_size: size.map_or(Ok(input.max_size), |s| {
+                        s.parse().with_context(|| format!("--track_max_size {s}"))
+                    })?,
+                    count: count.map_or(Ok(input.features), |s| {
+                        s.parse().with_context(|| format!("--track_features {s}"))
+                    })?,
+                    contrast: contrast.map_or(Ok(input.contrast), |s| {
+                        s.parse().with_context(|| format!("--track_contrast {s}"))
+                    })?,
+                });
+            }
             threads(&mut a)?;
             a.finish()?;
             s20_visual::run::run(&input, &job)?;
@@ -608,6 +630,7 @@ fn calibrate_cameras(
             holdout: 0.2,
             max_size: 1800,
             features: 8000,
+            contrast: s20_visual::sift::CONTRAST,
             gate: 25.,
             search: 80.,
             ratio: 0.75,
@@ -615,6 +638,7 @@ fn calibrate_cameras(
             camera_prior: s20_visual::run::CameraPrior::MAKER,
             tracks: None,
             track_points: None,
+            track_features: None,
         };
         job.log(&format!("{name}: collecting observations"));
         let c = s20_visual::run::collect(
@@ -836,15 +860,19 @@ const USAGE: &str = "usage:
        frames are recorded in --data, the folder holding --images by default)
   s20 refine-images --data <session data folder> --imgpose ImgPose.txt --calib calibration.yaml --cloud <uncolored .las|laz>
       <out ImgPose.txt> [--fit_camera <out calibration.yaml> [--device_calibration]] [--step n] [--holdout f]
-      [--max_size px] [--features n] [--gate px] [--search px] [--ratio r] [--tracks <out ImgPose.txt> [--track_points <out .txt>]] [--threads n]
+      [--max_size px] [--features n] [--contrast c] [--gate px] [--search px] [--ratio r]
+      [--tracks <out ImgPose.txt> [--track_points <out .txt> [--track_max_size px] [--track_features n] [--track_contrast c]]] [--threads n]
       (every image's pose turned and moved a little so that features anchored on the cloud agree across
        consecutive, simultaneous and seconds-apart images, for the coloring; --tracks: also the matches of
        more pairs (two apart, the other camera's neighboring frames, revisits) joined into tracks and
        adjusted with free points held near the cloud's planes, the left and right images of a frame moving
        together, written there: the images agree with one another, for Gaussian Splatting; --track_points:
        the tracks triangulated with those poses, with how well each is determined (sightings, time span,
-       ray angle, residuals, distance to the cloud): image points where the cloud has none; the trajectory
-       and the cloud stay; --fit_camera also
+       ray angle, residuals, distance to the cloud): image points where the cloud has none, with
+       --track_*: the features matched along the epipolar lines found with other settings (finer, for faint
+       surfaces such as a wooden floor; those not given are the refinement's); the features: SIFT on the
+       images scaled to --max_size (1800) px on the long side, the --features (8000) strongest, contrast
+       threshold --contrast (0.04); the trajectory and the cloud stay; --fit_camera also
        solves the cameras' mounts, fisheye angles and principal points and writes them as a calibration to
        color with, moving them freely from a maker's calibration, or with --device_calibration only a little
        from one calibrate-cameras made; a report beside the output with the held-out residuals, overall and per image)

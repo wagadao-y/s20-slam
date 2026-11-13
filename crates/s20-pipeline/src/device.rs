@@ -125,6 +125,7 @@ pub fn calibrate(works: &[RunConfig], job: &Job) -> Result<(String, serde_json::
             holdout: 0.2,
             max_size: 1800,
             features: 8000,
+            contrast: s20_visual::sift::CONTRAST,
             gate: 25.,
             search: 80.,
             ratio: 0.75,
@@ -132,6 +133,7 @@ pub fn calibrate(works: &[RunConfig], job: &Job) -> Result<(String, serde_json::
             camera_prior: s20_visual::run::CameraPrior::MAKER,
             tracks: None,
             track_points: None,
+            track_features: None,
             out: PathBuf::new(),
         };
         let name = crate::folder_name(&cfg.work);

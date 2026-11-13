@@ -36,6 +36,7 @@ fn main() -> Result<()> {
             holdout: 0.2,
             max_size: 1800,
             features: 8000,
+            contrast: s20_visual::sift::CONTRAST,
             gate: 25.,
             search: 80.,
             ratio: 0.75,
@@ -43,6 +44,7 @@ fn main() -> Result<()> {
             camera_prior: s20_visual::run::CameraPrior::MAKER,
             tracks: None,
             track_points: None,
+            track_features: None,
         };
         let c = collect(&input, &job)?;
         eprintln!(

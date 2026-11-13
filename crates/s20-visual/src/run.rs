@@ -32,8 +32,11 @@ pub struct Input {
     pub out: PathBuf,
     /// share of observations held out for the check
     pub holdout: f64,
+    /// the features: SIFT on the images scaled to `max_size` on the long side, the `features`
+    /// strongest, with the contrast threshold `contrast` (OpenCV's 0.04)
     pub max_size: usize,
     pub features: usize,
+    pub contrast: f32,
     /// guided matching: accepted distance from the prediction, search radius (pixels), ratio test
     pub gate: f64,
     pub search: f64,
@@ -53,6 +56,17 @@ pub struct Input {
     /// well it is determined (see [`write_track_points`]): image points for the surfaces the laser
     /// missed, to start Gaussian Splatting from where the cloud has none
     pub track_points: Option<PathBuf>,
+    /// with `track_points`: other features for the matching along the epipolar lines (finer, for
+    /// the faint surfaces such as a wooden floor); none: those of the refinement
+    pub track_features: Option<FeatureSettings>,
+}
+
+/// How the features of an image are found (see [`Input::max_size`]).
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct FeatureSettings {
+    pub max_size: usize,
+    pub count: usize,
+    pub contrast: f32,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -594,7 +608,13 @@ pub fn collect(input: &Input, job: &Job) -> Result<Collected> {
             let name = &poses.names[i];
             let jpeg = s20_io::dataset::read_image(&input.data.join("images").join(name))
                 .with_context(|| name.clone())?;
-            let f = features(&jpeg, &cams[side(name)], input.max_size, input.features)?;
+            let f = features(
+                &jpeg,
+                &cams[side(name)],
+                input.max_size,
+                input.features,
+                input.contrast,
+            )?;
             features_part.report(
                 "features",
                 done.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1,
@@ -642,9 +662,44 @@ pub fn collect(input: &Input, job: &Job) -> Result<Collected> {
         })
         .collect();
     let free_parts = if input.track_points.is_some() {
+        // the finer features for the epipolar search, when asked for
+        let fine: Option<Vec<Option<Features>>> = match input.track_features {
+            Some(t) => {
+                let started = std::time::Instant::now();
+                let fine = (0..poses.names.len())
+                    .into_par_iter()
+                    .map(|i| -> Result<Option<Features>> {
+                        if feats[i].is_none() {
+                            return Ok(None);
+                        }
+                        job.check()?;
+                        let name = &poses.names[i];
+                        let jpeg =
+                            s20_io::dataset::read_image(&input.data.join("images").join(name))
+                                .with_context(|| name.clone())?;
+                        Ok(Some(features(
+                            &jpeg,
+                            &cams[side(name)],
+                            t.max_size,
+                            t.count,
+                            t.contrast,
+                        )?))
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                let n: usize = fine.iter().flatten().map(|f| f.uv.len()).sum();
+                job.log(&format!(
+                    "features for the epipolar search: {n} in {} images ({:.0} s)",
+                    used.len(),
+                    started.elapsed().as_secs_f64()
+                ));
+                Some(fine)
+            }
+            None => None,
+        };
+        let free_feats = fine.as_ref().unwrap_or(&feats);
         let meets: Vec<Vec<Option<f64>>> = (0..poses.names.len())
             .into_par_iter()
-            .map(|i| match &feats[i] {
+            .map(|i| match &free_feats[i] {
                 Some(f) => {
                     let cam = &cams[side(&poses.names[i])];
                     f.uv.iter()
@@ -679,7 +734,7 @@ pub fn collect(input: &Input, job: &Job) -> Result<Collected> {
                 }
             }
         }
-        Some((meets, free_pairs))
+        Some((meets, free_pairs, fine))
     } else {
         None
     };
@@ -726,8 +781,8 @@ pub fn collect(input: &Input, job: &Job) -> Result<Collected> {
         chain,
         used,
         pairs: pairs.len(),
-        free: free_parts.map(|(meets, pairs)| FreeInput {
-            feats,
+        free: free_parts.map(|(meets, pairs, fine)| FreeInput {
+            feats: fine.unwrap_or(feats),
             meets,
             pairs,
             cloud,

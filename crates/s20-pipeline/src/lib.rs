@@ -2226,6 +2226,7 @@ impl RunConfig {
                     holdout: 0.2,
                     max_size: 1800,
                     features: 8000,
+                    contrast: s20_visual::sift::CONTRAST,
                     gate: 25.,
                     search: 80.,
                     ratio: 0.75,
@@ -2233,6 +2234,7 @@ impl RunConfig {
                     camera_prior: s20_visual::run::CameraPrior::MAKER,
                     tracks: Some(self.tracked_poses()),
                     track_points: Some(self.tracked_points()),
+                    track_features: None,
                     out: self.refined_poses(),
                 };
                 s20_visual::run::run(&input, &job.named(step.key()))?;
