@@ -21,6 +21,10 @@ pub struct Settings {
     /// a point's distance to its plane (m), and the soft-L1 scale of that residual in these units
     pub plane_sigma: f64,
     pub plane_scale: f64,
+    /// a plane-held point's distance along its plane from where the starting poses' rays meet it
+    /// (m; soft-L1 with `plane_scale`): the plane alone lets the frames that see one surface slide
+    /// along it with their points (a shrine's door: 5 cm); zero: not held along
+    pub along_sigma: f64,
     /// prior on each frame's correction (rad, m)
     pub rot_sigma: f64,
     pub pos_sigma: f64,
@@ -39,6 +43,7 @@ impl Default for Settings {
             pixel: 1.5,
             plane_sigma: 0.005,
             plane_scale: 2.,
+            along_sigma: 0.03,
             rot_sigma: 1f64.to_radians(),
             pos_sigma: 0.05,
             rot_smooth: 0.5f64.to_radians(),
@@ -235,6 +240,43 @@ pub fn triangulate(t: &Track, poses: &[Pose]) -> Option<V3> {
     a.try_inverse().map(|i| i * b)
 }
 
+/// A plane-held point's offset along its plane from the track's anchor.
+fn along(t: &Track, x: &V3) -> V3 {
+    let d = x - t.anchor;
+    d - t.normal * t.normal.dot(&d)
+}
+
+/// Where the sightings' rays from `poses` meet the track's plane: the median of the meeting points
+/// (each axis), back onto the plane; none when no ray meets it in front at more than 0.1 of a right
+/// angle.
+fn meet_plane(t: &Track, poses: &[Pose]) -> Option<V3> {
+    let (a, n) = (t.anchor, t.normal);
+    let hits: Vec<V3> = t
+        .sightings
+        .iter()
+        .filter_map(|s| {
+            let p = &poses[s.image];
+            let d = p.r * s.bearing;
+            let along = n.dot(&d);
+            if along.abs() < 0.1 {
+                return None;
+            }
+            let k = n.dot(&(a - p.p)) / along;
+            (k > 0.).then(|| p.p + d * k)
+        })
+        .collect();
+    if hits.is_empty() {
+        return None;
+    }
+    let median = |axis: usize| {
+        let mut v: Vec<f64> = hits.iter().map(|h| h[axis]).collect();
+        v.sort_by(f64::total_cmp);
+        v[v.len() / 2]
+    };
+    let m = V3::new(median(0), median(1), median(2));
+    Some(m - n * n.dot(&(m - a)))
+}
+
 /// A track triangulated with `poses`, with what tells how well it is determined (for the image
 /// points written beside the COLMAP model: surfaces the laser missed, such as those too close to it).
 pub struct TrackPoint {
@@ -328,6 +370,9 @@ pub struct Solution {
     pub shift: Vec<V3>,
     pub iterations: usize,
     pub cost: [f64; 2],
+    /// the tracks adjusted, with the sightings dropped as outliers left out (on the same planes;
+    /// the anchors where the starting poses' rays met them)
+    pub kept: Vec<Track>,
 }
 
 impl Solution {
@@ -337,6 +382,127 @@ impl Solution {
             p: p.p + self.shift[frame],
         }
     }
+}
+
+/// How far planes tell a scale about `mean` apart from a turn and a shift: the scale's hold left
+/// once those are solved for, as a share of its own, from the planes' anchors and normals (the
+/// points' places along them aside). Zero when they all pass through one line or point.
+fn scale_hold(on: &[(V3, V3, V3)], mean: &V3) -> f64 {
+    type M7 = SMatrix<f64, 7, 7>;
+    type V7 = SMatrix<f64, 7, 1>;
+    let mut h = M7::zeros();
+    for (_, a, n) in on {
+        let v = a - mean;
+        let jw = v.cross(n);
+        let j = V7::from_column_slice(&[jw.x, jw.y, jw.z, n.x, n.y, n.z, n.dot(&v)]);
+        h += j * j.transpose();
+    }
+    if h[(6, 6)] <= 0. {
+        return 0.;
+    }
+    // a faint ridge only to invert what the planes leave free (along a corridor)
+    let rest =
+        h.fixed_view::<6, 6>(0, 0).into_owned() + Matrix6::identity() * (1e-9 * h.trace() / 7.);
+    let cross = h.fixed_view::<6, 1>(0, 6).into_owned();
+    rest.try_inverse().map_or(0., |inv| {
+        ((h[(6, 6)] - (cross.transpose() * inv * cross)[0]) / h[(6, 6)]).max(0.)
+    })
+}
+
+/// The images moved together onto the cloud by [`align_to_planes`].
+pub struct Aligned {
+    pub poses: Vec<Pose>,
+    /// the turn, the shift (of the points' mean) and the scale
+    pub turn: M3,
+    pub shift: V3,
+    pub scale: f64,
+    /// how far the planes tell the scale apart from the turn and the place (its hold left once
+    /// they are solved for, as a share of its own): below 1 % it is not solved for
+    pub scale_hold: f64,
+}
+
+/// `poses` turned, moved and scaled together (one similarity about the points' mean) so that the
+/// (not held-out) plane-held tracks, triangulated with them, lie best on their LiDAR planes:
+/// Gauss-Newton on the points' distances along the normals, Huber at 1 cm. The adjustment holds the
+/// images to one another by bearings, which leave the whole turn, place and scale free, and to the
+/// planes only weakly, so in a small room the images came out a few tenths of a degree to a degree
+/// turned and up to 1.5 % wider than the cloud; this takes that back without changing how they
+/// agree. The scale is left when the planes cannot tell it (all through one line or point, as along
+/// a corridor of a wall and the floor).
+pub fn align_to_planes(tracks: &[Track], poses: &[Pose]) -> Aligned {
+    let on: Vec<(V3, V3, V3)> = tracks
+        .par_iter()
+        .filter(|t| !t.held && t.planar() && t.sightings.len() >= 2)
+        .filter_map(|t| triangulate(t, poses).map(|x| (x, t.anchor, t.normal)))
+        .collect();
+    let mut out = Aligned {
+        poses: poses.to_vec(),
+        turn: M3::identity(),
+        shift: V3::zeros(),
+        scale: 1.,
+        scale_hold: 0.,
+    };
+    if on.len() < 50 {
+        return out;
+    }
+    let mean = on.iter().map(|o| o.0).sum::<V3>() / on.len() as f64;
+    let (mut turn, mut shift, mut scale) = (M3::identity(), V3::zeros(), 1f64);
+    type M7 = SMatrix<f64, 7, 7>;
+    type V7 = SMatrix<f64, 7, 1>;
+    let mut scaled = None;
+    for _ in 0..30 {
+        let mut h = M7::zeros();
+        let mut g = V7::zeros();
+        for (x, a, n) in &on {
+            let v = scale * (turn * (x - mean));
+            let y = v + mean + shift;
+            let r = n.dot(&(y - a));
+            let w = if r.abs() <= 0.01 { 1. } else { 0.01 / r.abs() };
+            // d r / d (small turn, shift, log scale) = (v x n, n, n . v)
+            let jw = v.cross(n);
+            let j = V7::from_column_slice(&[jw.x, jw.y, jw.z, n.x, n.y, n.z, n.dot(&v)]);
+            h += w * j * j.transpose();
+            g += w * j * r;
+        }
+        // a faint pull to no change (a millionth of the planes' mean hold): what they cannot tell
+        // of the turn and the place (along a corridor, the place along it) stays
+        let prior = 1e-6 * h.trace() / 7.;
+        let w0 = rotvec(&turn);
+        let now = V7::from_column_slice(&[w0.x, w0.y, w0.z, shift.x, shift.y, shift.z, scale.ln()]);
+        h += M7::identity() * prior;
+        g += now * prior;
+        // whether the planes tell the scale apart, once, from where they lie (the anchors) and
+        // not from the points: the points' few millimetres off their planes would tell it on one
+        // plane too, and shrinking everything onto it would lessen them
+        let solve_scale = *scaled.get_or_insert_with(|| {
+            out.scale_hold = scale_hold(&on, &mean);
+            out.scale_hold >= 0.01
+        });
+        if !solve_scale {
+            h.row_mut(6).fill(0.);
+            h.column_mut(6).fill(0.);
+            h[(6, 6)] = 1.;
+            g[6] = 0.;
+        }
+        let Some(d) = h.lu().solve(&(-g)) else {
+            break;
+        };
+        turn = *Rotation3::new(d.fixed_rows::<3>(0).into_owned()).matrix() * turn;
+        shift += d.fixed_rows::<3>(3);
+        scale *= d[6].exp();
+        if d.norm() < 1e-10 {
+            break;
+        }
+    }
+    out.poses = poses
+        .iter()
+        .map(|p| Pose {
+            r: turn * p.r,
+            p: scale * (turn * (p.p - mean)) + mean + shift,
+        })
+        .collect();
+    (out.turn, out.shift, out.scale) = (turn, shift, scale);
+    out
 }
 
 fn skew(v: &V3) -> M3 {
@@ -370,6 +536,8 @@ struct Problem<'a> {
     frames: usize,
     chain: &'a [(usize, usize)],
     tracks: Vec<Track>,
+    /// per track: held along its plane too (where the starting poses' rays met it)
+    pinned: Vec<bool>,
     s: &'a Settings,
 }
 
@@ -387,7 +555,7 @@ impl Problem<'_> {
         }
     }
 
-    fn track_cost(&self, t: &Track, x: &V3, rot: &[M3], shift: &[V3]) -> f64 {
+    fn track_cost(&self, t: &Track, pinned: bool, x: &V3, rot: &[M3], shift: &[V3]) -> f64 {
         let s = self.s;
         let mut c = 0.;
         for sg in &t.sightings {
@@ -397,6 +565,10 @@ impl Problem<'_> {
         if t.planar() {
             let rp = t.normal.dot(&(x - t.anchor)) / s.plane_sigma;
             c += soft_l1(rp * rp / (s.plane_scale * s.plane_scale)).0;
+            if pinned {
+                let ra = along(t, x) / s.along_sigma;
+                c += soft_l1(ra.norm_squared() / (s.plane_scale * s.plane_scale)).0;
+            }
         }
         c
     }
@@ -405,9 +577,10 @@ impl Problem<'_> {
     /// returns the sightings dropped.
     fn prune(&mut self, x: &mut Vec<V3>, rot: &[M3], shift: &[V3]) -> usize {
         let tracks = std::mem::take(&mut self.tracks);
+        let pinned = std::mem::take(&mut self.pinned);
         let points = std::mem::take(x);
         let mut dropped = 0;
-        for (mut t, p) in tracks.into_iter().zip(points) {
+        for ((mut t, pin), p) in tracks.into_iter().zip(pinned).zip(points) {
             let n = t.sightings.len();
             t.sightings.retain(|sg| {
                 sg.residual(&self.pose(rot, shift, sg.image), &p).0.norm() <= self.s.outlier
@@ -415,6 +588,7 @@ impl Problem<'_> {
             dropped += n - t.sightings.len();
             if usable(&t) {
                 self.tracks.push(t);
+                self.pinned.push(pin);
                 x.push(p);
             }
         }
@@ -441,8 +615,9 @@ impl Problem<'_> {
         let tracks: f64 = self
             .tracks
             .par_iter()
+            .zip(&self.pinned)
             .zip(x)
-            .map(|(t, x)| self.track_cost(t, x, rot, shift))
+            .map(|((t, &pin), x)| self.track_cost(t, pin, x, rot, shift))
             .sum();
         tracks + self.prior_cost(rot, shift)
     }
@@ -451,6 +626,7 @@ impl Problem<'_> {
     fn linearise(
         &self,
         t: &Track,
+        pinned: bool,
         x: &V3,
         rot: &[M3],
         shift: &[V3],
@@ -506,6 +682,15 @@ impl Problem<'_> {
             let jp = t.normal / s.plane_sigma;
             hpp += wp * jp * jp.transpose();
             gp += wp * jp * rp;
+            if pinned {
+                // r = P (x - a) / sigma with P the projection onto the plane: J = P / sigma
+                let ra = along(t, x) / s.along_sigma;
+                let wa = soft_l1(ra.norm_squared() / (s.plane_scale * s.plane_scale)).1
+                    / (s.plane_scale * s.plane_scale);
+                let p = (M3::identity() - t.normal * t.normal.transpose()) / s.along_sigma;
+                hpp += wa * p * p;
+                gp += wa * p * ra;
+            }
         }
         let damped =
             hpp + Matrix3::from_diagonal(&hpp.diagonal()) * lambda + Matrix3::identity() * 1e-12;
@@ -528,16 +713,29 @@ pub fn solve(
     s: &Settings,
     log: &dyn Fn(&str),
 ) -> Solution {
+    // held along the plane to where the starting poses put it (the anchor came from the poses
+    // before the refinement); not at all when their rays do not meet the plane
+    let (tracks_in, pinned): (Vec<Track>, Vec<bool>) = tracks
+        .iter()
+        .filter(|t| !t.held && usable(t))
+        .cloned()
+        .map(|mut t| {
+            let met = (t.planar() && s.along_sigma > 0.)
+                .then(|| meet_plane(&t, poses))
+                .flatten();
+            if let Some(a) = met {
+                t.anchor = a;
+            }
+            (t, met.is_some())
+        })
+        .unzip();
     let mut pb = Problem {
         poses,
         frame,
         frames,
         chain,
-        tracks: tracks
-            .iter()
-            .filter(|t| !t.held && usable(t))
-            .cloned()
-            .collect(),
+        tracks: tracks_in,
+        pinned,
         s,
     };
     log(&format!(
@@ -564,8 +762,9 @@ pub fn solve(
         let lin: Vec<Option<(FrameBlocks, Linear)>> = pb
             .tracks
             .par_iter()
+            .zip(&pb.pinned)
             .zip(&x)
-            .map(|(t, x)| pb.linearise(t, x, &rot, &shift, lambda))
+            .map(|((t, &pin), x)| pb.linearise(t, pin, x, &rot, &shift, lambda))
             .collect();
         // the points eliminated: H_ff - W H_pp^-1 W^T and g_f - W H_pp^-1 g_p
         let (mut blocks, mut g) = lin
@@ -691,6 +890,7 @@ pub fn solve(
         shift,
         iterations,
         cost: [start, cost],
+        kept: pb.tracks,
     }
 }
 
@@ -753,6 +953,154 @@ mod tests {
     fn look(p: &Pose, x: &V3) -> Option<V3> {
         let l = p.r.transpose() * (x - p.p);
         (l.xy().norm().atan2(l.z) < 1.2).then_some(l)
+    }
+
+    #[test]
+    fn the_rays_meet_the_plane_where_the_point_is_whatever_the_anchor_on_it() {
+        let (truth, points, normals) = scene();
+        for t in plane_tracks(&truth, &points, &normals) {
+            // the anchor is elsewhere on the plane: the meeting point is the point itself
+            let x = triangulate(&t, &truth).unwrap();
+            let m = meet_plane(&t, &truth).unwrap();
+            assert!((m - x).norm() < 1e-6, "{}", (m - x).norm());
+            assert!(along(&t, &m).norm() > 1e-3);
+        }
+    }
+
+    /// Tracks seen by the images at `poses`, held on the planes of `scene` (every fifth held out).
+    fn plane_tracks(poses: &[Pose], points: &[V3], normals: &[V3]) -> Vec<Track> {
+        let cam = camera();
+        points
+            .iter()
+            .zip(normals)
+            .enumerate()
+            .filter_map(|(k, (x, n))| {
+                let sightings: Vec<Sighting> = poses
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, p)| {
+                        let l = look(p, x)?;
+                        Some(Sighting::new(
+                            i,
+                            cam.project([l.x, l.y, l.z]),
+                            &cam,
+                            &[0.; 4],
+                        ))
+                    })
+                    .collect();
+                (sightings.len() >= 3).then(|| Track {
+                    sightings,
+                    // anchored elsewhere on the same plane, as the cloud's points are
+                    anchor: x + n.cross(&V3::new(0.3, 0.2, 0.1)) * 0.01,
+                    normal: *n,
+                    held: k % 5 == 0,
+                })
+            })
+            .collect()
+    }
+
+    /// The images as the bearings alone leave them: all turned 0.5 deg about a tilted axis,
+    /// `scale` wider about a point off the path and moved by `shift`.
+    fn widened(truth: &[Pose], scale: f64, shift: V3) -> Vec<Pose> {
+        let turn =
+            *Rotation3::new(V3::new(0.3, -0.5, 0.8).normalize() * 0.5f64.to_radians()).matrix();
+        let pivot = V3::new(3., 2., 1.);
+        truth
+            .iter()
+            .map(|p| Pose {
+                r: turn * p.r,
+                p: scale * (turn * (p.p - pivot)) + pivot + shift,
+            })
+            .collect()
+    }
+
+    fn angle(m: &M3) -> f64 {
+        ((m.trace() - 1.) / 2.).clamp(-1., 1.).acos()
+    }
+
+    #[test]
+    fn images_turned_widened_and_moved_together_are_put_back_onto_the_planes() {
+        let (truth, mut points, mut normals) = scene();
+        // a wall slanted across the path (with the wall and the floor, every turn and place) and
+        // a table top above the floor (the scale: planes all through one point keep any about it)
+        let slant = V3::new(1., 1., 0.).normalize();
+        for k in 0..300 {
+            let t = k as f64;
+            let y = 1. + (t * 0.41).sin().abs() * 3.;
+            points.push(V3::new(6. - y, y, 0.3 + (t * 0.17).cos().abs() * 1.7));
+            normals.push(slant);
+            points.push(V3::new(
+                (t * 0.23).sin().abs() * 3.,
+                1.5 + (t * 0.31).cos().abs() * 1.5,
+                0.75,
+            ));
+            normals.push(V3::new(0., 0., 1.));
+        }
+        let tracks = plane_tracks(&truth, &points, &normals);
+        let moved = widened(&truth, 1.012, V3::new(0.015, -0.01, 0.02));
+        let a = align_to_planes(&tracks, &moved);
+        assert!(a.scale_hold > 0.01, "{}", a.scale_hold);
+        assert!(
+            (angle(&a.turn) - 0.5f64.to_radians()).abs() < 1e-5,
+            "{}",
+            angle(&a.turn).to_degrees()
+        );
+        assert!((a.scale * 1.012 - 1.).abs() < 1e-5, "{}", a.scale);
+        for (b, p) in a.poses.iter().zip(&truth) {
+            let e = angle(&(b.r * p.r.transpose()));
+            assert!(e < 1e-5, "{e}");
+            assert!((b.p - p.p).norm() < 1e-4, "{}", (b.p - p.p).norm());
+        }
+    }
+
+    #[test]
+    fn on_one_plane_the_points_off_it_do_not_shrink_the_images_onto_it() {
+        // the wall only, its points a few millimetres off it either side (as triangulated points
+        // are): a scale would lessen those, but the plane cannot tell one
+        let (truth, points, normals) = scene();
+        let (mut wall, mut up) = (Vec::new(), Vec::new());
+        for (k, (x, n)) in points.iter().zip(&normals).enumerate() {
+            if n.y > 0.5 {
+                let off = if k % 4 == 0 { 0.003 } else { -0.003 };
+                wall.push(x + n * off);
+                up.push(*n);
+            }
+        }
+        let mut tracks = plane_tracks(&truth, &wall, &up);
+        for t in &mut tracks {
+            // the anchors on the wall itself
+            t.anchor.y = 4.;
+        }
+        let a = align_to_planes(&tracks, &truth);
+        assert!(a.scale_hold < 0.01, "{}", a.scale_hold);
+        assert_eq!(a.scale, 1.);
+        for (b, p) in a.poses.iter().zip(&truth) {
+            assert!((b.p - p.p).norm() < 2e-3, "{}", (b.p - p.p).norm());
+        }
+    }
+
+    #[test]
+    fn along_a_corridor_what_the_planes_cannot_tell_stays_as_it_was() {
+        // a wall and the floor only: they hold the turn, but not the place along them, nor the
+        // scale about where they meet
+        let (truth, points, normals) = scene();
+        let tracks = plane_tracks(&truth, &points, &normals);
+        let moved = widened(&truth, 1., V3::new(0., -0.01, 0.02));
+        let a = align_to_planes(&tracks, &moved);
+        assert!(a.scale_hold < 0.01, "{}", a.scale_hold);
+        assert_eq!(a.scale, 1.);
+        assert!(
+            (angle(&a.turn) - 0.5f64.to_radians()).abs() < 1e-4,
+            "{}",
+            angle(&a.turn).to_degrees()
+        );
+        // back but for one slide along the corridor, the same for every image
+        let slide = a.poses[0].p - truth[0].p;
+        for (b, p) in a.poses.iter().zip(&truth) {
+            let d = b.p - p.p;
+            assert!((d - slide).norm() < 1e-4, "{}", (d - slide).norm());
+            assert!(d.y.abs() < 1e-4 && d.z.abs() < 1e-4, "{d:?}");
+        }
     }
 
     #[test]

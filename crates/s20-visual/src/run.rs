@@ -894,6 +894,20 @@ pub fn run(input: &Input, job: &Job) -> Result<serde_json::Value> {
         let solved: Vec<Pose> = (0..start.len())
             .map(|i| sol.pose(frame[i], &start[i]))
             .collect();
+        // held to the cloud as a whole: the bearings leave the images free to turn, move and
+        // scale together
+        // with the sightings the adjustment kept (its outliers left out)
+        let onto = bundle::align_to_planes(&sol.kept, &solved);
+        let turn_back = Rotation3::from_matrix_unchecked(onto.turn)
+            .angle()
+            .to_degrees();
+        job.log(&format!(
+            "tracks: the images put back onto the cloud together: turned {turn_back:.3} deg, moved {:.1} mm, scaled {:+.3} % (the planes' hold on the scale {:.0} %)",
+            onto.shift.norm() * 1000.,
+            (onto.scale - 1.) * 100.,
+            onto.scale_hold * 100.
+        ));
+        let solved = onto.poses;
         write_poses(tracks_out, &poses.rows, &solved)?;
         if let Some(points_out) = &input.track_points {
             let started = std::time::Instant::now();
@@ -945,8 +959,10 @@ pub fn run(input: &Input, job: &Job) -> Result<serde_json::Value> {
             "held_out_plane_mm": {"before": 1000. * median(p0), "after": 1000. * median(p1)},
             "frame_turn_deg": {"median": median(turn.clone()), "max": turn.iter().cloned().fold(0., f64::max)},
             "frame_shift_mm": {"median": median(moved.clone()), "max": moved.iter().cloned().fold(0., f64::max)},
+            "onto_the_cloud": {"turn_deg": turn_back, "shift_mm": onto.shift.norm() * 1000., "scale": onto.scale, "scale_hold": onto.scale_hold},
             "settings": {
                 "pixel": s.pixel, "plane_sigma_m": s.plane_sigma, "plane_scale": s.plane_scale,
+                "along_sigma_m": s.along_sigma,
                 "rot_sigma_deg": s.rot_sigma.to_degrees(), "pos_sigma_m": s.pos_sigma,
                 "rot_smooth_deg": s.rot_smooth.to_degrees(), "pos_smooth_m": s.pos_smooth,
             },

@@ -871,8 +871,9 @@ const USAGE: &str = "usage:
       (every image's pose turned and moved a little so that features anchored on the cloud agree across
        consecutive, simultaneous and seconds-apart images, for the coloring; --tracks: also the matches of
        more pairs (two apart, the other camera's neighboring frames, revisits) joined into tracks and
-       adjusted with free points held near the cloud's planes, the left and right images of a frame moving
-       together, written there: the images agree with one another, for Gaussian Splatting; --track_points:
+       adjusted with free points held near the cloud's planes (on and, more loosely, along them), the left
+       and right images of a frame moving together, then all the images turned, moved and scaled together
+       onto the planes, written there: the images agree with one another, for Gaussian Splatting; --track_points:
        the tracks triangulated with those poses, with how well each is determined (sightings, time span,
        ray angle, residuals, distance to the cloud): image points where the cloud has none, with
        --track_*: the features matched along the epipolar lines found with other settings (finer, for faint
