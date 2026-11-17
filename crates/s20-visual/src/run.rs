@@ -33,10 +33,12 @@ pub struct Input {
     /// share of observations held out for the check
     pub holdout: f64,
     /// the features: SIFT on the images scaled to `max_size` on the long side, the `features`
-    /// strongest, with the contrast threshold `contrast` (OpenCV's 0.04)
+    /// strongest, with the contrast threshold `contrast` (OpenCV's 0.04), the image doubled first
+    /// when `double_first` (OpenCV's default)
     pub max_size: usize,
     pub features: usize,
     pub contrast: f32,
+    pub double_first: bool,
     /// guided matching: accepted distance from the prediction, search radius (pixels), ratio test
     pub gate: f64,
     pub search: f64,
@@ -67,6 +69,7 @@ pub struct FeatureSettings {
     pub max_size: usize,
     pub count: usize,
     pub contrast: f32,
+    pub double_first: bool,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -614,6 +617,7 @@ pub fn collect(input: &Input, job: &Job) -> Result<Collected> {
                 input.max_size,
                 input.features,
                 input.contrast,
+                input.double_first,
             )?;
             features_part.report(
                 "features",
@@ -683,6 +687,7 @@ pub fn collect(input: &Input, job: &Job) -> Result<Collected> {
                             t.max_size,
                             t.count,
                             t.contrast,
+                            t.double_first,
                         )?))
                     })
                     .collect::<Result<Vec<_>>>()?;

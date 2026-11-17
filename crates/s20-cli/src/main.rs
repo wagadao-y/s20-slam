@@ -143,10 +143,11 @@ fn main() -> Result<()> {
             };
             // other features for the epipolar search (each setting not given is the refinement's),
             // read before the output, a positional argument
-            let (size, count, contrast) = (
+            let (size, count, contrast, no_double) = (
                 a.get_str("--track_max_size")?,
                 a.get_str("--track_features")?,
                 a.get_str("--track_contrast")?,
+                a.flag("--track_no_double"),
             );
             let mut input = s20_visual::run::Input {
                 data: req(&mut a, "--data", "<session data folder with images.txt>")?,
@@ -166,6 +167,7 @@ fn main() -> Result<()> {
                 max_size: a.get("--max_size", 1800)?,
                 features: a.get("--features", 8000)?,
                 contrast: a.get("--contrast", s20_visual::sift::CONTRAST)?,
+                double_first: !a.flag("--no_double"),
                 gate: a.get("--gate", 25.)?,
                 search: a.get("--search", 80.)?,
                 ratio: a.get("--ratio", 0.75)?,
@@ -180,7 +182,7 @@ fn main() -> Result<()> {
                 track_features: None,
                 out: PathBuf::from(a.positional_req("output ImgPose.txt")?),
             };
-            if size.is_some() || count.is_some() || contrast.is_some() {
+            if size.is_some() || count.is_some() || contrast.is_some() || no_double {
                 input.track_features = Some(s20_visual::run::FeatureSettings {
                     max_size: size.map_or(Ok(input.max_size), |s| {
                         s.parse().with_context(|| format!("--track_max_size {s}"))
@@ -191,6 +193,8 @@ fn main() -> Result<()> {
                     contrast: contrast.map_or(Ok(input.contrast), |s| {
                         s.parse().with_context(|| format!("--track_contrast {s}"))
                     })?,
+                    // not doubled when asked, or when the refinement's are not
+                    double_first: input.double_first && !no_double,
                 });
             }
             threads(&mut a)?;
@@ -631,6 +635,7 @@ fn calibrate_cameras(
             max_size: 1800,
             features: 8000,
             contrast: s20_visual::sift::CONTRAST,
+            double_first: true,
             gate: 25.,
             search: 80.,
             ratio: 0.75,
@@ -860,8 +865,9 @@ const USAGE: &str = "usage:
        frames are recorded in --data, the folder holding --images by default)
   s20 refine-images --data <session data folder> --imgpose ImgPose.txt --calib calibration.yaml --cloud <uncolored .las|laz>
       <out ImgPose.txt> [--fit_camera <out calibration.yaml> [--device_calibration]] [--step n] [--holdout f]
-      [--max_size px] [--features n] [--contrast c] [--gate px] [--search px] [--ratio r]
-      [--tracks <out ImgPose.txt> [--track_points <out .txt> [--track_max_size px] [--track_features n] [--track_contrast c]]] [--threads n]
+      [--max_size px] [--features n] [--contrast c] [--no_double] [--gate px] [--search px] [--ratio r]
+      [--tracks <out ImgPose.txt> [--track_points <out .txt> [--track_max_size px] [--track_features n] [--track_contrast c]
+      [--track_no_double]]] [--threads n]
       (every image's pose turned and moved a little so that features anchored on the cloud agree across
        consecutive, simultaneous and seconds-apart images, for the coloring; --tracks: also the matches of
        more pairs (two apart, the other camera's neighboring frames, revisits) joined into tracks and
@@ -872,7 +878,7 @@ const USAGE: &str = "usage:
        --track_*: the features matched along the epipolar lines found with other settings (finer, for faint
        surfaces such as a wooden floor; those not given are the refinement's); the features: SIFT on the
        images scaled to --max_size (1800) px on the long side, the --features (8000) strongest, contrast
-       threshold --contrast (0.04); the trajectory and the cloud stay; --fit_camera also
+       threshold --contrast (0.04), the image doubled first unless --no_double; the trajectory and the cloud stay; --fit_camera also
        solves the cameras' mounts, fisheye angles and principal points and writes them as a calibration to
        color with, moving them freely from a maker's calibration, or with --device_calibration only a little
        from one calibrate-cameras made; a report beside the output with the held-out residuals, overall and per image)

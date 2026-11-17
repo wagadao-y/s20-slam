@@ -32,6 +32,7 @@ fn main() -> Result<()> {
         1800,
         8000,
         s20_visual::sift::CONTRAST,
+        true,
     )?;
     let fb = features(
         &s20_io::dataset::read_image(&data.join("images").join(nb))?,
@@ -39,6 +40,7 @@ fn main() -> Result<()> {
         1800,
         8000,
         s20_visual::sift::CONTRAST,
+        true,
     )?;
     let t2 = Instant::now();
     let ga = zgrid(&cloud, &poses.poses[ia], cam(na));

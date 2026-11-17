@@ -2227,6 +2227,7 @@ impl RunConfig {
                     max_size: 1800,
                     features: 8000,
                     contrast: s20_visual::sift::CONTRAST,
+                    double_first: true,
                     gate: 25.,
                     search: 80.,
                     ratio: 0.75,

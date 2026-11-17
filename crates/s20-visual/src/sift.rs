@@ -1,5 +1,5 @@
 //! SIFT keypoints and descriptors, following OpenCV's implementation (4.x `sift.simd.hpp`): the
-//! image doubled first, 3 layers per octave from sigma 1.6, contrast threshold 0.04 (by default), edge ratio 10,
+//! image doubled first (by default), 3 layers per octave from sigma 1.6, contrast threshold 0.04 (by default), edge ratio 10,
 //! 36-bin orientations with peaks above 80 % of the highest, 4x4x8 descriptors clipped at 0.2 and
 //! stored as bytes (x512).
 
@@ -34,7 +34,8 @@ pub struct Keypoint {
     /// degrees, OpenCV's convention
     pub angle: f32,
     pub response: f32,
-    /// octave of the doubled image (0 = the doubled image), layer, and the position in that octave
+    /// octave (0 = the doubled image, or the input when not doubled), layer, and the position in
+    /// that octave
     octave: usize,
     layer: usize,
     ox: f32,
@@ -42,6 +43,8 @@ pub struct Keypoint {
     /// the refined integer position in that octave (the orientation histogram's centre)
     ix: isize,
     iy: isize,
+    /// input pixels per pixel of octave 0: 0.5 when the image was doubled, else 1
+    base: f32,
 }
 
 /// Separable Gaussian blur, OpenCV's kernel size for float images (8 sigma + 1) and border
@@ -145,9 +148,15 @@ struct Pyramid {
     dog: Vec<Vec<Gray>>,
 }
 
-fn pyramid(img: &Gray) -> Pyramid {
-    let base = double(img);
-    let diff = (SIGMA * SIGMA - (2. * INIT_SIGMA).powi(2)).max(0.01).sqrt();
+/// The Gaussian and difference-of-Gaussian octaves, from the image doubled (`double`, OpenCV's
+/// default) or as it is (OpenCV's `firstOctave = 0`).
+fn pyramid(img: &Gray, double_first: bool) -> Pyramid {
+    let (base, init) = if double_first {
+        (double(img), 2. * INIT_SIGMA)
+    } else {
+        (img.clone(), INIT_SIGMA)
+    };
+    let diff = (SIGMA * SIGMA - init * init).max(0.01).sqrt();
     let base = blur(&base, diff);
     let octaves = ((base.w.min(base.h) as f32).log2().round() as isize - 2).max(1) as usize;
     let k = 2f32.powf(1. / LAYERS as f32);
@@ -203,6 +212,7 @@ fn refine(
     x0: usize,
     y0: usize,
     contrast: f32,
+    base: f32,
 ) -> Option<Keypoint> {
     let img_scale = 1. / 255.;
     let (ds, d2s, dxs) = (img_scale * 0.5, img_scale, img_scale * 0.25);
@@ -294,20 +304,17 @@ fn refine(
     if det <= 0. || tr * tr * EDGE >= (EDGE + 1.).powi(2) * det {
         return None;
     }
-    let scale = (1 << octave) as f32 * 0.5; // octave 0 is the doubled image
+    let scale = (1 << octave) as f32 * base;
     let (ox, oy) = (x as f32 + sol[0], y as f32 + sol[1]);
     Some(Keypoint {
         x: ox * scale,
         y: oy * scale,
-        size: SIGMA
-            * 2f32.powf((layer as f32 + sol[2]) / LAYERS as f32)
-            * (1 << octave) as f32
-            * 2.
-            * 0.5,
+        size: SIGMA * 2f32.powf((layer as f32 + sol[2]) / LAYERS as f32) * 2. * scale,
         angle: 0.,
         response: contr.abs(),
         octave,
         layer: layer as usize,
+        base,
         ox,
         oy,
         ix: x,
@@ -347,7 +354,7 @@ fn gauss_table(n: usize, s: f32) -> Vec<f32> {
 
 /// Dominant orientations of a keypoint (OpenCV's calcOrientationHist and the peak search).
 fn orientations(img: &Gray, kp: &Keypoint) -> Vec<f32> {
-    let scl = kp.size * 2. * 0.5 / (1 << kp.octave) as f32; // size on the octave, before the doubling unpack
+    let scl = kp.size * 0.5 / (kp.base * (1 << kp.octave) as f32); // sigma on the octave
     let (px, py) = (kp.ix, kp.iy);
     let radius = (ORI_RADIUS * scl).round() as isize;
     let sigma = ORI_SIG * scl;
@@ -415,7 +422,8 @@ fn orientations(img: &Gray, kp: &Keypoint) -> Vec<f32> {
 
 /// The 128-byte descriptor (OpenCV's calcSIFTDescriptor).
 fn descriptor(img: &Gray, kp: &Keypoint) -> [u8; 128] {
-    let scl = kp.size / (1 << kp.octave) as f32;
+    // half the size on the octave, as OpenCV passes it
+    let scl = kp.size * 0.5 / (kp.base * (1 << kp.octave) as f32);
     let mut ori = 360. - kp.angle;
     if (ori - 360.).abs() < f32::EPSILON {
         ori = 0.;
@@ -521,17 +529,20 @@ fn descriptor(img: &Gray, kp: &Keypoint) -> [u8; 128] {
 
 /// Keypoints (in `img` pixels) and descriptors, the `max_features` strongest.
 pub fn detect(img: &Gray, max_features: usize) -> (Vec<Keypoint>, Vec<[u8; 128]>) {
-    detect_with(img, max_features, CONTRAST)
+    detect_with(img, max_features, CONTRAST, true)
 }
 
 /// [`detect`] with another contrast threshold (lower: also the faint features, such as a wooden
-/// floor's).
+/// floor's) and with or without the image doubled first (without: the finest features of a large
+/// image cost a quarter, those it would find only in the doubled image are not found).
 pub fn detect_with(
     img: &Gray,
     max_features: usize,
     contrast: f32,
+    double_first: bool,
 ) -> (Vec<Keypoint>, Vec<[u8; 128]>) {
-    let pyr = pyramid(img);
+    let pyr = pyramid(img, double_first);
+    let base = if double_first { 0.5 } else { 1. };
     let threshold = (0.5 * contrast / LAYERS as f32 * 255.).floor();
     let mut kps: Vec<Keypoint> = (0..pyr.dog.len())
         .into_par_iter()
@@ -576,7 +587,7 @@ pub fn detect_with(
                                     && v <= n.px[k]
                                     && around.iter().all(|&d| v <= at(p, d) && v <= at(n, d))
                             };
-                            if ext && let Some(kp) = refine(dog, o, l, x, y, contrast) {
+                            if ext && let Some(kp) = refine(dog, o, l, x, y, contrast, base) {
                                 found.push(kp);
                             }
                         }
