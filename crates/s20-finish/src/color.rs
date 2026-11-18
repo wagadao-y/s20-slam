@@ -1053,32 +1053,60 @@ type Entry = (u64, u32, u32, [f32; 3]);
 /// alternating means weighted by the point counts (residuals clipped at 0.4), pulled to 0 by
 /// the cells' median weight, mean 0 (as colorize_blend.gains). `entries` sorted.
 fn gains(entries: &[Entry], images: usize) -> Vec<[f32; 3]> {
-    let ok: Vec<_> = entries
-        .iter()
+    // (in parallel, each sum in the entries' order as one after another: a cell's within its
+    // run of entries, an image's over its entries in their order)
+    let ok: Vec<&Entry> = entries
+        .par_iter()
         .filter(|e| e.3.iter().all(|&c| c > 8. && c < 245.) && e.2 >= 20)
         .collect();
-    let mut count: FxHashMap<u64, u32> = FxHashMap::default();
-    for e in &ok {
-        *count.entry(e.0).or_default() += 1;
+    // the cells seen twice or more (the entries sorted, so a cell's are one run)
+    let mut kept: Vec<&Entry> = Vec::with_capacity(ok.len());
+    let mut a = 0;
+    while a < ok.len() {
+        let mut b = a + 1;
+        while b < ok.len() && ok[b].0 == ok[a].0 {
+            b += 1;
+        }
+        if b - a >= 2 {
+            kept.extend_from_slice(&ok[a..b]);
+        }
+        a = b;
     }
-    let ok: Vec<_> = ok.into_iter().filter(|e| count[&e.0] >= 2).collect();
-    let mut dense: FxHashMap<u64, usize> = FxHashMap::default();
-    let mut cs = Vec::with_capacity(ok.len());
-    let mut uniq: Vec<u64> = ok.iter().map(|e| e.0).collect();
-    uniq.sort_unstable();
-    uniq.dedup();
-    for (i, c) in uniq.iter().enumerate() {
-        dense.insert(*c, i);
+    let ok = kept;
+    let mut cell_start = vec![0usize];
+    for i in 1..ok.len() {
+        if ok[i].0 != ok[i - 1].0 {
+            cell_start.push(i);
+        }
     }
-    for e in &ok {
-        cs.push(dense[&e.0]);
+    if !ok.is_empty() {
+        cell_start.push(ok.len());
     }
-    let nc = uniq.len();
+    let nc = cell_start.len().saturating_sub(1);
+    let mut cs = vec![0usize; ok.len()];
+    for c in 0..nc {
+        cs[cell_start[c]..cell_start[c + 1]].fill(c);
+    }
     let ks: Vec<usize> = ok.iter().map(|e| e.1 as usize).collect();
     let ws: Vec<f64> = ok.iter().map(|e| e.2 as f64).collect();
     let ys: Vec<[f64; 3]> = ok.iter().map(|e| e.3.map(|c| (c as f64).ln())).collect();
+    // each image's entries, in their order
+    let mut by_image_start = vec![0usize; images + 1];
+    for &k in &ks {
+        by_image_start[k + 1] += 1;
+    }
+    for k in 0..images {
+        by_image_start[k + 1] += by_image_start[k];
+    }
+    let mut at = by_image_start.clone();
+    let mut by_image = vec![0usize; ok.len()];
+    for (i, &k) in ks.iter().enumerate() {
+        by_image[at[k]] = i;
+        at[k] += 1;
+    }
+    let of_image = |k: usize| &by_image[by_image_start[k]..by_image_start[k + 1]];
     let mut sorted = ws.clone();
-    sorted.sort_by(f64::total_cmp);
+    sorted.par_sort_by(f64::total_cmp);
     let median = if sorted.is_empty() {
         0.
     } else if sorted.len() % 2 == 1 {
@@ -1086,31 +1114,42 @@ fn gains(entries: &[Entry], images: usize) -> Vec<[f32; 3]> {
     } else {
         0.5 * (sorted[sorted.len() / 2 - 1] + sorted[sorted.len() / 2])
     };
+    // each image's weight, the same every round
+    let den: Vec<f64> = (0..images)
+        .into_par_iter()
+        .map(|k| of_image(k).iter().map(|&i| ws[i]).fold(0., |s, w| s + w))
+        .collect();
     let mut g = vec![[0f64; 3]; images];
     for _ in 0..30 {
-        let mut lnum = vec![[0f64; 3]; nc];
-        let mut lden = vec![0f64; nc];
-        for i in 0..ok.len() {
-            for j in 0..3 {
-                lnum[cs[i]][j] += ws[i] * (ys[i][j] + g[ks[i]][j]);
-            }
-            lden[cs[i]] += ws[i];
-        }
-        let mut num = vec![[0f64; 3]; images];
-        let mut den = vec![0f64; images];
-        for i in 0..ok.len() {
-            for j in 0..3 {
-                let l = lnum[cs[i]][j] / lden[cs[i]];
-                let r = (l - ys[i][j]).clamp(g[ks[i]][j] - 0.4, g[ks[i]][j] + 0.4);
-                num[ks[i]][j] += ws[i] * r;
-            }
-            den[ks[i]] += ws[i];
-        }
-        for k in 0..images {
-            for j in 0..3 {
-                g[k][j] = num[k][j] / (den[k] + median);
-            }
-        }
+        // each cell's level
+        let l: Vec<[f64; 3]> = (0..nc)
+            .into_par_iter()
+            .map(|c| {
+                let (mut num, mut d) = ([0f64; 3], 0f64);
+                for i in cell_start[c]..cell_start[c + 1] {
+                    for j in 0..3 {
+                        num[j] += ws[i] * (ys[i][j] + g[ks[i]][j]);
+                    }
+                    d += ws[i];
+                }
+                num.map(|v| v / d)
+            })
+            .collect();
+        // each image's gain
+        let next: Vec<[f64; 3]> = (0..images)
+            .into_par_iter()
+            .map(|k| {
+                let mut num = [0f64; 3];
+                for &i in of_image(k) {
+                    for j in 0..3 {
+                        let r = (l[cs[i]][j] - ys[i][j]).clamp(g[k][j] - 0.4, g[k][j] + 0.4);
+                        num[j] += ws[i] * r;
+                    }
+                }
+                num.map(|v| v / (den[k] + median))
+            })
+            .collect();
+        g = next;
         let total: f64 = den.iter().map(|d| d + 1e-9).sum();
         for j in 0..3 {
             let mean = (0..images).map(|k| g[k][j] * (den[k] + 1e-9)).sum::<f64>() / total;
@@ -1948,6 +1987,110 @@ pub fn colorize(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The gains as they were summed one entry after another (before the parallel sums).
+    fn gains_one_by_one(entries: &[Entry], images: usize) -> Vec<[f32; 3]> {
+        let ok: Vec<_> = entries
+            .iter()
+            .filter(|e| e.3.iter().all(|&c| c > 8. && c < 245.) && e.2 >= 20)
+            .collect();
+        let mut count: FxHashMap<u64, u32> = FxHashMap::default();
+        for e in &ok {
+            *count.entry(e.0).or_default() += 1;
+        }
+        let ok: Vec<_> = ok.into_iter().filter(|e| count[&e.0] >= 2).collect();
+        let mut dense: FxHashMap<u64, usize> = FxHashMap::default();
+        let mut cs = Vec::with_capacity(ok.len());
+        let mut uniq: Vec<u64> = ok.iter().map(|e| e.0).collect();
+        uniq.sort_unstable();
+        uniq.dedup();
+        for (i, c) in uniq.iter().enumerate() {
+            dense.insert(*c, i);
+        }
+        for e in &ok {
+            cs.push(dense[&e.0]);
+        }
+        let nc = uniq.len();
+        let ks: Vec<usize> = ok.iter().map(|e| e.1 as usize).collect();
+        let ws: Vec<f64> = ok.iter().map(|e| e.2 as f64).collect();
+        let ys: Vec<[f64; 3]> = ok.iter().map(|e| e.3.map(|c| (c as f64).ln())).collect();
+        let mut sorted = ws.clone();
+        sorted.sort_by(f64::total_cmp);
+        let median = if sorted.is_empty() {
+            0.
+        } else if sorted.len() % 2 == 1 {
+            sorted[sorted.len() / 2]
+        } else {
+            0.5 * (sorted[sorted.len() / 2 - 1] + sorted[sorted.len() / 2])
+        };
+        let mut g = vec![[0f64; 3]; images];
+        for _ in 0..30 {
+            let mut lnum = vec![[0f64; 3]; nc];
+            let mut lden = vec![0f64; nc];
+            for i in 0..ok.len() {
+                for j in 0..3 {
+                    lnum[cs[i]][j] += ws[i] * (ys[i][j] + g[ks[i]][j]);
+                }
+                lden[cs[i]] += ws[i];
+            }
+            let mut num = vec![[0f64; 3]; images];
+            let mut den = vec![0f64; images];
+            for i in 0..ok.len() {
+                for j in 0..3 {
+                    let l = lnum[cs[i]][j] / lden[cs[i]];
+                    let r = (l - ys[i][j]).clamp(g[ks[i]][j] - 0.4, g[ks[i]][j] + 0.4);
+                    num[ks[i]][j] += ws[i] * r;
+                }
+                den[ks[i]] += ws[i];
+            }
+            for k in 0..images {
+                for j in 0..3 {
+                    g[k][j] = num[k][j] / (den[k] + median);
+                }
+            }
+            let total: f64 = den.iter().map(|d| d + 1e-9).sum();
+            for j in 0..3 {
+                let mean = (0..images).map(|k| g[k][j] * (den[k] + 1e-9)).sum::<f64>() / total;
+                for gk in g.iter_mut() {
+                    gk[j] -= mean;
+                }
+            }
+        }
+        g.iter().map(|gk| gk.map(|x| x.exp() as f32)).collect()
+    }
+
+    #[test]
+    fn the_gains_summed_in_parallel_are_those_summed_one_by_one_to_the_bit() {
+        // cells seen by a few of 40 images, with colours and counts of a pseudo-random sequence
+        let mut x = 0x9e3779b97f4a7c15u64;
+        let mut next = || {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            x
+        };
+        let mut entries: Vec<Entry> = Vec::new();
+        for cell in 0..3000u64 {
+            let seen = 1 + next() % 5;
+            let first = (next() % 40) as u32;
+            for s in 0..seen as u32 {
+                let image = (first + 3 * s) % 40;
+                let level = 30. + (cell % 200) as f32;
+                let colour = [0, 1, 2].map(|j| {
+                    level * (1. + 0.1 * ((image as f32 + j as f32) * 0.37).sin())
+                        + (next() % 7) as f32
+                });
+                entries.push((cell, image, 10 + (next() % 60) as u32, colour));
+            }
+        }
+        entries.sort_unstable_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
+        entries.dedup_by(|a, b| a.0 == b.0 && a.1 == b.1);
+        let (a, b) = (gains(&entries, 40), gains_one_by_one(&entries, 40));
+        assert!(a.iter().any(|g| (g[0] - 1.).abs() > 1e-3));
+        for (p, q) in a.iter().zip(&b) {
+            assert_eq!(p.map(f32::to_bits), q.map(f32::to_bits));
+        }
+    }
 
     #[test]
     fn audit_weights_preserve_direct_blending_and_ties() {
