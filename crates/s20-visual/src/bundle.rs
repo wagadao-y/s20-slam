@@ -1106,6 +1106,149 @@ pub fn solve(
     }
 }
 
+/// What [`solve`] takes, written to a file and read back: the adjustment tried again apart from
+/// the matching before it (`S20_DUMP_TRACKS` in `run`, and the `solve_replay` example).
+pub struct SolveInput {
+    pub poses: Vec<Pose>,
+    pub frame: Vec<usize>,
+    pub frames: usize,
+    pub chain: Vec<(usize, usize)>,
+    pub tracks: Vec<Track>,
+}
+
+const SOLVE_INPUT_MAGIC: &[u8; 8] = b"S20SLV1\n";
+
+/// Writes [`solve`]'s inputs to `path` (little-endian; see [`SolveInput::load`]).
+pub fn save_solve_input(
+    path: &std::path::Path,
+    poses: &[Pose],
+    frame: &[usize],
+    frames: usize,
+    chain: &[(usize, usize)],
+    tracks: &[Track],
+) -> anyhow::Result<()> {
+    use std::io::Write;
+    let file = std::fs::File::create(path)?;
+    let mut w = std::io::BufWriter::new(file);
+    let u = |w: &mut std::io::BufWriter<std::fs::File>, v: u64| w.write_all(&v.to_le_bytes());
+    let f = |w: &mut std::io::BufWriter<std::fs::File>, v: &[f64]| -> std::io::Result<()> {
+        for x in v {
+            w.write_all(&x.to_le_bytes())?;
+        }
+        Ok(())
+    };
+    w.write_all(SOLVE_INPUT_MAGIC)?;
+    u(&mut w, poses.len() as u64)?;
+    for p in poses {
+        f(&mut w, p.r.as_slice())?;
+        f(&mut w, p.p.as_slice())?;
+    }
+    u(&mut w, frame.len() as u64)?;
+    for &k in frame {
+        u(&mut w, k as u64)?;
+    }
+    u(&mut w, frames as u64)?;
+    u(&mut w, chain.len() as u64)?;
+    for &(a, b) in chain {
+        u(&mut w, a as u64)?;
+        u(&mut w, b as u64)?;
+    }
+    u(&mut w, tracks.len() as u64)?;
+    for t in tracks {
+        f(&mut w, t.anchor.as_slice())?;
+        f(&mut w, t.normal.as_slice())?;
+        u(&mut w, t.held as u64)?;
+        u(&mut w, t.sightings.len() as u64)?;
+        for sg in &t.sightings {
+            u(&mut w, sg.image as u64)?;
+            f(&mut w, sg.bearing.as_slice())?;
+            f(&mut w, sg.ta.as_slice())?;
+            f(&mut w, sg.tb.as_slice())?;
+            f(&mut w, &[sg.focal])?;
+        }
+    }
+    w.flush()?;
+    Ok(())
+}
+
+impl SolveInput {
+    /// Reads what [`save_solve_input`] wrote.
+    pub fn load(path: &std::path::Path) -> anyhow::Result<Self> {
+        use std::io::Read;
+        let mut r = std::io::BufReader::new(std::fs::File::open(path)?);
+        let mut magic = [0u8; 8];
+        r.read_exact(&mut magic)?;
+        anyhow::ensure!(&magic == SOLVE_INPUT_MAGIC, "not the adjustment's inputs");
+        let mut b = [0u8; 8];
+        let mut u = |r: &mut std::io::BufReader<std::fs::File>| -> std::io::Result<u64> {
+            r.read_exact(&mut b)?;
+            Ok(u64::from_le_bytes(b))
+        };
+        let f =
+            |r: &mut std::io::BufReader<std::fs::File>, n: usize| -> std::io::Result<Vec<f64>> {
+                let mut v = vec![0u8; 8 * n];
+                r.read_exact(&mut v)?;
+                Ok(v.as_chunks::<8>()
+                    .0
+                    .iter()
+                    .map(|c| f64::from_le_bytes(*c))
+                    .collect())
+            };
+        let v3 = |v: &[f64]| V3::new(v[0], v[1], v[2]);
+        let n = u(&mut r)? as usize;
+        let mut poses = Vec::with_capacity(n);
+        for _ in 0..n {
+            let v = f(&mut r, 12)?;
+            poses.push(Pose {
+                r: M3::from_column_slice(&v[..9]),
+                p: v3(&v[9..]),
+            });
+        }
+        let n = u(&mut r)? as usize;
+        let frame = (0..n)
+            .map(|_| u(&mut r).map(|k| k as usize))
+            .collect::<std::io::Result<_>>()?;
+        let frames = u(&mut r)? as usize;
+        let n = u(&mut r)? as usize;
+        let mut chain = Vec::with_capacity(n);
+        for _ in 0..n {
+            chain.push((u(&mut r)? as usize, u(&mut r)? as usize));
+        }
+        let n = u(&mut r)? as usize;
+        let mut tracks = Vec::with_capacity(n);
+        for _ in 0..n {
+            let v = f(&mut r, 6)?;
+            let held = u(&mut r)? != 0;
+            let m = u(&mut r)? as usize;
+            let mut sightings = Vec::with_capacity(m);
+            for _ in 0..m {
+                let image = u(&mut r)? as usize;
+                let s = f(&mut r, 10)?;
+                sightings.push(Sighting {
+                    image,
+                    bearing: v3(&s[0..3]),
+                    ta: v3(&s[3..6]),
+                    tb: v3(&s[6..9]),
+                    focal: s[9],
+                });
+            }
+            tracks.push(Track {
+                sightings,
+                anchor: v3(&v[..3]),
+                normal: v3(&v[3..]),
+                held,
+            });
+        }
+        Ok(SolveInput {
+            poses,
+            frame,
+            frames,
+            chain,
+            tracks,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1463,5 +1606,48 @@ mod tests {
         let mut images: Vec<usize> = t[0].sightings.iter().map(|s| s.image).collect();
         images.sort_unstable();
         assert_eq!(images, vec![0, 1, 2]);
+    }
+    #[test]
+    fn the_adjustments_inputs_read_back_as_written() {
+        let cam = camera();
+        let k: Intrinsic = Default::default();
+        let poses = vec![
+            Pose {
+                r: Rotation3::from_euler_angles(0.1, 0.2, 0.3).into_inner(),
+                p: V3::new(1., 2., 3.),
+            },
+            Pose {
+                r: M3::identity(),
+                p: V3::new(-1., 0.5, 0.25),
+            },
+        ];
+        let tracks = vec![Track {
+            sightings: vec![
+                Sighting::new(0, [1700., 2300.], &cam, &k),
+                Sighting::new(1, [1800., 2400.], &cam, &k),
+            ],
+            anchor: V3::new(0.5, 4., 1.),
+            normal: V3::new(0., 1., 0.),
+            held: true,
+        }];
+        let path = std::env::temp_dir().join(format!("s20_solve_input_{}", std::process::id()));
+        save_solve_input(&path, &poses, &[0, 1], 2, &[(0, 1)], &tracks).unwrap();
+        let back = SolveInput::load(&path).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(back.poses.len(), 2);
+        assert_eq!(back.poses[0].r, poses[0].r);
+        assert_eq!(back.poses[1].p, poses[1].p);
+        assert_eq!(
+            (back.frame, back.frames, back.chain),
+            (vec![0, 1], 2, vec![(0, 1)])
+        );
+        let (a, b) = (&back.tracks[0], &tracks[0]);
+        assert_eq!((a.anchor, a.normal, a.held), (b.anchor, b.normal, b.held));
+        for (x, y) in a.sightings.iter().zip(&b.sightings) {
+            assert_eq!(
+                (x.image, x.bearing, x.ta, x.tb, x.focal),
+                (y.image, y.bearing, y.ta, y.tb, y.focal)
+            );
+        }
     }
 }

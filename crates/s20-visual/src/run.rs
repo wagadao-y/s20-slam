@@ -605,6 +605,8 @@ fn features_of(
     used: &[usize],
     of: impl Fn(usize) -> Result<Features> + Sync,
 ) -> Result<Vec<Option<Features>>> {
+    // (2006 images: 383 s and 10.9 GB at the highest; unbounded 324 s and 13.8 GB, by twelve 368 s
+    // and 12.6 GB)
     let part: Vec<Features> = used
         .par_iter()
         .map(|&i| ALONE.with(|alone| alone.install(|| of(i))))
@@ -961,6 +963,15 @@ pub fn run(input: &Input, job: &Job) -> Result<serde_json::Value> {
             })
             .collect();
         let s = bundle::Settings::default();
+        // for trying the adjustment again apart (examples/solve_replay.rs)
+        if let Some(path) = std::env::var_os("S20_DUMP_TRACKS") {
+            let path = PathBuf::from(path);
+            bundle::save_solve_input(&path, &start, &frame, frames, &frame_chain, &tracks)?;
+            job.log(&format!(
+                "wrote the adjustment's inputs to {}",
+                path.display()
+            ));
+        }
         let started = std::time::Instant::now();
         let sol = bundle::solve(
             &start,
