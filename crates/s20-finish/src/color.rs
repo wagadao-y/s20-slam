@@ -1052,72 +1052,78 @@ type Entry = (u64, u32, u32, [f32; 3]);
 /// Exposure gain per image and channel: log mean colour of image k over cell c ~ L_c - g_k, by
 /// alternating means weighted by the point counts (residuals clipped at 0.4), pulled to 0 by
 /// the cells' median weight, mean 0 (as colorize_blend.gains). `entries` sorted.
+/// An entry the gains take: of enough points, its colour neither dark nor saturated.
+fn gain_entry(points: u32, rgb: &[f32; 3]) -> bool {
+    rgb.iter().all(|&c| c > 8. && c < 245.) && points >= 20
+}
+
 fn gains(entries: &[Entry], images: usize) -> Vec<[f32; 3]> {
     // (in parallel, each sum in the entries' order as one after another: a cell's within its
     // run of entries, an image's over its entries in their order)
-    let ok: Vec<&Entry> = entries
-        .par_iter()
-        .filter(|e| e.3.iter().all(|&c| c > 8. && c < 245.) && e.2 >= 20)
-        .collect();
-    // the cells seen twice or more (the entries sorted, so a cell's are one run)
-    let mut kept: Vec<&Entry> = Vec::with_capacity(ok.len());
+    // the entries taken, of the cells seen twice or more (the entries sorted, so a cell's are one
+    // run), as four columns: cell, image, weight (points) and log colour (40 bytes an entry)
+    let (mut cs, mut ks, mut ws, mut ys) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    let mut cell_start = vec![0usize];
+    let mut run: Vec<&Entry> = Vec::new();
     let mut a = 0;
-    while a < ok.len() {
+    while a < entries.len() {
         let mut b = a + 1;
-        while b < ok.len() && ok[b].0 == ok[a].0 {
+        while b < entries.len() && entries[b].0 == entries[a].0 {
             b += 1;
         }
-        if b - a >= 2 {
-            kept.extend_from_slice(&ok[a..b]);
+        run.clear();
+        run.extend(entries[a..b].iter().filter(|e| gain_entry(e.2, &e.3)));
+        if run.len() >= 2 {
+            let c = (cell_start.len() - 1) as u32;
+            for e in &run {
+                cs.push(c);
+                ks.push(e.1);
+                ws.push(e.2);
+                ys.push(e.3.map(|c| (c as f64).ln()));
+            }
+            cell_start.push(cs.len());
         }
         a = b;
     }
-    let ok = kept;
-    let mut cell_start = vec![0usize];
-    for i in 1..ok.len() {
-        if ok[i].0 != ok[i - 1].0 {
-            cell_start.push(i);
-        }
-    }
-    if !ok.is_empty() {
-        cell_start.push(ok.len());
-    }
-    let nc = cell_start.len().saturating_sub(1);
-    let mut cs = vec![0usize; ok.len()];
-    for c in 0..nc {
-        cs[cell_start[c]..cell_start[c + 1]].fill(c);
-    }
-    let ks: Vec<usize> = ok.iter().map(|e| e.1 as usize).collect();
-    let ws: Vec<f64> = ok.iter().map(|e| e.2 as f64).collect();
-    let ys: Vec<[f64; 3]> = ok.iter().map(|e| e.3.map(|c| (c as f64).ln())).collect();
+    let nc = cell_start.len() - 1;
     // each image's entries, in their order
     let mut by_image_start = vec![0usize; images + 1];
     for &k in &ks {
-        by_image_start[k + 1] += 1;
+        by_image_start[k as usize + 1] += 1;
     }
     for k in 0..images {
         by_image_start[k + 1] += by_image_start[k];
     }
     let mut at = by_image_start.clone();
-    let mut by_image = vec![0usize; ok.len()];
+    let mut by_image = vec![0u32; ks.len()];
     for (i, &k) in ks.iter().enumerate() {
-        by_image[at[k]] = i;
-        at[k] += 1;
+        by_image[at[k as usize]] = i as u32;
+        at[k as usize] += 1;
     }
+    drop(at);
     let of_image = |k: usize| &by_image[by_image_start[k]..by_image_start[k + 1]];
-    let mut sorted = ws.clone();
-    sorted.par_sort_by(f64::total_cmp);
-    let median = if sorted.is_empty() {
+    // the weights' median (the two middle ones' mean for an even count)
+    let median = if ws.is_empty() {
         0.
-    } else if sorted.len() % 2 == 1 {
-        sorted[sorted.len() / 2]
     } else {
-        0.5 * (sorted[sorted.len() / 2 - 1] + sorted[sorted.len() / 2])
+        let mut w = ws.clone();
+        let n = w.len();
+        let (left, &mut mid, _) = w.select_nth_unstable(n / 2);
+        if n % 2 == 1 {
+            mid as f64
+        } else {
+            0.5 * (*left.iter().max().unwrap() as f64 + mid as f64)
+        }
     };
     // each image's weight, the same every round
     let den: Vec<f64> = (0..images)
         .into_par_iter()
-        .map(|k| of_image(k).iter().map(|&i| ws[i]).fold(0., |s, w| s + w))
+        .map(|k| {
+            of_image(k)
+                .iter()
+                .map(|&i| ws[i as usize] as f64)
+                .fold(0., |s, w| s + w)
+        })
         .collect();
     let mut g = vec![[0f64; 3]; images];
     for _ in 0..30 {
@@ -1127,10 +1133,11 @@ fn gains(entries: &[Entry], images: usize) -> Vec<[f32; 3]> {
             .map(|c| {
                 let (mut num, mut d) = ([0f64; 3], 0f64);
                 for i in cell_start[c]..cell_start[c + 1] {
+                    let (w, k) = (ws[i] as f64, ks[i] as usize);
                     for j in 0..3 {
-                        num[j] += ws[i] * (ys[i][j] + g[ks[i]][j]);
+                        num[j] += w * (ys[i][j] + g[k][j]);
                     }
-                    d += ws[i];
+                    d += w;
                 }
                 num.map(|v| v / d)
             })
@@ -1141,9 +1148,11 @@ fn gains(entries: &[Entry], images: usize) -> Vec<[f32; 3]> {
             .map(|k| {
                 let mut num = [0f64; 3];
                 for &i in of_image(k) {
+                    let i = i as usize;
+                    let (w, c) = (ws[i] as f64, cs[i] as usize);
                     for j in 0..3 {
-                        let r = (l[cs[i]][j] - ys[i][j]).clamp(g[k][j] - 0.4, g[k][j] + 0.4);
-                        num[j] += ws[i] * r;
+                        let r = (l[c][j] - ys[i][j]).clamp(g[k][j] - 0.4, g[k][j] + 0.4);
+                        num[j] += w * r;
                     }
                 }
                 num.map(|v| v / (den[k] + median))
@@ -1279,10 +1288,13 @@ fn gather(
                 acc.map(|x| (x / ws.max(1e-12)) as f32)
             })
             .collect();
+        // only those the gains take (`gain_entry`): of 4650 images, 1.3 billion entries (42 GB)
+        // before
         let gain: Vec<(u32, u32, [f32; 3])> = sums
             .iter()
             .filter(|(c, _)| cells.owned[**c as usize])
             .map(|(&c, (s, m))| (c, *m, s.map(|x| (x / *m as f64) as f32)))
+            .filter(|&(_, m, rgb)| gain_entry(m, &rgb))
             .collect();
         let mut starts = vec![0usize; shards + 1];
         for &s in &v.pts {
@@ -1901,16 +1913,25 @@ pub fn colorize(
     drop(slot);
     let gathered = start.elapsed().as_secs_f64();
     // 2. the gains
+    let t = std::time::Instant::now();
     entries.par_sort_unstable_by(|x, y| x.0.cmp(&y.0).then(x.1.cmp(&y.1)));
+    let sorted = t.elapsed().as_secs_f64();
     let mut g: Vec<[f32; 3]> = if a.gain {
         gains(&entries, poses.len())
     } else {
         vec![[1.; 3]; poses.len()]
     };
+    let solved = t.elapsed().as_secs_f64();
     if a.gain && a.gain_window > 0. {
         let times: Vec<f64> = poses.iter().map(|p| p.time).collect();
         g = local_gains(&g, &times, a.gain_window);
     }
+    job.log(&format!(
+        "colour: gains of {} entries (cell and image): sorted {sorted:.1} s, solved {:.1} s, over time {:.1} s",
+        entries.len(),
+        solved - sorted,
+        t.elapsed().as_secs_f64() - solved
+    ));
     drop(entries);
     if a.gain {
         let mut q: Vec<[f32; 3]> = g.clone();
