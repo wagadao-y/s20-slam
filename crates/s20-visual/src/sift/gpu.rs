@@ -383,7 +383,7 @@ impl GpuSift {
                 self.sized[k].lock().unwrap()
             }
         };
-        self.gpu.checked(|| {
+        let r = self.gpu.checked(|| {
             if guard
                 .as_ref()
                 .is_none_or(|s| s.key != (img.w, img.h, double_first))
@@ -397,7 +397,12 @@ impl GpuSift {
                 contrast,
                 double_first,
             )
-        })
+        });
+        if r.is_err() {
+            // (a read-back may have failed with its buffer mapped: these buffers are made again)
+            *guard = None;
+        }
+        r
     }
 
     fn run(

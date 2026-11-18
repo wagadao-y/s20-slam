@@ -29,6 +29,11 @@ impl Gpu {
         } else {
             wgpu::Backends::PRIMARY
         };
+        // only DX12 is built: elsewhere there is no backend to pick (the instance would panic)
+        anyhow::ensure!(
+            wgpu::Instance::enabled_backend_features().intersects(desc.backends),
+            "no GPU backend in this build"
+        );
         let instance = wgpu::Instance::new(desc.with_env());
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,

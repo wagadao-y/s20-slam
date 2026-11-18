@@ -845,6 +845,8 @@ pub fn collect(input: &Input, job: &Job) -> Result<Collected> {
     };
     // the z-buffers served the matching and the depths
     drop(grids);
+    // the places served the matching and the depths
+    drop(placed);
     job.check()?;
     // the refinement's observations first, in their order without the tracks, so that it and its
     // hold-out are as they were (in place: of the two, only the fewer moved out for a while)

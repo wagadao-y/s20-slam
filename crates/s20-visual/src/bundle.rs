@@ -1173,10 +1173,20 @@ pub fn save_solve_input(
 }
 
 impl SolveInput {
-    /// Reads what [`save_solve_input`] wrote.
+    /// Reads what [`save_solve_input`] wrote (an error for a file that does not hold it).
     pub fn load(path: &std::path::Path) -> anyhow::Result<Self> {
         use std::io::Read;
-        let mut r = std::io::BufReader::new(std::fs::File::open(path)?);
+        let file = std::fs::File::open(path)?;
+        let size = file.metadata()?.len();
+        // a count cannot ask for more than the file holds (8 bytes an item at the least)
+        let fits = |n: u64| -> anyhow::Result<usize> {
+            anyhow::ensure!(
+                n <= size / 8,
+                "not the adjustment's inputs (a count of {n})"
+            );
+            Ok(n as usize)
+        };
+        let mut r = std::io::BufReader::new(file);
         let mut magic = [0u8; 8];
         r.read_exact(&mut magic)?;
         anyhow::ensure!(&magic == SOLVE_INPUT_MAGIC, "not the adjustment's inputs");
@@ -1196,7 +1206,7 @@ impl SolveInput {
                     .collect())
             };
         let v3 = |v: &[f64]| V3::new(v[0], v[1], v[2]);
-        let n = u(&mut r)? as usize;
+        let n = fits(u(&mut r)?)?;
         let mut poses = Vec::with_capacity(n);
         for _ in 0..n {
             let v = f(&mut r, 12)?;
@@ -1205,22 +1215,22 @@ impl SolveInput {
                 p: v3(&v[9..]),
             });
         }
-        let n = u(&mut r)? as usize;
+        let n = fits(u(&mut r)?)?;
         let frame = (0..n)
             .map(|_| u(&mut r).map(|k| k as usize))
             .collect::<std::io::Result<_>>()?;
-        let frames = u(&mut r)? as usize;
-        let n = u(&mut r)? as usize;
+        let frames = fits(u(&mut r)?)?;
+        let n = fits(u(&mut r)?)?;
         let mut chain = Vec::with_capacity(n);
         for _ in 0..n {
             chain.push((u(&mut r)? as usize, u(&mut r)? as usize));
         }
-        let n = u(&mut r)? as usize;
+        let n = fits(u(&mut r)?)?;
         let mut tracks = Vec::with_capacity(n);
         for _ in 0..n {
             let v = f(&mut r, 6)?;
             let held = u(&mut r)? != 0;
-            let m = u(&mut r)? as usize;
+            let m = fits(u(&mut r)?)?;
             let mut sightings = Vec::with_capacity(m);
             for _ in 0..m {
                 let image = u(&mut r)? as usize;
@@ -1240,13 +1250,29 @@ impl SolveInput {
                 held,
             });
         }
-        Ok(SolveInput {
+        let input = SolveInput {
             poses,
             frame,
             frames,
             chain,
             tracks,
-        })
+        };
+        // the indices within what they index
+        anyhow::ensure!(
+            input.frame.len() == input.poses.len()
+                && input.frame.iter().all(|&f| f < input.frames)
+                && input
+                    .chain
+                    .iter()
+                    .all(|&(a, b)| a < input.frames && b < input.frames)
+                && input
+                    .tracks
+                    .iter()
+                    .flat_map(|t| &t.sightings)
+                    .all(|s| s.image < input.poses.len()),
+            "not the adjustment's inputs (an index out of range)"
+        );
+        Ok(input)
     }
 }
 
@@ -1634,6 +1660,17 @@ mod tests {
         let path = std::env::temp_dir().join(format!("s20_solve_input_{}", std::process::id()));
         save_solve_input(&path, &poses, &[0, 1], 2, &[(0, 1)], &tracks).unwrap();
         let back = SolveInput::load(&path).unwrap();
+        // damaged: a count far beyond the file, then a track's image out of range
+        let good = std::fs::read(&path).unwrap();
+        let mut bad = good.clone();
+        bad[8..16].copy_from_slice(&u64::MAX.to_le_bytes());
+        std::fs::write(&path, &bad).unwrap();
+        assert!(SolveInput::load(&path).is_err());
+        let mut bad = good.clone();
+        let at = good.len() - 11 * 8;
+        bad[at..at + 8].copy_from_slice(&7u64.to_le_bytes());
+        std::fs::write(&path, &bad).unwrap();
+        assert!(SolveInput::load(&path).is_err());
         std::fs::remove_file(&path).unwrap();
         assert_eq!(back.poses.len(), 2);
         assert_eq!(back.poses[0].r, poses[0].r);

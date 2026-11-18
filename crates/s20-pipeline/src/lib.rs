@@ -2279,6 +2279,12 @@ impl RunConfig {
                 // the COLMAP model with the poses of the tracks, when refined
                 let tracked = self.tracked_poses();
                 let colmap = (self.refine && tracked.exists()).then_some(tracked.as_path());
+                if self.refine && colmap.is_none() {
+                    job.log(
+                        "the tracks' poses are missing (the refinement ran without the images): \
+                         the COLMAP model takes the refined poses; run the refinement again for the tracks'",
+                    );
+                }
                 images(
                     &self.data(),
                     &self.opt_file(),
@@ -2352,7 +2358,13 @@ impl RunConfig {
     /// As [`RunConfig::run_from`], stopping after `last`.
     pub fn run_until(&self, first: Step, last: Step, job: &Job) -> Result<()> {
         for step in Step::ALL.into_iter().filter(|&s| s <= last) {
-            if step < first && self.done(step) {
+            // (a refinement without the tracks does not serve the images: again when they are
+            // asked for)
+            let tracks_missing = step == Step::Refine
+                && self.images
+                && last >= Step::Images
+                && !self.tracked_poses().exists();
+            if step < first && self.done(step) && !tracks_missing {
                 continue;
             }
             // without colouring, a run stops before the colorize step (unless that step is asked for)
