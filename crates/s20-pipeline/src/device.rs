@@ -1,7 +1,7 @@
 //! The device's camera calibration (`s20 calibrate-cameras` in the GUI): solved from several of a
 //! device's recordings, kept in a folder by the digest of the maker's calibration file (the raw
 //! data carry no serial number, and each device has its own maker calibration), and used in place
-//! of the maker's for its recordings (the export's image poses, the refinement and the colouring).
+//! of the maker's for its recordings (the export's image poses, the refinement and the coloring).
 
 use crate::{IMG_POSE_FILE, RunConfig, export, file_digest, frames};
 use anyhow::{Context, Result, ensure};

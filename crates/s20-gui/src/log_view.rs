@@ -122,7 +122,7 @@ mod tests {
         let ctx = egui::Context::default();
         let mut view = LogView::default();
         let mut log: Vec<String> = (0..MAX_LOGS)
-            .map(|i| format!("{i}: a long optimisation log entry with several words to wrap"))
+            .map(|i| format!("{i}: a long optimization log entry with several words to wrap"))
             .collect();
         let mut run = |width: f32, log: &[String], check: &mut dyn FnMut(&LogView)| {
             ctx.run_ui(egui::RawInput::default(), |ui| {
@@ -173,7 +173,7 @@ mod tests {
                 if i % 7 == 0 {
                     format!(
                         "{i}: {}\nsecond line",
-                        "a long optimisation log entry ".repeat(3)
+                        "a long optimization log entry ".repeat(3)
                     )
                 } else {
                     format!("{i}: short entry")

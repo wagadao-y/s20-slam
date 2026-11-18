@@ -1,6 +1,6 @@
 /* Application glue, Apache-2.0. RTKLIB sources retain their BSD license.
  * No file paths or external programs: Rust supplies validated binary frames.
- * postpos has process-global state; the Rust API serialises access. */
+ * postpos has process-global state; the Rust API serializes access. */
 #define outsol s20_emit_solution
 #include "rtklib.h"
 #include "../vendor/rtklib/src/postpos.c"
@@ -262,7 +262,7 @@ extern void s20_ppk_end(void) {
 extern void s20_ppk_stats(int *out) { memcpy(out,fixed_stats,sizeof(fixed_stats)); }
 
 /* Raw data inspection: one stream decoded alone, apart from the PPK state above, reporting the
-   satellites of each observation epoch. The Rust API serialises access as for PPK. */
+   satellites of each observation epoch. The Rust API serializes access as for PPK. */
 static raw_t *insp_rover;
 static rtcm_t *insp_base;
 extern int s20_inspect_begin(int rcv,int week,double tow) {
@@ -460,8 +460,8 @@ extern int s20_ppk_test_mixed_consistency(void) {
 }
 
 /* FIX/FIX directional check in ENU with sigma floors. At latitude/longitude 0,
-   ECEF x is up, y east and z north. Millimetre FIX covariance alone rejects a
-   2 cm difference; the floors accept centimetres but not decimetres. */
+   ECEF x is up, y east and z north. Millimeter FIX covariance alone rejects a
+   2 cm difference; the floors accept centimeters but not decimeters. */
 extern int s20_ppk_test_fix_floor(void) {
     prcopt_t p=prcopt_default;solopt_t s=solopt_default;test_result_t actual={0};int ok=1,k;
     static const struct { double d[3],fh,fv;int stat; } c[]={
@@ -494,7 +494,7 @@ extern int s20_ppk_test_fix_floor(void) {
 }
 
 /* FIX/FLOAT check with the FLOAT floors (axes as above): a converging FLOAT
-   decimetres away keeps the FIX sigma, metres away still enlarge it, and
+   decimeters away keeps the FIX sigma, meters away still enlarge it, and
    FIX/FIX pairs ignore the FLOAT floors. */
 extern int s20_ppk_test_float_floor(void) {
     prcopt_t p=prcopt_default;solopt_t s=solopt_default;test_result_t actual={0};int ok=1,k;

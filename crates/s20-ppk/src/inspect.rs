@@ -194,7 +194,7 @@ impl Positioning {
     }
 }
 
-/// The receiver's clock against UTC, from the synchronisation in the raw folder's info bags.
+/// The receiver's clock against UTC, from the synchronization in the raw folder's info bags.
 pub struct SyncClock {
     /// (device time, UTC), by device time
     by_device: Vec<(f64, f64)>,
@@ -215,7 +215,7 @@ impl SyncClock {
         Ok(Self { by_device })
     }
 
-    /// The UTC of a device time (none outside the synchronisation or across a break in it).
+    /// The UTC of a device time (none outside the synchronization or across a break in it).
     pub fn utc(&self, device: f64) -> Option<f64> {
         device_time(&self.by_device, device)
     }
@@ -360,7 +360,7 @@ fn gps_time(utc: f64) -> (i32, f64) {
     (week as i32, gps - week * 604_800.0)
 }
 
-fn summarise(b: &[u8], rover: bool, time: (i32, f64), job: &Job) -> Result<RawSummary> {
+fn summarize(b: &[u8], rover: bool, time: (i32, f64), job: &Job) -> Result<RawSummary> {
     let f = frames(b, rover, job)?;
     let mut s = RawSummary {
         bytes: b.len() as u64,
@@ -474,7 +474,7 @@ pub fn inspect(raw: &Path, job: &Job) -> Result<(Option<RawSummary>, Option<RawS
             let f = frames(&b, true, job)?;
             start = rover_time(&b, &f);
             let time = start.context("no GNSS time in the rover's first frame")?;
-            Some(summarise(&b, true, time, job)?)
+            Some(summarize(&b, true, time, job)?)
         }
         None => None,
     };
@@ -488,7 +488,7 @@ pub fn inspect(raw: &Path, job: &Job) -> Result<(Option<RawSummary>, Option<RawS
                     .map_or(0.0, |d| d.as_secs_f64());
                 gps_time(modified)
             });
-            Some(summarise(&b, false, time, job)?)
+            Some(summarize(&b, false, time, job)?)
         }
         None => None,
     };
@@ -649,16 +649,16 @@ mod real_data {
 
     #[test]
     #[ignore = "reads the raw folders of the local multi_park work folder; prints their GNSS summary"]
-    fn summarise_a_recording() {
+    fn summarize_a_recording() {
         let work = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../out/multi_park/project.json");
         let project: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(work).unwrap()).unwrap();
         for session in project["sessions"].as_array().unwrap() {
-            summarise_one(Path::new(session["raw"].as_str().unwrap()));
+            summarize_one(Path::new(session["raw"].as_str().unwrap()));
         }
     }
 
-    fn summarise_one(raw: &Path) {
+    fn summarize_one(raw: &Path) {
         eprintln!("{}", raw.display());
         let started = std::time::Instant::now();
         let (rover, base) = inspect(raw, &Job::stderr()).unwrap();

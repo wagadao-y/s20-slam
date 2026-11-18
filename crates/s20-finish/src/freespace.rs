@@ -70,7 +70,7 @@ fn key(p: [f64; 3], inv: f64) -> u64 {
 
 /// One viewing direction per (voxel, scan), so repeated returns in one frame cannot
 /// turn a transient into persistent support: from the sensor position of the scan's first
-/// observation in the voxel (it moves during a scan) to the voxel centre.
+/// observation in the voxel (it moves during a scan) to the voxel center.
 fn direction_protection(
     raw: &[Observation],
     bounds: &[usize],

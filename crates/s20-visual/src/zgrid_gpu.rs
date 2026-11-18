@@ -1,5 +1,5 @@
 //! [`crate::anchors::zgrid`] for many images on the GPU (`zgrid.wgsl`), the cloud sent once. In
-//! single precision (the points about their centre): a point at a cell's border, or as near as
+//! single precision (the points about their center): a point at a cell's border, or as near as
 //! another, may go the other way than on the CPU.
 
 use crate::anchors::{CELL, Cloud, HEIGHT, Pose, WIDTH, ZGrid, zgrid};
@@ -48,18 +48,18 @@ fn on_gpu(gpu: &Gpu, cloud: &Cloud, poses: &[(Pose, &Fisheye)]) -> Result<Vec<ZG
     ensure!(n > 0 && n < u32::MAX as usize, "no points or too many");
     let (w, h) = (WIDTH.div_ceil(CELL), HEIGHT.div_ceil(CELL));
     let cells = w * h;
-    // the points about their centre, in single precision
-    let mut centre = [0f64; 3];
+    // the points about their center, in single precision
+    let mut center = [0f64; 3];
     for p in &cloud.xyz {
         for d in 0..3 {
-            centre[d] += p[d];
+            center[d] += p[d];
         }
     }
-    centre = centre.map(|c| c / n as f64);
+    center = center.map(|c| c / n as f64);
     let pts: Vec<f32> = cloud
         .xyz
         .iter()
-        .flat_map(|p| [0, 1, 2].map(|d| (p[d] - centre[d]) as f32))
+        .flat_map(|p| [0, 1, 2].map(|d| (p[d] - center[d]) as f32))
         .collect();
     let dev = &gpu.device;
     let buffer = |size: u64, usage: wgpu::BufferUsages, label: &str| {
@@ -193,9 +193,9 @@ fn on_gpu(gpu: &Gpu, cloud: &Cloud, poses: &[(Pose, &Fisheye)]) -> Result<Vec<ZG
             let p = Params {
                 r: [row(0), row(1), row(2)],
                 t: [
-                    (pose.p.x - centre[0]) as f32,
-                    (pose.p.y - centre[1]) as f32,
-                    (pose.p.z - centre[2]) as f32,
+                    (pose.p.x - center[0]) as f32,
+                    (pose.p.y - center[1]) as f32,
+                    (pose.p.z - center[2]) as f32,
                     0.,
                 ],
                 k03: [cam.k[0], cam.k[1], cam.k[2], cam.k[3]].map(|v| v as f32),

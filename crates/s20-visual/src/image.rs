@@ -1,4 +1,4 @@
-//! Greyscale images in f32 (0..255): JPEG decoding and area downscaling.
+//! Grayscale images in f32 (0..255): JPEG decoding and area downscaling.
 
 use anyhow::{Context, Result, ensure};
 use rayon::prelude::*;

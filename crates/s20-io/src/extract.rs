@@ -92,7 +92,7 @@ pub const DEVICE_POSE: &str = "device_pose.txt";
 
 /// The tilt of the LiDAR (and its IMU) about the device's y axis: `frame_pose.txt` holds the device
 /// body, world_T_imu = world_T_body * Ry(25°) (the S20's LiDAR is mounted tilted 25° to the ground).
-/// Fitted against the optimised trajectory of a garden recording: 24.5° about y, under 0.2° about
+/// Fitted against the optimized trajectory of a garden recording: 24.5° about y, under 0.2° about
 /// the other axes, and the body's origin within a few cm of the IMU's (taken as the same).
 const DEVICE_TILT_DEG: f64 = 25.0;
 
@@ -181,7 +181,7 @@ pub fn extract(raw: &Path, out: &Path, job: &crate::job::Job) -> Result<ExtractS
     }
     npy::write_f64(&out.join("imu.npy"), &imu, 7)?;
 
-    // --- gnss (receiver solution synchronised to the device clock)
+    // --- gnss (receiver solution synchronized to the device clock)
     let gm = bag.topic_messages("/rtk_agent/pvtsln_sync");
     let mut gnss = Vec::with_capacity(gm.len() * 14);
     for m in &gm {

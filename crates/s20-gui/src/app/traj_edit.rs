@@ -17,7 +17,7 @@ pub(super) enum EditKind {
 impl EditKind {
     pub(super) const ALL: [EditKind; 3] = [EditKind::Exclude, EditKind::Hold, EditKind::Loop];
 
-    /// The colour it takes on the trajectory and the time bar, and of its markers.
+    /// The color it takes on the trajectory and the time bar, and of its markers.
     pub(super) fn color(self) -> egui::Color32 {
         let c = match self {
             EditKind::Exclude => EXCLUDED,
@@ -544,9 +544,9 @@ impl App {
         }
     }
 
-    /// The view's label of an end of a correction, after `what`, and its colour: a loop's in the
-    /// colour of its session when there are several (its marker shows it is a loop), an
-    /// interval's in the colour of its kind with the short session name in the session's.
+    /// The view's label of an end of a correction, after `what`, and its color: a loop's in the
+    /// color of its session when there are several (its marker shows it is a loop), an
+    /// interval's in the color of its kind with the short session name in the session's.
     fn end_label(
         &self,
         painter: &egui::Painter,
@@ -725,7 +725,7 @@ impl App {
     }
 
     /// The run that applies the corrections: from the odometry when it is out of date (the
-    /// heading holds changed), else the optimisation alone.
+    /// heading holds changed), else the optimization alone.
     pub(super) fn apply_run(&self) -> Run {
         if self.steps.get(&Step::Lio) == Some(&StepState::Stale) {
             Run {

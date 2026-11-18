@@ -29,7 +29,7 @@ struct Profile {
     calls: [f64; 2],
     call_seconds: [f64; 2],
     search_seconds: f64,
-    /// Cells returned by the neighbourhood searches, and a histogram of them (first radius).
+    /// Cells returned by the neighborhood searches, and a histogram of them (first radius).
     cells: f64,
     cell_hist: [f64; 8],
     fast_hits: f64,
@@ -106,10 +106,10 @@ fn v(p: [f32; 3]) -> V {
     V::new(p[0] as f64, p[1] as f64, p[2] as f64)
 }
 
-/// Sufficient statistics of the observations in one cell, relative to the cell centre.
+/// Sufficient statistics of the observations in one cell, relative to the cell center.
 #[derive(Clone)]
 struct Cell {
-    centre: V,
+    center: V,
     n: f64,
     sum: V,
     // Lower triangle, column-major: 00, 10, 20, 11, 21, 22. Keeping a cell at
@@ -120,7 +120,7 @@ struct Cell {
 }
 impl Cell {
     fn centroid(&self) -> V {
-        self.centre + self.sum / self.n
+        self.center + self.sum / self.n
     }
 }
 pub struct Moments {
@@ -130,7 +130,7 @@ pub struct Moments {
 
 /// Cell centroids bucketed on a coarse grid for radius searches. The cells already sit on a
 /// regular 1 cm grid, so a hash of coarse buckets, each a contiguous run of centroids, finds
-/// a neighbourhood with a few lookups and a linear scan, where a KD-tree over tens of millions
+/// a neighborhood with a few lookups and a linear scan, where a KD-tree over tens of millions
 /// of cells spends most of the plane classification in pointer chasing.
 struct CellGrid {
     inv: f64,
@@ -143,7 +143,7 @@ struct CellGrid {
 /// cells outside the sphere, and large enough that a search touches few buckets.
 const GRID_BUCKET: f64 = 0.04;
 /// Debug: `S20_TRACE=<file>` and `S20_TRACE_BOX=minx,miny,minz,maxx,maxy,maxz` write one JSON line
-/// per plane fit centred in the box: the PCA over all cells, the fast path, each consensus's
+/// per plane fit centerd in the box: the PCA over all cells, the fast path, each consensus's
 /// candidates and scores, and the planes fitted.
 struct Trace {
     file: std::sync::Mutex<std::io::BufWriter<std::fs::File>>,
@@ -222,11 +222,11 @@ fn js_plane(pl: &Plane) -> String {
         pl.count
     )
 }
-/// Stability check only: `S20_REVERSE_NEIGHBOURS=1` lists the neighbours in descending cell
+/// Stability check only: `S20_REVERSE_NEIGHBORS=1` lists the neighbors in descending cell
 /// order. A method whose result changes with it depends on an arbitrary order.
-fn reverse_neighbours() -> bool {
+fn reverse_neighbors() -> bool {
     static R: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *R.get_or_init(|| std::env::var("S20_REVERSE_NEIGHBOURS").is_ok_and(|v| v == "1"))
+    *R.get_or_init(|| std::env::var("S20_REVERSE_NEIGHBORS").is_ok_and(|v| v == "1"))
 }
 impl CellGrid {
     fn key(&self, p: [f64; 3]) -> [i32; 3] {
@@ -357,20 +357,20 @@ impl Moments {
             .par_windows(2)
             .map(|w| {
                 let k = keyed[w[0]].0;
-                let centre = V::new(
+                let center = V::new(
                     (k[0] as f64 + 0.5) * cell,
                     (k[1] as f64 + 0.5) * cell,
                     (k[2] as f64 + 0.5) * cell,
                 );
                 let mut c = Cell {
-                    centre,
+                    center,
                     n: 0.,
                     sum: V::zeros(),
                     second: [0.; 6],
                     ray: V::zeros(),
                 };
                 for &(_, i) in &keyed[w[0]..w[1]] {
-                    let d = v(raw[i].xyz) - centre;
+                    let d = v(raw[i].xyz) - center;
                     c.n += 1.;
                     c.sum += d;
                     for (s, (i, j)) in
@@ -405,7 +405,7 @@ impl Moments {
         let mut ids = Vec::new();
         self.grid.within((*q).into(), r, &mut ids);
         ids.sort_unstable();
-        if reverse_neighbours() {
+        if reverse_neighbors() {
             ids.reverse();
         }
         ids
@@ -433,7 +433,7 @@ fn plane(cells: &[&Cell], w: &[f64]) -> Option<Plane> {
             continue;
         }
         sw += w * c.n;
-        s += w * (c.centre * c.n + c.sum);
+        s += w * (c.center * c.n + c.sum);
         count += c.n;
     }
     if sw < 1e-9 {
@@ -445,7 +445,7 @@ fn plane(cells: &[&Cell], w: &[f64]) -> Option<Plane> {
         if w <= 0. {
             continue;
         }
-        let a = c.centre - mu;
+        let a = c.center - mu;
         // SymmetricEigen reads the lower triangle. Preserve the arithmetic order of each
         // entry, but avoid computing the unused upper triangle on every robust refit.
         for (&second, (i, j)) in
@@ -629,7 +629,7 @@ pub struct Outcome {
     pub status: u32,
     pub plane: Option<(V, V, f64)>,
     pub count: u32,
-    /// The plane came from the fast path: one plane over the neighbourhood.
+    /// The plane came from the fast path: one plane over the neighborhood.
     pub clean: bool,
 }
 /// Status codes shared with `geometry::STATUS_NAMES` (codes of removed stages stay unused so
@@ -692,7 +692,7 @@ fn classify_at(m: &Moments, q: V, rq: &V, range: f64, p: &FinishParams, r: f64) 
     o
 }
 
-/// The plane of a neighbourhood, before a query is tested against it (see [`decide`]).
+/// The plane of a neighborhood, before a query is tested against it (see [`decide`]).
 #[derive(Clone)]
 enum Fit {
     /// No plane: `SPARSE` or `NONPLANAR`.
@@ -713,8 +713,8 @@ impl Fit {
     }
 }
 
-/// The query's status and plane: everything else depends on the neighbourhood only, so a fit
-/// can be shared by the queries near its centre seen from the same side.
+/// The query's status and plane: everything else depends on the neighborhood only, so a fit
+/// can be shared by the queries near its center seen from the same side.
 fn decide(fit: &Fit, q: V, range: f64, p: &FinishParams) -> Outcome {
     match fit {
         Fit::None { status, count } => Outcome {
@@ -755,7 +755,7 @@ fn decide(fit: &Fit, q: V, range: f64, p: &FinishParams) -> Outcome {
     }
 }
 
-/// The planes within `r` of `q` (the query, or the centre of the queries sharing the fit),
+/// The planes within `r` of `q` (the query, or the center of the queries sharing the fit),
 /// seen from the side of `rq`.
 fn fit_at(m: &Moments, q: V, rq: &V, p: &FinishParams, r: f64, tier: usize) -> Fit {
     let traced = trace_selected(&q);
@@ -1190,15 +1190,15 @@ impl Prepared {
                     job.report("shared planes", k as u64, groups as u64);
                 }
                 let t = Instant::now();
-                let (mut centre, mut ray) = (V::zeros(), V::zeros());
+                let (mut center, mut ray) = (V::zeros(), V::zeros());
                 for &(_, i) in &keyed[w[0]..w[1]] {
                     let o = &input[i as usize];
-                    centre += v(o.xyz);
+                    center += v(o.xyz);
                     ray += (v(o.xyz) - v(o.origin)).normalize();
                 }
-                centre /= (w[1] - w[0]) as f64;
+                center /= (w[1] - w[0]) as f64;
                 let ray = ray.normalize();
-                let fit = fit_at(&self.moments, centre, &ray, p, p.mls_radius, 0);
+                let fit = fit_at(&self.moments, center, &ray, p, p.mls_radius, 0);
                 let s = t.elapsed().as_secs_f64();
                 profile(|f| {
                     f.anchor_groups += 1.;
@@ -1395,7 +1395,7 @@ mod tests {
     /// rejects the other face's points near the line, and the 4 / 2 cm retries lean between the
     /// faces (2026-10-21: 3.9% of the points within 10 cm beyond 2 mm, at most 6.4 mm).
     #[test]
-    fn corner_rounds_by_a_few_millimetres_at_most() {
+    fn corner_rounds_by_a_few_millimeters_at_most() {
         for anchor_grid in ANCHORS {
             corner(anchor_grid);
         }

@@ -197,7 +197,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn paths_are_relative_to_the_work_folder_or_labelled() {
+    fn paths_are_relative_to_the_work_folder_or_labeled() {
         let m = PathMask { rules: Vec::new() }
             .with(Path::new(r"E:\home\someone"), "~")
             .with(Path::new(r"E:\home\someone\scans\work"), "")

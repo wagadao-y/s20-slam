@@ -54,7 +54,7 @@ part keeps its own license, reproduced at the end of this file.
    The Potree 2.0 octrees written next to the output clouds
    (crates/s20-io/src/potree.rs) follow its layout and method: the folder and
    files, the counting grid cut into chunks, nodes sampled bottom-up on a 128³
-   grid, BROTLI nodes of Morton-coded positions and colours.
+   grid, BROTLI nodes of Morton-coded positions and colors.
 
 The Rust crates built into this product, and the fonts egui embeds, are listed
 with their licenses in THIRD-PARTY-LICENSES.txt (generated from Cargo.lock by

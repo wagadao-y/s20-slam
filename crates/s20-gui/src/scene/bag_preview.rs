@@ -236,7 +236,7 @@ impl Reader {
                     continue;
                 };
                 let w = r * V3::from(raw.x[i].map(f64::from)) + p;
-                let g = super::reflectivity_grey(raw.refl[i].into());
+                let g = super::reflectivity_gray(raw.refl[i].into());
                 points.push(ViewPoint {
                     offset: [
                         (w.x - origin[0]) as f32,
@@ -286,7 +286,7 @@ pub(super) fn open(
                 continue;
             };
             let w = r * V3::from(s.xyz.map(f64::from)) + p;
-            let g = super::reflectivity_grey(s.reflectivity.into());
+            let g = super::reflectivity_gray(s.reflectivity.into());
             sample.push(([w.x, w.y, w.z], [g; 4]));
         }
         let spacing = lod_node(&sample).map_or(0.05, |n| n.sample_nn);

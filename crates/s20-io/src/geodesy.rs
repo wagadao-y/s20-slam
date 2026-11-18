@@ -4,11 +4,11 @@ use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
 use std::{fs, path::Path};
 
-/// Coordinates of the trajectory and its exported points (metres).
+/// Coordinates of the trajectory and its exported points (meters).
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CoordinateFrame {
-    /// WGS84 geodetic latitude/longitude (degrees), ellipsoidal height (metres).
+    /// WGS84 geodetic latitude/longitude (degrees), ellipsoidal height (meters).
     LocalEnu { origin_llh: [f64; 3] },
     /// GNSS was not used; the first session's SLAM frame defines the coordinates.
     LocalSlam,
@@ -153,7 +153,7 @@ impl TransverseMercator {
         (xi, eta)
     }
 
-    /// (easting, northing) in metres from latitude/longitude in degrees.
+    /// (easting, northing) in meters from latitude/longitude in degrees.
     pub fn forward(&self, lat_deg: f64, lon_deg: f64) -> (f64, f64) {
         let (xi, eta) = self.xi_eta(lat_deg.to_radians(), lon_deg.to_radians());
         (
@@ -180,8 +180,8 @@ mod tests {
         let b = 6378137. * (1. - 1. / 298.257223563);
         assert!((north[1] - b).abs() < 1e-8);
         assert!((north[2] + 6378137.).abs() < 1e-8);
-        let metre = frame.position([0., (1.0_f64 / 6378137.).to_degrees(), 0.]);
-        assert!((metre[0] - 1.).abs() < 1e-10);
+        let meter = frame.position([0., (1.0_f64 / 6378137.).to_degrees(), 0.]);
+        assert!((meter[0] - 1.).abs() < 1e-10);
     }
 
     #[test]

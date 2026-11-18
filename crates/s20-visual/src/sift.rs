@@ -42,7 +42,7 @@ pub struct Keypoint {
     layer: usize,
     ox: f32,
     oy: f32,
-    /// the refined integer position in that octave (the orientation histogram's centre)
+    /// the refined integer position in that octave (the orientation histogram's center)
     ix: isize,
     iy: isize,
     /// input pixels per pixel of octave 0: 0.5 when the image was doubled, else 1
@@ -77,9 +77,9 @@ fn blur(src: &Gray, sigma: f32) -> Gray {
         let padded: Vec<f32> = (0..w + 2 * half)
             .map(|i| line[reflect(i as isize - half as isize, w)])
             .collect();
-        let centre = k[half];
+        let center = k[half];
         for (o, v) in row.iter_mut().zip(&padded[half..half + w]) {
-            *o = v * centre;
+            *o = v * center;
         }
         // tap by tap over the whole row, so the inner loop runs over contiguous pixels
         for i in 1..=half {
@@ -112,7 +112,7 @@ fn blur(src: &Gray, sigma: f32) -> Gray {
     out
 }
 
-/// Bilinear doubling (OpenCV INTER_LINEAR with half-pixel centres).
+/// Bilinear doubling (OpenCV INTER_LINEAR with half-pixel centers).
 fn double(src: &Gray) -> Gray {
     let (w, h) = (src.w * 2, src.h * 2);
     let mut out = Gray::new(w, h);
@@ -603,7 +603,7 @@ pub fn detect_with(
                         return found;
                     }
                     let (p, c, n) = (&dog[l - 1], &dog[l], &dog[l + 1]);
-                    // the 8 neighbours in the layer, then the 9 above and below (offsets in the row-major pixels)
+                    // the 8 neighbors in the layer, then the 9 above and below (offsets in the row-major pixels)
                     let around: [isize; 8] = [
                         -(w as isize) - 1,
                         -(w as isize),

@@ -62,10 +62,10 @@ fn one_way(
     let (cols, rows) = y.cells.size();
     // within 80 degrees of y's axis: the lateral distance against the depth (no arctangent)
     let tan_limit = 80f64.to_radians().tan();
-    // the rays in y's frame: from x's centre (`a`) along each feature's direction
+    // the rays in y's frame: from x's center (`a`) along each feature's direction
     let rt = y.pose.r.transpose();
     let a = rt * (x.pose.p - y.pose.p);
-    // a cell holds a feature within `gate` of a piece only when its centre is within this of it
+    // a cell holds a feature within `gate` of a piece only when its center is within this of it
     let reach = gate + CELL * std::f64::consts::FRAC_1_SQRT_2;
     // (the curve, the features near it and which are already in, in buffers of each thread)
     (0..x.features.uv.len())
@@ -112,8 +112,8 @@ fn one_way(
                     );
                     for gy in r0.max(0)..=r1.min(rows as isize - 1) {
                         for gx in c0.max(0)..=c1.min(cols as isize - 1) {
-                            let centre = [(gx as f64 + 0.5) * CELL, (gy as f64 + 0.5) * CELL];
-                            if to_segment(centre, w[0], w[1]) > reach {
+                            let center = [(gx as f64 + 0.5) * CELL, (gy as f64 + 0.5) * CELL];
+                            if to_segment(center, w[0], w[1]) > reach {
                                 continue;
                             }
                             for &j in y.cells.at(gx, gy) {

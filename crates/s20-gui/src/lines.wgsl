@@ -3,9 +3,9 @@
 struct Lines {
     // Positions are relative to the camera target, like `view`.
     view: mat4x4<f32>, projection: mat4x4<f32>, viewport: vec2<f32>,
-    // Physical pixels a metre spans at a view depth of 1 (perspective) or at
+    // Physical pixels a meter spans at a view depth of 1 (perspective) or at
     // any depth (parallel projection).
-    pixels_per_metre: f32, ortho: f32,
+    pixels_per_meter: f32, ortho: f32,
     // Added to the view depth for EDL, as for the points.
     depth_offset: f32,
     // 1: drawn over the points; they leave no depth, so eye-dome lighting does not shade them
@@ -22,11 +22,11 @@ struct Out {
 const BIAS_PIXELS = 4.0;
 fn toward_eye(p: vec3<f32>) -> vec4<f32> {
     var v = lines.view * vec4(p, 1.0);
-    var metres = BIAS_PIXELS / lines.pixels_per_metre;
+    var meters = BIAS_PIXELS / lines.pixels_per_meter;
     if lines.ortho < 0.5 {
-        metres = metres * max(-v.z, 0.0);
+        meters = meters * max(-v.z, 0.0);
     }
-    v.z = v.z + metres;
+    v.z = v.z + meters;
     return v;
 }
 @vertex fn vertex(@builtin(vertex_index) id: u32, @location(0) a: vec3<f32>, @location(1) b: vec3<f32>, @location(2) color: vec4<f32>, @location(3) width: f32) -> Out {

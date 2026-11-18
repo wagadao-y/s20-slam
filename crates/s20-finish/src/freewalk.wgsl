@@ -131,7 +131,7 @@ fn walk(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) lid: ve
                 ok = true;
             } else {
                 // the distance of the centroid to the ray by the cross product: |m|^2 - (m.u)^2
-                // loses all of a centimetre to cancellation in single precision at tens of metres
+                // loses all of a centimeter to cancellation in single precision at tens of meters
                 let m = vec3f(centroids[3u * v], centroids[3u * v + 1u], centroids[3u * v + 2u]) - a;
                 let q = cross(m, u);
                 ok = dot(q, q) <= P.r2;

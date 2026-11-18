@@ -1,6 +1,6 @@
 //! A recording as a COLMAP model for 3D Gaussian Splatting: the images as they are, each camera as
 //! COLMAP's `OPENCV_FISHEYE` (Kannala-Brandt) fitted to the S20 polynomial, the image poses, and
-//! the coloured cloud thinned to one point per voxel as the seed points.
+//! the colored cloud thinned to one point per voxel as the seed points.
 //!
 //! Kannala-Brandt has odd powers of theta only and no skew, so the fit leaves a fraction of a
 //! pixel (the report gives it). Pixels past `max_angle` lie outside the calibration's fit and are
@@ -18,7 +18,7 @@ use std::fmt::Write as _;
 use std::path::PathBuf;
 
 /// `OPENCV_FISHEYE`: pixel = f * theta (1 + k1 theta^2 + ... + k4 theta^8) + c, in S20 pixels
-/// (centres on integers; COLMAP's are on halves).
+/// (centers on integers; COLMAP's are on halves).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Kb {
     pub fx: f64,
@@ -45,7 +45,7 @@ impl Kb {
         [self.fx * d * c + self.cx, self.fy * d * s + self.cy]
     }
 
-    /// The `cameras.txt` line (COLMAP's pixel centres).
+    /// The `cameras.txt` line (COLMAP's pixel centers).
     pub fn colmap_line(&self, id: usize, width: u32, height: u32) -> String {
         let p = [
             self.fx,
@@ -185,10 +185,10 @@ pub fn image_line(id: usize, camera: usize, name: &str, pose: &Pose) -> String {
     )
 }
 
-/// A point's position and colour.
+/// A point's position and color.
 type Point = ([f64; 3], [u8; 3]);
 
-/// One point per voxel (the mean position and colour) from a uniform draw of the cloud, the voxel
+/// One point per voxel (the mean position and color) from a uniform draw of the cloud, the voxel
 /// found by bisection so that about `target` remain; and the voxel edge (m).
 pub fn thin(pts: &[Point], target: usize) -> (Vec<Point>, f64) {
     if pts.len() <= target {

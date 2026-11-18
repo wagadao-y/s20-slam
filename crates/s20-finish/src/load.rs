@@ -1,6 +1,6 @@
 //! The observations of a dataset placed with a trajectory: each point with the pose at its own
 //! time, world = R(t)·(x + lever) + p(t), the sensor at R(t)·lever + p(t). The trajectories are
-//! in the dataset's local frame (its projection origin subtracted), so f32 keeps millimetres.
+//! in the dataset's local frame (its projection origin subtracted), so f32 keeps millimeters.
 use crate::{FinishParams, Observation};
 use rayon::prelude::*;
 use s20_geom::so3::V3;

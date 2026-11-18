@@ -1,4 +1,4 @@
-//! Trajectory comparison against a reference (e.g. LIO against the PPK-constrained optimisation).
+//! Trajectory comparison against a reference (e.g. LIO against the PPK-constrained optimization).
 //!
 //! - Drift: the estimate is fitted rigidly to the reference over its first `align_s` seconds only, as an
 //!   unreferenced survey would be, and the horizontal / vertical error is reported along the path.

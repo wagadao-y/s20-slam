@@ -1,4 +1,4 @@
-//! Trajectory colouring by the per-knot quality of the optimisation (`opt_quality.txt`).
+//! Trajectory coloring by the per-knot quality of the optimization (`opt_quality.txt`).
 
 use crate::lang::tl;
 use anyhow::Result;
@@ -145,7 +145,7 @@ pub fn badness(m: &Metric, bad: f64, v: f64) -> f64 {
     ((v - m.good) / (bad - m.good)).clamp(0.0, 1.0)
 }
 
-/// Green -> yellow -> red; grey for NaN.
+/// Green -> yellow -> red; gray for NaN.
 pub fn color(u: f64) -> [u8; 3] {
     if !u.is_finite() {
         return [120, 120, 120];

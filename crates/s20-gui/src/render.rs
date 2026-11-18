@@ -43,10 +43,10 @@ struct Uniform {
     /// highlighted when `box_highlight_on` is 1.
     highlight_box: [[f32; 4]; 4],
     box_highlight_on: f32,
-    /// How the points are coloured: `Coloring::code`.
+    /// How the points are colored: `Coloring::code`.
     color_mode: f32,
-    /// Physical pixels a metre spans at a clip-space w of 1.
-    pixels_per_metre: f32,
+    /// Physical pixels a meter spans at a clip-space w of 1.
+    pixels_per_meter: f32,
     /// The draw's place in the frame, written to the id target.
     segment: u32,
     /// Height scaled to 0..1 over the ramp as `dot(ramp, (position, 1))`.
@@ -83,7 +83,7 @@ struct LineUniform {
     view: [[f32; 4]; 4],
     projection: [[f32; 4]; 4],
     viewport: [f32; 2],
-    pixels_per_metre: f32,
+    pixels_per_meter: f32,
     ortho: f32,
     depth_offset: f32,
     padding: [f32; 3],
@@ -95,10 +95,10 @@ struct EdlUniform {
     strength: f32,
     padding: [f32; 2],
 }
-/// Eye-Dome Lighting. A strength of 0 shows the plain colours.
+/// Eye-Dome Lighting. A strength of 0 shows the plain colors.
 #[derive(Clone, Copy, PartialEq)]
 pub struct Edl {
-    /// Neighbour distance in physical pixels.
+    /// Neighbor distance in physical pixels.
     pub radius: f32,
     pub strength: f32,
 }
@@ -113,19 +113,19 @@ struct Targets {
     output: wgpu::TextureView,
     edl_bind: wgpu::BindGroup,
 }
-/// How the points are coloured. The points carry an sRGB colour and, in its alpha, their grey
+/// How the points are colored. The points carry an sRGB color and, in its alpha, their gray
 /// by reflectivity.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Coloring {
-    /// their own colour
+    /// their own color
     Rgb,
-    /// grey by reflectivity
+    /// gray by reflectivity
     Reflectivity,
     /// by height from the first to the second value (project Z)
     Height([f64; 2]),
     /// each node's tint (its session), shaded by reflectivity
     Tint,
-    /// one grey
+    /// one gray
     Plain,
 }
 
@@ -175,16 +175,16 @@ pub struct DrawNode<'a> {
     pub id: usize,
     pub points: &'a Arc<NodePoints>,
     pub world: DMat4,
-    /// sRGB colour (0..1) mixed into the points, by the fourth component.
+    /// sRGB color (0..1) mixed into the points, by the fourth component.
     pub tint: [f32; 4],
     /// Points to highlight, e.g. those a move would take; none when no point
     /// is. New marks come in a new array.
     pub marks: Option<&'a Arc<[bool]>>,
-    /// Each point's spacing in metres, for adaptive point size.
+    /// Each point's spacing in meters, for adaptive point size.
     pub spacings: Option<&'a Arc<[f32]>>,
     /// Draw only the first `limit` points (all of them are uploaded).
     pub limit: u32,
-    /// Spacing of the drawn points in metres for adaptive size; 0 uses `spacings`.
+    /// Spacing of the drawn points in meters for adaptive size; 0 uses `spacings`.
     pub spacing: f32,
 }
 /// GPU bookkeeping holds a weak reference: the identity allocation stays unique, while evicting
@@ -600,9 +600,9 @@ impl PointRenderer {
         if camera.ortho {
             depth_row.w += camera.distance;
         }
-        // A metre at clip-space w = 1 spans this many pixels vertically: the
+        // A meter at clip-space w = 1 spans this many pixels vertically: the
         // projection's y scale over the half-height in pixels.
-        let pixels_per_metre = (if camera.ortho {
+        let pixels_per_meter = (if camera.ortho {
             1. / camera.half_height()
         } else {
             1. / (camera.fov * 0.5).tan()
@@ -634,7 +634,7 @@ impl PointRenderer {
                     .to_cols_array_2d(),
                 box_highlight_on: highlight_box.is_some() as u32 as f32,
                 color_mode: coloring.code(),
-                pixels_per_metre,
+                pixels_per_meter,
                 segment: i as u32,
                 ramp: match coloring {
                     Coloring::Height([low, high]) => {
@@ -718,7 +718,7 @@ impl PointRenderer {
                     view: camera.relative_view().as_mat4().to_cols_array_2d(),
                     projection: camera.projection().as_mat4().to_cols_array_2d(),
                     viewport: [size[0] as f32, size[1] as f32],
-                    pixels_per_metre,
+                    pixels_per_meter,
                     ortho: camera.ortho as u32 as f32,
                     depth_offset: if camera.ortho {
                         camera.distance as f32

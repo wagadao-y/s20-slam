@@ -22,7 +22,7 @@ use crate::scene::{self, NodePoints, Scene, TrajectorySource};
 use eframe::egui;
 use egui_phosphor::regular as icon;
 use glam::{DMat4, DVec3};
-use s20_pipeline::job::{Job, is_cancelled};
+use s20_pipeline::job::{Job, is_canceled};
 use s20_pipeline::runlog::PathMask;
 use s20_pipeline::{
     At, Edits, FolderKind, NameProblem, PointAt, ProcessParams, RunConfig, Step, WorkSettings,
@@ -103,7 +103,7 @@ struct Settings {
     laz: bool,
     /// the export writes the photos with their poses (`images/`)
     images: bool,
-    /// every image's pose is refined against the cloud before the colouring
+    /// every image's pose is refined against the cloud before the coloring
     refine: bool,
     point_size: f32,
     /// Potree's adaptive point size (by the spacing of the drawn points): the output cloud, the
@@ -124,19 +124,19 @@ struct Settings {
     traj_on_top: bool,
     /// RTK fixes on the trajectory
     show_rtk: bool,
-    /// the corrections' intervals in their colours on the trajectory (else its own colours show
-    /// through; the interval being placed is coloured all the same)
+    /// the corrections' intervals in their colors on the trajectory (else its own colors show
+    /// through; the interval being placed is colored all the same)
     show_edit_spans: bool,
     /// the camera follows the time slider
     follow: bool,
     /// camera images of the slider time
     show_images: bool,
-    /// trajectory colours: 0 time, else quality metric index + 1
+    /// trajectory colors: 0 time, else quality metric index + 1
     traj_metric: usize,
     /// value shown red, per metric
     metric_bad: [f64; 7],
     show_points: bool,
-    /// how the points are coloured: the scans, the output cloud
+    /// how the points are colored: the scans, the output cloud
     point_color_scans: PointColor,
     point_color_output: PointColor,
     /// the scans drawn by time: all, around the marked time or up to it
@@ -278,7 +278,7 @@ struct Running {
     log_file: Option<Arc<s20_pipeline::runlog::LogFile>>,
 }
 
-/// Shares the optimisation bar across its phases: PPK when it is computed (not when cached), then
+/// Shares the optimization bar across its phases: PPK when it is computed (not when cached), then
 /// loading, the pose graph on the GNSS fixes, the loops' registration and the iterations. The
 /// iterations take most of the time (a 30-minute recording: loading 9 s, GNSS 6 s, iterations
 /// 170 s), so they take most of the bar.
@@ -296,7 +296,7 @@ impl OptProgress {
         } else {
             0.0
         };
-        // the optimisation's own phases: where each starts and how much of the bar it takes
+        // the optimization's own phases: where each starts and how much of the bar it takes
         let (label, start, width) = match stage {
             "ppk decode" | "ppk forward" | "ppk backward" => {
                 self.ppk = true;
@@ -336,7 +336,7 @@ impl OptProgress {
     }
 }
 
-/// Everything that changes the trajectory geometry or colours; the camera is deliberately absent.
+/// Everything that changes the trajectory geometry or colors; the camera is deliberately absent.
 #[derive(PartialEq)]
 struct TrajectoryKey {
     scene_revision: u64,
@@ -398,8 +398,8 @@ pub struct App {
     camera: Camera,
     renderer: Option<PointRenderer>,
     framed: bool,
-    /// animated retarget: camera at the start, new orbit centre, start time
-    /// animated retarget: camera at the start, new orbit centre, new distance, start time
+    /// animated retarget: camera at the start, new orbit center, start time
+    /// animated retarget: camera at the start, new orbit center, new distance, start time
     flight: Option<(Camera, DVec3, Option<f64>, Instant)>,
     /// a time picked on the trajectory (sensor clock) and its position
     marker: Option<(f64, DVec3)>,
@@ -448,7 +448,7 @@ pub struct App {
     /// values); the outcome of the last JSON export or import (ok, message)
     params_open: bool,
     /// the preview to go back to when the debug layers are left
-    /// the heights coloured over when set by hand (else the scene's)
+    /// the heights colored over when set by hand (else the scene's)
     height_manual: Option<[f64; 2]>,
     /// the heights the points are cut below and above, by the slider on the view (none: not cut)
     height_clip: [Option<f64>; 2],
@@ -564,7 +564,7 @@ pub struct Smoke {
     pub adaptive: Option<bool>,
     /// camera distance factor after framing
     pub zoom: Option<f64>,
-    /// trajectory colour metric (0 time, else metric + 1), and fly to its worst place
+    /// trajectory color metric (0 time, else metric + 1), and fly to its worst place
     pub metric: Option<usize>,
     pub goto_worst: bool,
     /// mark this time (seconds from the start) once the preview is there
@@ -996,7 +996,7 @@ impl App {
             );
             return;
         }
-        // the corrections the optimisation runs with stay as a revision
+        // the corrections the optimization runs with stay as a revision
         if first <= Step::Opt && last.is_none_or(|l| l >= Step::Opt) {
             self.save_revision(true);
         }
@@ -1101,7 +1101,7 @@ impl App {
             while let Ok(e) = job.rx.try_recv() {
                 match e {
                     Event::Progress(stage, done, total) => {
-                        // the phases of the optimisation (with PPK) report under their own names
+                        // the phases of the optimization (with PPK) report under their own names
                         let step = if stage.starts_with("ppk ") || stage.starts_with("opt ") {
                             Some(Step::Opt)
                         } else {
@@ -1152,8 +1152,8 @@ impl App {
             if let Some(f) = self.job.as_ref().and_then(|j| j.log_file.as_ref()) {
                 f.line(&match &r {
                     Ok(()) => tr!("---- 完了（{secs:.0} 秒）", "---- Done ({secs:.0} s)"),
-                    Err(e) if is_cancelled(e) => {
-                        tl("---- 中断しました", "---- Cancelled").to_string()
+                    Err(e) if is_canceled(e) => {
+                        tl("---- 中断しました", "---- Canceled").to_string()
                     }
                     Err(e) => tr!("---- エラー: {e:#}", "---- Error: {e:#}"),
                 });
@@ -1172,12 +1172,12 @@ impl App {
                     );
                     self.refresh_steps();
                 }
-                Err(e) if is_cancelled(&e) => {
+                Err(e) if is_canceled(&e) => {
                     self.log
-                        .push(tl("---- 中断しました", "---- Cancelled").into());
+                        .push(tl("---- 中断しました", "---- Canceled").into());
                     self.notices.push(
                         Level::Info,
-                        tl("処理を中断しました", "Processing cancelled").into(),
+                        tl("処理を中断しました", "Processing canceled").into(),
                     );
                     if let Some(c) = self.current {
                         self.steps.insert(c, StepState::Pending);
@@ -2382,7 +2382,7 @@ impl App {
         }
     }
 
-    /// How session `k` is placed: the reference, placed by the optimisation, linked, or not.
+    /// How session `k` is placed: the reference, placed by the optimization, linked, or not.
     fn session_status(
         &self,
         k: usize,
@@ -2585,7 +2585,7 @@ impl App {
         self.log_view.show(ui, &self.log);
     }
 
-    /// Whether the trajectory was optimised with RTK (it is then in the frame of the fixes).
+    /// Whether the trajectory was optimized with RTK (it is then in the frame of the fixes).
     fn rtk_used(&self) -> bool {
         self.scene.rtk_used
     }
@@ -2664,7 +2664,7 @@ impl App {
     }
 
     /// `at_short_label` after `prefix`, laid out for the view: the short session name in the
-    /// session's colour, the rest in `color`.
+    /// session's color, the rest in `color`.
     fn at_short_galley(
         &self,
         painter: &egui::Painter,
@@ -2692,7 +2692,7 @@ impl App {
         format!("S{}", k + 1)
     }
 
-    /// The colour of session `k`.
+    /// The color of session `k`.
     fn session_color(k: usize) -> [u8; 3] {
         const C: [[u8; 3]; 6] = [
             [255, 196, 60],
@@ -2725,7 +2725,7 @@ impl App {
             .is_some_and(|(a, b)| t >= a && t < b)
     }
 
-    /// Whether the trajectory at `t` takes the colour of an interval of `kind`: those placed
+    /// Whether the trajectory at `t` takes the color of an interval of `kind`: those placed
     /// unless hidden in the display settings, and the one being placed.
     fn span_colored(&self, kind: EditKind, t: f64) -> bool {
         if self.s.show_edit_spans {
@@ -2740,7 +2740,7 @@ impl App {
         self.in_interval(EditKind::Exclude, t)
     }
 
-    /// Colour of a trajectory sample at time `t`: by time, or by the selected quality metric.
+    /// Color of a trajectory sample at time `t`: by time, or by the selected quality metric.
     fn traj_color(&self, t: f64, t0: f64, t1: f64) -> [u8; 3] {
         if self.span_colored(EditKind::Hold, t) {
             return HELD;
@@ -2793,7 +2793,7 @@ impl App {
         lines
     }
 
-    /// Trajectory as coloured segments, and a cross at the picked time.
+    /// Trajectory as colored segments, and a cross at the picked time.
     fn build_traj_lines(&self, pixels: f32) -> Vec<Line> {
         let t = &self.scene.traj;
         if t.len() < 2 || !self.s.show_traj {
@@ -2915,7 +2915,7 @@ impl App {
         places
     }
 
-    /// Trajectory colour choice, legend and the worst places of the selected metric.
+    /// Trajectory color choice, legend and the worst places of the selected metric.
     fn quality_ui(&mut self, ui: &mut egui::Ui) {
         let has_q = self.scene.quality.is_some();
         let label = |m: usize| {
@@ -3182,7 +3182,7 @@ impl App {
         }
     }
 
-    /// The time bar: the trajectory's colours along it (by time, quality metric or session, and
+    /// The time bar: the trajectory's colors along it (by time, quality metric or session, and
     /// the intervals marked), the worst places of the metric above it, the loop ends below it and
     /// the selected time. A click or drag selects a time (`rel`, from `t0`).
     fn timeline_bar(
@@ -3217,7 +3217,7 @@ impl App {
         let rail =
             egui::Rect::from_x_y_ranges(rect.x_range(), rect.top() + 6.0..=rect.top() + 16.0);
         painter.rect_filled(rail, 2.0, visuals.extreme_bg_color);
-        // the trajectory's colour, in runs of the same colour (2 px a sample)
+        // the trajectory's color, in runs of the same color (2 px a sample)
         let (tr0, tr1) = (
             self.scene.traj[0].0,
             self.scene
@@ -3503,7 +3503,7 @@ impl App {
                     break;
                 }
                 let k = left.min(c.len());
-                // by session: the session's colour, drawn shaded instead of mixed in
+                // by session: the session's color, drawn shaded instead of mixed in
                 let tint = match (coloring, self.scene.nodes[ni].session) {
                     (Coloring::Tint, Some(s)) => {
                         let c = Self::session_color(s).map(|v| v as f32 / 255.0);
@@ -3823,7 +3823,7 @@ impl App {
         }
     }
 
-    /// Marks the orbit centre while it matters.
+    /// Marks the orbit center while it matters.
     fn draw_pivot(&self, ui: &egui::Ui, response: &egui::Response) {
         let orbiting = response.dragged_by(egui::PointerButton::Primary)
             || response.dragged_by(egui::PointerButton::Middle);
@@ -3867,11 +3867,11 @@ const HELD: [u8; 3] = [40, 210, 230];
 /// a loop's markers and the line between its ends
 const LOOP: [u8; 3] = [255, 190, 50];
 
-/// Turbo colour map (sRGB bytes), as the point shader uses for heights.
+/// Turbo color map (sRGB bytes), as the point shader uses for heights.
 /// Labels drawn on the view, kept off one another.
 #[derive(Default)]
 pub(super) struct ViewLabels {
-    /// the space taken by each label drawn, with its full text and colour if it has one
+    /// the space taken by each label drawn, with its full text and color if it has one
     placed: Vec<(egui::Rect, Option<(String, egui::Color32)>)>,
 }
 
@@ -3893,7 +3893,7 @@ impl ViewLabels {
         self.add_galley(painter, at, galley, full, color, below, force);
     }
 
-    /// Like `add`, with the text laid out already (in several colours).
+    /// Like `add`, with the text laid out already (in several colors).
     #[allow(clippy::too_many_arguments)]
     fn add_galley(
         &mut self,
@@ -4436,7 +4436,7 @@ mod tests {
     }
 
     #[test]
-    fn optimisation_bar_does_not_reset_after_ppk_or_finish_before_extra_iterations() {
+    fn optimization_bar_does_not_reset_after_ppk_or_finish_before_extra_iterations() {
         let mut app = app();
         app.s.ppk = true;
         let (tx, rx) = mpsc::channel();
@@ -4467,7 +4467,7 @@ mod tests {
             app.poll(&ctx);
             assert_eq!(app.current, Some(Step::Opt));
             let Some(StepState::Running(f)) = app.steps.get(&Step::Opt) else {
-                panic!("optimisation must remain running");
+                panic!("optimization must remain running");
             };
             assert!(*f >= previous && *f < 1.0, "progress {previous} -> {f}");
             if stage.starts_with("opt") {
@@ -4500,7 +4500,7 @@ mod tests {
     }
 
     #[test]
-    fn cached_ppk_and_runs_without_ppk_use_the_full_optimisation_bar() {
+    fn cached_ppk_and_runs_without_ppk_use_the_full_optimization_bar() {
         for ppk in [false, true] {
             let mut app = app();
             app.s.ppk = ppk;
@@ -4523,7 +4523,7 @@ mod tests {
             tx.send(Event::Progress("opt".into(), 5, 10)).unwrap();
             app.poll(&egui::Context::default());
             let Some(StepState::Running(f)) = app.steps.get(&Step::Opt) else {
-                panic!("optimisation must be running");
+                panic!("optimization must be running");
             };
             assert!((f - 0.575).abs() < 1e-6, "{f}");
         }
@@ -4675,7 +4675,7 @@ mod tests {
     }
 
     #[test]
-    fn the_intervals_colours_can_be_hidden_but_not_the_one_being_placed() {
+    fn the_intervals_colors_can_be_hidden_but_not_the_one_being_placed() {
         let mut a = app();
         a.edits.heading_hold.push((At::new(10.0), At::new(20.0)));
         assert_eq!(a.traj_color(115.0, 100.0, 219.0), HELD);

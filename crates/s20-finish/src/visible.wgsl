@@ -1,6 +1,6 @@
 // The points of one fisheye image's view that pass the occlusion test (see gpu.rs and
 // Scene::view in color.rs). One thread per point of the listed ranges: project as the CPU's
-// Lens (from the block's centre, the same atan), keep it within range, the field of view and
+// Lens (from the block's center, the same atan), keep it within range, the field of view and
 // the image, test it against the z-buffer's window minimum and depth slope, and against its
 // normal; write (block order, u, v, range, theta) at the next free place.
 
@@ -17,13 +17,13 @@ struct Params {
     e: vec4u,     // cells down, places for the output
 }
 
-// per range: first point, first thread, the block's centre and the centre less the camera's
+// per range: first point, first thread, the block's center and the center less the camera's
 struct Range {
     first: u32,
     thread: u32,
     pad0: u32,
     pad1: u32,
-    centre: vec4f,
+    center: vec4f,
     to: vec4f,
 }
 
@@ -64,7 +64,7 @@ fn main(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) lid: ve
     let j = rg.first + (t - rg.thread);
     let i = j - P.d.w;
     let q = vec3f(pts[3u * i], pts[3u * i + 1u], pts[3u * i + 2u]);
-    let d = (q - rg.centre.xyz) + rg.to.xyz;
+    let d = (q - rg.center.xyz) + rg.to.xyz;
     let r = sqrt(d.x * d.x + d.y * d.y + d.z * d.z);
     if (!(r <= P.b.w)) {
         return;

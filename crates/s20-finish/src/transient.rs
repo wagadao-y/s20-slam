@@ -7,7 +7,7 @@
 //! `angle` of the sensor-to-point direction ends `far` beyond the point and none ends short of it,
 //! and sees the point when one ends within `hit` of its distance: the tolerance grows with the
 //! range like the spacing of the rays. A ray of the cone ending short of the point means a surface
-//! the cone grazes: on ground seen at a few degrees the rays just above a point go on for metres
+//! the cone grazes: on ground seen at a few degrees the rays just above a point go on for meters
 //! and those just below land before it, every scan; around a car the rays go on. A place few
 //! scans measured (a car is in 1-3 scans), all within a moment, and many more saw through was there
 //! only briefly; bushes, also seen through, are measured by dozens of scans, and the tips of the
@@ -122,7 +122,7 @@ pub fn candidates(raw: &[Observation], out: &[PointResult]) -> Vec<bool> {
 }
 
 /// The rays of one scan by direction: a latitude-longitude grid of cells no smaller than the
-/// cone, so a cone spans the neighbouring rows and a few columns. A ray's length is negative for
+/// cone, so a cone spans the neighboring rows and a few columns. A ray's length is negative for
 /// a shot without a return: minus the reach of the returned shots around it.
 struct Image {
     rows: usize,

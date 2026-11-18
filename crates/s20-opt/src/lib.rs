@@ -1,4 +1,4 @@
-//! Unified continuous-time trajectory optimisation.
+//! Unified continuous-time trajectory optimization.
 //!
 //! The trajectory is a chain of knot states x_k = (R, p, v, bg, ba) at the LIO scan ends (~0.1 s). Between
 //! knots the motion is the IMU integration from the previous knot, so every LiDAR point gets its own pose
@@ -693,7 +693,7 @@ impl Problem {
         )
     }
 
-    /// Robust GNSS terms: residual e = antenna - fix, normalised by (sig_h, sig_h, sig_v), Huber on |u|.
+    /// Robust GNSS terms: residual e = antenna - fix, normalized by (sig_h, sig_h, sig_v), Huber on |u|.
     /// `pose_graph`: the velocities stay fixed. Without IMU factors a knot's velocity would otherwise
     /// absorb the fix between knots (antenna = ... + v tau) instead of moving the pose.
     fn rtk_terms(

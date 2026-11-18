@@ -1,11 +1,11 @@
-//! Per-knot quality of an optimised trajectory, to show where it is doubtful.
+//! Per-knot quality of an optimized trajectory, to show where it is doubtful.
 //!
 //! - plane residual: RMS distance of the knot's points to the planes of the final stage, and the
 //!   fraction of its points that lie on planes (few means a degenerate or cluttered view)
 //! - IMU: chi-square per degree of freedom of the preintegration factor to the next knot
 //! - RTK: residual of the fixes in the knot's interval, horizontal and vertical
 //! - correction: how much the motion over one second changed from the odometry (rotation and
-//!   translation per second); large values mark odometry jumps that the optimisation repaired
+//!   translation per second); large values mark odometry jumps that the optimization repaired
 
 use crate::imu::imu_residual;
 use crate::planes::{self, NONE};

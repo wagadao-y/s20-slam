@@ -1,4 +1,4 @@
-//! Trajectory outputs in the maker's formats and the image poses for colouring
+//! Trajectory outputs in the maker's formats and the image poses for coloring
 //! (ports of `export_traj_raw.py` and `imgpose_raw.py`).
 //!
 //! - `trajectory.txt`: poses at the scan ends (10 Hz), `x y z roll pitch yaw qx qy qz qw timestamp`
@@ -187,7 +187,7 @@ fn pose_row(s: &mut String, name: &str, c: &CameraPose) -> Result<()> {
 }
 
 /// `ImgPose.txt` of `poses`; the names are absolute when the images are of several sessions (as
-/// colouring reads a relative name under its own image folder).
+/// coloring reads a relative name under its own image folder).
 pub fn image_poses(poses: &[CameraPose], out: &Path) -> Result<usize> {
     let multi = poses.iter().any(|c| c.dir != poses[0].dir);
     let mut s = String::from(IMG_POSE_HEADER);

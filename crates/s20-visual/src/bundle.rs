@@ -2,7 +2,7 @@
 //! pair joined by feature into tracks, each a free 3-D point seen by its images and held near the
 //! local LiDAR plane its features were anchored on. Every frame (the images taken together) gets a
 //! small correction shared by its images, with a weak prior and smoothness along the frames, so
-//! the images with few tracks follow the plane-held points and their neighbours rather than drift.
+//! the images with few tracks follow the plane-held points and their neighbors rather than drift.
 //! Levenberg-Marquardt with the points eliminated (Schur
 //! complement); the frames' block system by `refine`'s conjugate gradients.
 
@@ -197,10 +197,10 @@ pub fn tracks(
                 v.sort_by(f64::total_cmp);
                 v[v.len() / 2]
             };
-            let centre = V3::new(mid(0), mid(1), mid(2));
+            let center = V3::new(mid(0), mid(1), mid(2));
             let nearest = anchors
                 .iter()
-                .min_by(|a, b| (a.0 - centre).norm().total_cmp(&(b.0 - centre).norm()))
+                .min_by(|a, b| (a.0 - center).norm().total_cmp(&(b.0 - center).norm()))
                 .unwrap();
             let held = (((g as u64).wrapping_mul(0x9e3779b97f4a7c15) >> 40) as f64
                 / (1u64 << 24) as f64)
@@ -363,7 +363,7 @@ pub fn check(tracks: &[Track], poses: &[Pose]) -> (Vec<f64>, Vec<f64>) {
 }
 
 /// Each frame's correction: the world rotation applied to its images' rotations, and the shift of
-/// their centres.
+/// their centers.
 #[derive(Clone, Debug)]
 pub struct Solution {
     pub rot: Vec<M3>,
@@ -472,7 +472,7 @@ pub fn align_to_planes(tracks: &[Track], poses: &[Pose]) -> Aligned {
         h += M7::identity() * prior;
         g += now * prior;
         // whether the planes tell the scale apart, once, from where they lie (the anchors) and
-        // not from the points: the points' few millimetres off their planes would tell it on one
+        // not from the points: the points' few millimeters off their planes would tell it on one
         // plane too, and shrinking everything onto it would lessen them
         let solve_scale = *scaled.get_or_insert_with(|| {
             out.scale_hold = scale_hold(&on, &mean);
@@ -1437,7 +1437,7 @@ mod tests {
 
     #[test]
     fn on_one_plane_the_points_off_it_do_not_shrink_the_images_onto_it() {
-        // the wall only, its points a few millimetres off it either side (as triangulated points
+        // the wall only, its points a few millimeters off it either side (as triangulated points
         // are): a scale would lessen those, but the plane cannot tell one
         let (truth, points, normals) = scene();
         let (mut wall, mut up) = (Vec::new(), Vec::new());

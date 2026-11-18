@@ -1,13 +1,13 @@
-// The colours of one image's visible points on the GPU (see gpu.rs `ZBuffer::colours` and the
+// The colors of one image's visible points on the GPU (see gpu.rs `ZBuffer::colors` and the
 // CPU's `Scene::view` and `gather` in color.rs): after the visible pass wrote (point, u, v, range,
-// angle) per point, each point's colour (bilinear, as the CPU), score and grazing flag; the
-// image's colour sums per cell (integers: the colours x 256 as packed, so the order of the threads
+// angle) per point, each point's color (bilinear, as the CPU), score and grazing flag; the
+// image's color sums per cell (integers: the colors x 256 as packed, so the order of the threads
 // does not matter); each point's mean of the 8 cells around it (trilinear); and the cells the
-// gains take. Results per point: slot | wide << 31, score, then the colour and the cells' mean
+// gains take. Results per point: slot | wide << 31, score, then the color and the cells' mean
 // packed as u16 (x 256): (r | g << 16), (b | mean r << 16), (mean g | mean b << 16).
 
 struct Params {
-    t: vec4f,      // the camera's centre, the image's turn term (turn weight x omega / 30)
+    t: vec4f,      // the camera's center, the image's turn term (turn weight x omega / 30)
     angles: vec4f, // soft angle, hard angle (the largest f32 not beyond it), theta slope, -
     size: vec4u,   // image width, height, places, cells
     first: vec4u,  // first point of this points' buffer, the end of its range, room for gain entries, -
@@ -19,7 +19,7 @@ struct Params {
 // (point, u, v, range, angle) per visible point, and their number
 @group(0) @binding(3) var<storage, read> vis: array<u32>;
 @group(0) @binding(4) var<storage, read_write> counts: array<atomic<u32>>;
-// per point (block order): its slot, u32 max where it is not coloured
+// per point (block order): its slot, u32 max where it is not colored
 @group(0) @binding(5) var<storage, read> slot_of: array<u32>;
 // per slot: its cell and its place among the 8 cells around it (the fractions of the cells'
 // grid, found on the CPU in double: 10 bits each), then those 8 cells (u32 max: none)
@@ -29,7 +29,7 @@ struct Params {
 @group(0) @binding(8) var<storage, read> owned: array<u32>;
 // the image, RGB8 four bytes to a word
 @group(0) @binding(9) var<storage, read> img: array<u32>;
-// per cell: the colour sums (x 256) and the number of points
+// per cell: the color sums (x 256) and the number of points
 @group(0) @binding(10) var<storage, read_write> sums: array<atomic<u32>>;
 @group(0) @binding(11) var<storage, read_write> res: array<u32>;
 // per gain entry: cell, points, mean r, g, b (f32)
@@ -66,7 +66,7 @@ fn record(k: u32) -> bool {
 }
 
 @compute @workgroup_size(64)
-fn colour(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) lid: vec3u, @builtin(num_workgroups) nwg: vec3u) {
+fn color(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) lid: vec3u, @builtin(num_workgroups) nwg: vec3u) {
     let k = thread(wid, lid, nwg);
     if !record(k) {
         return;

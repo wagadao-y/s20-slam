@@ -1,16 +1,16 @@
-//! Colouring from the camera images (ported from slam-experiment, whose colorize_blend.py
+//! Coloring from the camera images (ported from slam-experiment, whose colorize_blend.py
 //! reproduced PointClouds Studio's way).
 //!
 //! Per image (in parallel batches): the points in its field of view within `max_range`, a
 //! z-buffer of 8 x 8 pixel cells, the points not behind it and facing the camera, with the
-//! bilinear colour and a score of range, incidence, angle off the
+//! bilinear color and a score of range, incidence, angle off the
 //! optical axis and the device's turning speed. Per point the best `keep` views are kept
 //! (merged in image order, so the result does not depend on the threads). Then: exposure gains
 //! per image and channel from the cells several images share; views off the reference near view
 //! (a third of the way up by brightness: a glare most views catch, and the operator's shadow a
 //! few do, both lose) lose score; the best `views` are blended for the detail and all kept views
-//! for each cell's colour (no seams where the camera's tone or white balance changed); a point
-//! one view sees that is much brighter than its neighbours takes their colour; points no image
+//! for each cell's color (no seams where the camera's tone or white balance changed); a point
+//! one view sees that is much brighter than its neighbors takes their color; points no image
 //! sees are dropped. (Judged by eye on the four recordings of 2026-10-28, with the refined poses:
 //! a single view or fewer kept views leave seams, the median reference keeps a glare, 10 cm cells
 //! leave the outline of the operator's shadow.)
@@ -35,7 +35,7 @@ const LUM: [f32; 3] = [0.299, 0.587, 0.114];
 const ZCELL: usize = 8;
 /// Points are grouped in blocks of this size (m) to skip whole blocks out of an image's view.
 const BLOCK: f64 = 1.;
-/// Kept colours are stored as u16 in 1/256 steps (0..256), before the exposure gains.
+/// Kept colors are stored as u16 in 1/256 steps (0..256), before the exposure gains.
 const CSCALE: f32 = 256.;
 fn pack(c: [f32; 3]) -> [u16; 3] {
     c.map(|x| (x * CSCALE).round().clamp(0., 65535.) as u16)
@@ -52,14 +52,14 @@ const NO_IMAGE: u16 = u16::MAX;
 /// The squares are counted in cells of this many [`BASE`] cells.
 const SMALL: i64 = 100;
 /// The points around a square whose views it gathers too ([`BASE`] cells): the cells of the
-/// outlier test around its points (2 x `cell`) and the neighbours of the fill.
+/// outlier test around its points (2 x `cell`) and the neighbors of the fill.
 const PART_MARGIN: i64 = 15;
 /// The memory of a point of a part while its views are gathered (bytes; the shrine 2026-09-23:
 /// 18.5 GB more for 65 M points more, and 32 for the cells around it), and the points of a part
 /// when the memory available is not known.
 const BYTES_PER_POINT: f64 = 330.;
 const FALLBACK_POINTS: usize = 12_000_000;
-/// The z-buffer is filled where the coloured points of an image fall, grown by this many cells:
+/// The z-buffer is filled where the colored points of an image fall, grown by this many cells:
 /// the occlusion test of a point looks up to 6 cells around it.
 const ZB_MARGIN: i64 = 8;
 
@@ -84,8 +84,8 @@ pub struct ColorParams {
     pub cell: f64,
     /// exp((score - best) / temperature) weighting of the blended views.
     pub temperature: f64,
-    /// Blend in two bands (0: off): the detail (a view's colour off its cell's mean) from the
-    /// blended views, the cell's colour from all kept views weighted by exp((score - best) /
+    /// Blend in two bands (0: off): the detail (a view's color off its cell's mean) from the
+    /// blended views, the cell's color from all kept views weighted by exp((score - best) /
     /// band_temperature), so that views of another tone or white balance leave no seams.
     pub band_temperature: f64,
     /// The outlier reference is taken among the views within this of the best score.
@@ -94,23 +94,23 @@ pub struct ColorParams {
     /// (0.5 the median, so that a shadow or a glare in a few of them both lose; 0: the second
     /// darkest, so that only a glare loses).
     pub outlier_quantile: f64,
-    /// Radius (m) of the neighbours a bright single-view point takes its colour from (0: off).
+    /// Radius (m) of the neighbors a bright single-view point takes its color from (0: off).
     pub fill: f64,
     /// Exposure / white balance gain per image and channel.
     pub gain: bool,
     /// Only the gains' differences from the images within this time window (s) are applied: the
-    /// steps between neighbouring images and between the two cameras are levelled, while the
+    /// steps between neighboring images and between the two cameras are levelled, while the
     /// exposure the camera chose for a place (darker in the sun, brighter in the shade) stays
     /// (0: the gains levelled over all images, which washes sunlit images out where most were
     /// taken in the shade; the shrine 2026-10-22).
     pub gain_window: f64,
-    /// Only points within this distance (m) of a camera are coloured from it.
+    /// Only points within this distance (m) of a camera are colored from it.
     pub max_range: f64,
     /// Point spacing (m): sets how many z-buffer cells around a point may hide it.
     pub spacing: f64,
     /// Allow the depth slope of a surface seen at a grazing angle in the occlusion test.
     pub graze: bool,
-    /// The points are coloured in squares in xy, split in four while the points of one (with
+    /// The points are colored in squares in xy, split in four while the points of one (with
     /// its margin) would take more than this fraction of the memory available (0: all at once);
     /// the result is the same. Fewer squares decode each image fewer times (the shrine
     /// 2026-09-23, 77 M points: 27 squares 534 s and 17 GB, all at once 438 s and 36 GB).
@@ -433,18 +433,18 @@ fn window_minima(z: &[f32], w: usize, h: usize, n: usize) -> Vec<Vec<f32>> {
 }
 
 thread_local! {
-    /// Each cell's place among the cells of the image a thread colours from (u32::MAX: not
+    /// Each cell's place among the cells of the image a thread colors from (u32::MAX: not
     /// among them), left empty between images.
     static CELL_PLACE: std::cell::RefCell<Vec<u32>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
-/// Seconds of the views summed over the threads (nanoseconds): the coloured candidates, the
-/// z-buffer, the occlusion test, reading and decoding the image, the colours and scores
+/// Seconds of the views summed over the threads (nanoseconds): the colored candidates, the
+/// z-buffer, the occlusion test, reading and decoding the image, the colors and scores
 /// (`STAGE_NAMES`); the images whose view was empty or decoded; then the views' cell means and
 /// the merge (on one thread).
 static SECONDS: [std::sync::atomic::AtomicU64; 9] =
     [const { std::sync::atomic::AtomicU64::new(0) }; 9];
-const STAGE_NAMES: [&str; 5] = ["candidates", "z-buffer", "occlusion", "decode", "colours"];
+const STAGE_NAMES: [&str; 5] = ["candidates", "z-buffer", "occlusion", "decode", "colors"];
 fn lap(k: usize, t: &mut std::time::Instant) {
     SECONDS[k].fetch_add(
         t.elapsed().as_nanos() as u64,
@@ -453,10 +453,10 @@ fn lap(k: usize, t: &mut std::time::Instant) {
     *t = std::time::Instant::now();
 }
 
-/// The coloured points an image sees: (block order, u, v, range, theta).
+/// The colored points an image sees: (block order, u, v, range, theta).
 type Seen = Vec<(u32, f32, f32, f32, f32)>;
 
-/// The points of an image's view: slots of the points coloured, score, colour, and the views
+/// The points of an image's view: slots of the points colored, score, color, and the views
 /// beyond `max_theta`.
 struct View {
     pts: Vec<u32>,
@@ -465,13 +465,13 @@ struct View {
     wide: Vec<bool>,
 }
 
-/// Points sorted into 1 m blocks: (point order, block start / end, block centres), and the
+/// Points sorted into 1 m blocks: (point order, block start / end, block centers), and the
 /// points' positions and normals in that order (read in turn, not across all memory: the
 /// candidates and their occlusion tests take a tenth less time).
 struct Blocks {
     order: Vec<u32>,
     bounds: Vec<(usize, usize)>,
-    centres: Vec<V>,
+    centers: Vec<V>,
     p: Vec<[f32; 3]>,
     n: Vec<[f32; 3]>,
 }
@@ -480,7 +480,7 @@ fn blocks(p: &[[f32; 3]], n: &[[f32; 3]]) -> Blocks {
     let mut order: Vec<u32> = (0..p.len() as u32).collect();
     order.par_sort_unstable_by_key(|&i| (key(&p[i as usize]), i));
     let mut bounds = Vec::new();
-    let mut centres = Vec::new();
+    let mut centers = Vec::new();
     let mut a = 0;
     while a < order.len() {
         let k = key(&p[order[a] as usize]);
@@ -489,7 +489,7 @@ fn blocks(p: &[[f32; 3]], n: &[[f32; 3]]) -> Blocks {
             b += 1;
         }
         bounds.push((a, b));
-        centres.push(V::new(
+        centers.push(V::new(
             (k[0] as f64 + 0.5) * BLOCK,
             (k[1] as f64 + 0.5) * BLOCK,
             (k[2] as f64 + 0.5) * BLOCK,
@@ -503,7 +503,7 @@ fn blocks(p: &[[f32; 3]], n: &[[f32; 3]]) -> Blocks {
     Blocks {
         order,
         bounds,
-        centres,
+        centers,
         p,
         n,
     }
@@ -525,21 +525,21 @@ struct Scene<'a> {
     gpu: Option<crate::gpu::ZBuffer>,
 }
 
-/// The points a pass colours: `slot` of each point (u32::MAX: not coloured, an occluder at most),
+/// The points a pass colors: `slot` of each point (u32::MAX: not colored, an occluder at most),
 /// and the xy box (m) they lie in.
-struct Coloured<'a> {
+struct Colored<'a> {
     slot: &'a [u32],
     lo: [f64; 2],
     hi: [f64; 2],
 }
 
 impl Scene<'_> {
-    fn view(&self, pose: &Pose, omega: f64, a: &ColorParams, c: &Coloured) -> Result<Option<View>> {
+    fn view(&self, pose: &Pose, omega: f64, a: &ColorParams, c: &Colored) -> Result<Option<View>> {
         let cam = if pose.left { &self.left } else { &self.right };
         let (w, h) = (cam.width as usize, cam.height as usize);
         let half_diag = 0.5 * 3f64.sqrt() * BLOCK;
         let limit = 100f64.to_radians();
-        // A block's points within range whose cone reaches the field of view: (centre, angular
+        // A block's points within range whose cone reaches the field of view: (center, angular
         // radius) on the image, or None.
         let reach = |cb: &V| -> Option<(f64, f64, f64)> {
             let d = cb - pose.t;
@@ -587,24 +587,24 @@ impl Scene<'_> {
             }
             seen
         } else {
-            // The coloured points it sees (from the blocks of their box) ...
+            // The colored points it sees (from the blocks of their box) ...
             let mut cand: Vec<(u32, f32, f32, f32, f32)> = Vec::new(); // block order, u, v, r, theta
             let lens = Lens::new(cam, pose, a.max_range, limit);
             let mut out = Lanes::default();
-            for (b, cb) in self.blocks.centres.iter().enumerate() {
+            for (b, cb) in self.blocks.centers.iter().enumerate() {
                 if (0..2).any(|d| cb[d] < c.lo[d] - half_diag || cb[d] > c.hi[d] + half_diag)
                     || reach(cb).is_none()
                 {
                     continue;
                 }
                 let (s, e) = self.blocks.bounds[b];
-                let (centre, to) = (
+                let (center, to) = (
                     [0, 1, 2].map(|d| cb[d] as f32),
                     [0, 1, 2].map(|d| (cb[d] - pose.t[d]) as f32),
                 );
                 for at in (s..e).step_by(LANES) {
                     let m = (e - at).min(LANES);
-                    // from the camera, as the block's centre plus the offset from it (exact in
+                    // from the camera, as the block's center plus the offset from it (exact in
                     // single precision)
                     let mut d = [[0f32; LANES]; 3];
                     // `l` fills one lane of the three coordinates (kept as plain lanes for speed)
@@ -612,7 +612,7 @@ impl Scene<'_> {
                     for l in 0..LANES {
                         let q = self.blocks.p[at + l.min(m - 1)];
                         for k in 0..3 {
-                            d[k][l] = (q[k] - centre[k]) + to[k];
+                            d[k][l] = (q[k] - center[k]) + to[k];
                         }
                     }
                     lens.project(&d, &mut out);
@@ -645,9 +645,9 @@ impl Scene<'_> {
             );
             // the blocks whose image, a disc of their angular radius (1.5 times for the lens), meets
             // the cells looked at
-            let near: Vec<usize> = (0..self.blocks.centres.len())
+            let near: Vec<usize> = (0..self.blocks.centers.len())
                 .filter(|&b| {
-                    let Some((u, v, spread)) = reach(&self.blocks.centres[b]) else {
+                    let Some((u, v, spread)) = reach(&self.blocks.centers[b]) else {
                         return false;
                     };
                     let rad = 1.5 * cam.a11 * spread + 2. * ZCELL as f64;
@@ -791,15 +791,15 @@ impl Scene<'_> {
         Ok(Some(out))
     }
 
-    /// The coloured points the image sees, on the GPU: the z-buffer over the whole image, its
-    /// window minima and depth slopes on the CPU, then the points of the blocks of the coloured
+    /// The colored points the image sees, on the GPU: the z-buffer over the whole image, its
+    /// window minima and depth slopes on the CPU, then the points of the blocks of the colored
     /// points' box tested there (as the CPU's path in [`Scene::view`]).
     fn seen_on_gpu(
         &self,
         g: &crate::gpu::ZBuffer,
         pose: &Pose,
         a: &ColorParams,
-        c: &Coloured,
+        c: &Colored,
         limit: f64,
     ) -> Result<Seen> {
         let Some((zc, blocks, zw, zh, grids, reach)) = self.gpu_setup(g, pose, a, c, limit)? else {
@@ -810,17 +810,17 @@ impl Scene<'_> {
         Ok(seen)
     }
 
-    /// The coloured points of an image on the GPU (see `gpu_colour`): as [`Scene::view`] and
+    /// The colored points of an image on the GPU (see `gpu_color`): as [`Scene::view`] and
     /// the cell means of `gather`, the image decoded here. None: it sees none of them.
-    fn colours_on_gpu(
+    fn colors_on_gpu(
         &self,
         g: &crate::gpu::ZBuffer,
-        part: &crate::gpu_colour::ColourPart,
+        part: &crate::gpu_color::ColorPart,
         pose: &Pose,
         omega: f64,
         a: &ColorParams,
-        c: &Coloured,
-    ) -> Result<Option<crate::gpu_colour::Colours>> {
+        c: &Colored,
+    ) -> Result<Option<crate::gpu_color::Colors>> {
         let limit = 100f64.to_radians();
         let mut t = std::time::Instant::now();
         let Some((zc, blocks, zw, zh, grids, reach)) = self.gpu_setup(g, pose, a, c, limit)? else {
@@ -838,11 +838,11 @@ impl Scene<'_> {
         let (img, iw) = decode(&s20_io::dataset::read_image(&img_path)?)
             .with_context(|| format!("decode {}", img_path.display()))?;
         lap(3, &mut t);
-        let shot = crate::gpu_colour::Shot {
+        let shot = crate::gpu_color::Shot {
             cam: &zc,
             reach,
             graze: a.graze,
-            centre: [0, 1, 2].map(|d| pose.t[d] as f32),
+            center: [0, 1, 2].map(|d| pose.t[d] as f32),
             turn: (a.turn_weight * omega / 30.) as f32,
             soft: a.soft_theta_deg.to_radians() as f32,
             hard: {
@@ -856,12 +856,12 @@ impl Scene<'_> {
             width: iw as u32,
             height: (img.len() / (3 * iw.max(1))) as u32,
         };
-        let out = g.colours(part, &shot, &blocks, zw, zh, &grids)?;
+        let out = g.colors(part, &shot, &blocks, zw, zh, &grids)?;
         lap(4, &mut t);
         Ok((!out.pts.is_empty()).then_some(out))
     }
 
-    /// The camera, the blocks of the coloured points' box, the z-buffer's grid (its window
+    /// The camera, the blocks of the colored points' box, the z-buffer's grid (its window
     /// minima of 1..6 cells, then its depth slopes) and the occlusion's reach of an image on the
     /// GPU; None when no block is near.
     #[allow(clippy::type_complexity)]
@@ -870,7 +870,7 @@ impl Scene<'_> {
         g: &crate::gpu::ZBuffer,
         pose: &Pose,
         a: &ColorParams,
-        c: &Coloured,
+        c: &Colored,
         limit: f64,
     ) -> Result<
         Option<(
@@ -889,7 +889,7 @@ impl Scene<'_> {
         let (plo, phi) = ([0., 0.], [(zw * ZCELL) as f64, (zh * ZCELL) as f64]);
         let mut near = Vec::new();
         let mut blocks = Vec::new();
-        for (b, cb) in self.blocks.centres.iter().enumerate() {
+        for (b, cb) in self.blocks.centers.iter().enumerate() {
             let d = cb - pose.t;
             let dist = d.norm();
             if dist > a.max_range + half_diag {
@@ -915,7 +915,7 @@ impl Scene<'_> {
                 blocks.push(crate::gpu::Block {
                     first: s as u32,
                     count: (e - s) as u32,
-                    centre: [0, 1, 2].map(|k| cb[k] as f32),
+                    center: [0, 1, 2].map(|k| cb[k] as f32),
                     to: [0, 1, 2].map(|k| d[k] as f32),
                 });
             }
@@ -963,7 +963,7 @@ impl Scene<'_> {
 struct Cells {
     inv: f64,
     of_point: Vec<u32>,
-    /// per point the 8 cells (same facing) whose centres surround it, u32::MAX where there is
+    /// per point the 8 cells (same facing) whose centers surround it, u32::MAX where there is
     /// none (found once, not per view: the views spent as long on them as on the occlusion test)
     around: Vec<[u32; 8]>,
     /// per cell: its key and whether the part owns it (its gain entries)
@@ -974,7 +974,7 @@ fn cell_key(k: [i64; 3], face: u8) -> u64 {
     let b = |x: i64| ((x + (1 << 19)) as u64) & 0xf_ffff;
     (b(k[0]) << 43) | (b(k[1]) << 23) | (b(k[2]) << 3) | face as u64
 }
-/// The cells of the points `ids`; `owns(xy)`: whether the part owns a cell with this centre.
+/// The cells of the points `ids`; `owns(xy)`: whether the part owns a cell with this center.
 fn cells(
     p: &[[f32; 3]],
     n: &[[f32; 3]],
@@ -1131,14 +1131,14 @@ impl Kept {
     }
 }
 
-/// A gain entry: cell, image, points, mean colour.
+/// A gain entry: cell, image, points, mean color.
 #[cfg(test)]
 type Entry = (u64, u32, u32, [f32; 3]);
 
-/// Exposure gain per image and channel: log mean colour of image k over cell c ~ L_c - g_k, by
+/// Exposure gain per image and channel: log mean color of image k over cell c ~ L_c - g_k, by
 /// alternating means weighted by the point counts (residuals clipped at 0.4), pulled to 0 by
 /// the cells' median weight, mean 0 (as colorize_blend.gains). `entries` sorted.
-/// An entry the gains take: of enough points, its colour neither dark nor saturated.
+/// An entry the gains take: of enough points, its color neither dark nor saturated.
 fn gain_entry(points: u32, rgb: &[f32; 3]) -> bool {
     rgb.iter().all(|&c| c > 8. && c < 245.) && points >= 20
 }
@@ -1150,7 +1150,7 @@ fn gains(entries: &[Entry], images: usize) -> Vec<[f32; 3]> {
 
 /// The gain entries the gains take, of the cells seen twice or more, in the order of the cells'
 /// keys then the images, as four columns: cell (its place in that order), image, weight (points)
-/// and log colour (40 bytes an entry); and where each cell's entries start.
+/// and log color (40 bytes an entry); and where each cell's entries start.
 struct GainColumns {
     cs: Vec<u32>,
     ks: Vec<u32>,
@@ -1196,13 +1196,13 @@ fn columns_of_sorted(entries: &[Entry]) -> GainColumns {
 }
 
 /// A part's gain entries: per image, in the images' order, its entries (the part's cell, points,
-/// mean colour); and its cells' keys (the part's cells are in their order).
+/// mean color); and its cells' keys (the part's cells are in their order).
 struct PartGains {
     keys: Vec<u64>,
     images: Vec<ImageGains>,
 }
 
-/// An image's gain entries: the image, then per entry the part's cell, points and mean colour.
+/// An image's gain entries: the image, then per entry the part's cell, points and mean color.
 type ImageGains = (u32, Vec<(u32, u32, [f32; 3])>);
 
 /// [`GainColumns`] of the parts' entries: the cells in the order of their keys (a cell is a
@@ -1392,21 +1392,21 @@ fn local_gains(g: &[[f32; 3]], times: &[f64], window: f64) -> Vec<[f32; 3]> {
         .collect()
 }
 
-/// A part of the colouring: the points whose [`BASE`] cell lies in `out` are coloured, from the
+/// A part of the coloring: the points whose [`BASE`] cell lies in `out` are colored, from the
 /// views of those within `out` grown by [`PART_MARGIN`] (the cells of the outlier test around
-/// them and the neighbours of the fill lie within).
-struct ColourPart {
+/// them and the neighbors of the fill lie within).
+struct ColorPart {
     out: Rect,
     ids: Vec<u32>,
 }
 
 /// The views of the points of `part` (their slots in `slot`), and the gain entries of the cells
 /// the part owns.
-#[allow(clippy::needless_range_loop)] // `j` indexes a view's points, scores and colours together
+#[allow(clippy::needless_range_loop)] // `j` indexes a view's points, scores and colors together
 #[allow(clippy::too_many_arguments)]
 fn gather(
     scene: &Scene,
-    part: &ColourPart,
+    part: &ColorPart,
     slot: &[u32],
     poses: &[Pose],
     omega: &[f64],
@@ -1418,7 +1418,7 @@ fn gather(
     let grown = part.out.grow(PART_MARGIN);
     let lo = [0, 1].map(|d| grown.lo[d] as f64 * BASE);
     let hi = [0, 1].map(|d| grown.hi[d] as f64 * BASE);
-    let coloured = Coloured { slot, lo, hi };
+    let colored = Colored { slot, lo, hi };
     let out = part.out;
     let cells = cells(p, scene.n, &part.ids, a.cell, |c| {
         out.contains([0, 1].map(|d| (c[d] / BASE).floor() as i64))
@@ -1443,22 +1443,22 @@ fn gather(
     let shards = np.div_ceil(run);
     // per image: its view, the cell means around each point, the cells' means for the gains, and
     // the view's points by shard (where each shard's start)
-    type Seen = (crate::gpu_colour::Colours, Vec<u32>, Vec<usize>);
-    // the colours on the GPU when it can (each point's slot by block order, the cells), else
+    type Seen = (crate::gpu_color::Colors, Vec<u32>, Vec<usize>);
+    // the colors on the GPU when it can (each point's slot by block order, the cells), else
     // on the CPU
     let on_gpu = scene
         .gpu
         .as_ref()
-        .filter(|g| g.no_normals.is_none() && std::env::var_os("S20_NO_GPU_COLOURS").is_none())
+        .filter(|g| g.no_normals.is_none() && std::env::var_os("S20_NO_GPU_COLORS").is_none())
         .and_then(|g| {
             let slot_of: Vec<u32> = scene
                 .blocks
                 .order
                 .iter()
-                .map(|&i| coloured.slot[i as usize])
+                .map(|&i| colored.slot[i as usize])
                 .collect();
             // each slot's cell and its place among the cells around it, in double here (in
-            // single precision a point at a cell's border took the other side's colour)
+            // single precision a point at a cell's border took the other side's color)
             let inv = 1. / a.cell;
             let cell_of: Vec<[u32; 2]> = part
                 .ids
@@ -1477,7 +1477,7 @@ fn gather(
                 in_cell[c as usize] += 1;
             }
             let most_in_cell = in_cell.into_iter().max().unwrap_or(0);
-            match g.colour_part(
+            match g.color_part(
                 &slot_of,
                 &cell_of,
                 &cells.around,
@@ -1486,13 +1486,13 @@ fn gather(
             ) {
                 Ok(c) => Some((g, c)),
                 Err(e) => {
-                    job.log(&format!("colour: the colours on the CPU (GPU: {e:#})"));
+                    job.log(&format!("color: the colors on the CPU (GPU: {e:#})"));
                     None
                 }
             }
         });
     // the view's points by shard (where each shard's start)
-    let with_shards = |v: crate::gpu_colour::Colours| -> Seen {
+    let with_shards = |v: crate::gpu_color::Colors| -> Seen {
         let mut starts = vec![0usize; shards + 1];
         for &s in &v.pts {
             starts[s as usize / run + 1] += 1;
@@ -1512,18 +1512,18 @@ fn gather(
     let gpu_failed = std::sync::Once::new();
     let work = |k: usize| -> Result<Option<Seen>> {
         if let Some((g, part)) = &on_gpu {
-            match scene.colours_on_gpu(g, part, &poses[k], omega[k], a, &coloured) {
+            match scene.colors_on_gpu(g, part, &poses[k], omega[k], a, &colored) {
                 Ok(Some(v)) => return Ok(Some(with_shards(v))),
                 Ok(None) => return Ok(None),
                 Err(e) => gpu_failed
-                    .call_once(|| job.log(&format!("colour: an image on the CPU (GPU: {e:#})"))),
+                    .call_once(|| job.log(&format!("color: an image on the CPU (GPU: {e:#})"))),
             }
         }
-        let Some(v) = scene.view(&poses[k], omega[k], a, &coloured)? else {
+        let Some(v) = scene.view(&poses[k], omega[k], a, &colored)? else {
             return Ok(None);
         };
         let mut t = std::time::Instant::now();
-        // The image's mean colour per cell it sees, and per point the means of the 8
+        // The image's mean color per cell it sees, and per point the means of the 8
         // cells (same facing) around it, trilinear: no step at the cell borders. The cells
         // found through the thread's index of them (a hash map's lookups cost 4650 images as
         // long as the occlusion test), each sum in the points' order as before.
@@ -1598,7 +1598,7 @@ fn gather(
             }
             (pm, gain)
         });
-        let v = crate::gpu_colour::Colours {
+        let v = crate::gpu_color::Colors {
             c: v.rgb.iter().map(|&c| pack(c)).collect(),
             m: pm.iter().map(|&c| pack(c)).collect(),
             pts: v.pts,
@@ -1708,7 +1708,7 @@ fn gather(
                     }
                 }
                 at += 1;
-                job.report("colour images", at as u64, near.len() as u64);
+                job.report("color images", at as u64, near.len() as u64);
                 // (all waiting threads go on once failed)
                 *merged.0.lock().unwrap() = if failed.is_some() { usize::MAX / 2 } else { at };
                 merged.1.notify_all();
@@ -1724,7 +1724,7 @@ fn gather(
 /// Debug-only provenance of direct blending in a world-space sphere, before the fill.
 /// Enabled by S20_COLOR_AUDIT=<output.json> and S20_COLOR_AUDIT_SPHERE=x,y,z,r.
 struct ColorAudit {
-    centre: V,
+    center: V,
     radius2: f64,
     output: PathBuf,
     points: usize,
@@ -1765,7 +1765,7 @@ impl ColorAudit {
             None
         };
         Ok(Some(Self {
-            centre: V::new(s[0], s[1], s[2]) - V::from(origin),
+            center: V::new(s[0], s[1], s[2]) - V::from(origin),
             radius2: s[3] * s[3],
             output: output.into(),
             points: 0,
@@ -1788,7 +1788,7 @@ impl ColorAudit {
     }
 }
 
-/// Exactly the weights used by the colour and its diagnostic provenance.
+/// Exactly the weights used by the color and its diagnostic provenance.
 fn blend_weights(s: &[f32], a: &ColorParams) -> Vec<(usize, f32)> {
     let mut o: Vec<usize> = (0..s.len()).filter(|&j| s[j].is_finite()).collect();
     o.sort_by(|&x, &y| s[y].total_cmp(&s[x]).then(x.cmp(&y)));
@@ -1808,10 +1808,10 @@ fn blend_weights(s: &[f32], a: &ColorParams) -> Vec<(usize, f32)> {
         .collect()
 }
 
-/// The colours of the points of `part` it owns, from their kept views and the gains `g`.
+/// The colors of the points of `part` it owns, from their kept views and the gains `g`.
 fn blend(
     p: &[[f32; 3]],
-    part: &ColourPart,
+    part: &ColorPart,
     mut kept: Kept,
     g: &[[f32; 3]],
     a: &ColorParams,
@@ -1877,13 +1877,13 @@ fn blend(
         for (i, &id) in part.ids.iter().enumerate() {
             let point = p[id as usize];
             if !part.out.contains(base_xy(point))
-                || (vf(point) - audit.centre).norm_squared() > audit.radius2
+                || (vf(point) - audit.center).norm_squared() > audit.radius2
             {
                 continue;
             }
             if audit
                 .plane
-                .is_some_and(|(n, w)| (vf(point) - audit.centre).dot(&n).abs() > w)
+                .is_some_and(|(n, w)| (vf(point) - audit.center).dot(&n).abs() > w)
             {
                 continue;
             }
@@ -1951,7 +1951,7 @@ fn blend(
     let pos = |i: usize| p[part.ids[i] as usize].map(|v| v as f64);
     let owned = |i: usize| part.out.contains(base_xy(p[part.ids[i] as usize]));
     // A point only one view sees cannot tell a glare: much brighter than the reference of its
-    // neighbours several views see, it takes their colour.
+    // neighbors several views see, it takes their color.
     if a.fill > 0. && a.outlier > 0. {
         let multi: Vec<usize> = (0..np)
             .filter(|&i| rgb[i].is_some() && near_counts[i] >= 2)
@@ -2012,8 +2012,8 @@ fn base_xy(x: [f32; 3]) -> [i64; 2] {
     [0, 1].map(|d| (x[d] as f64 / BASE).floor() as i64)
 }
 
-/// Colours of the points `p` (normals `n`), in a local frame: `origin` is added to them to give
-/// the frame of the poses. `Some(rgb)` per coloured point, `None` where no image sees it.
+/// Colors of the points `p` (normals `n`), in a local frame: `origin` is added to them to give
+/// the frame of the poses. `Some(rgb)` per colored point, `None` where no image sees it.
 /// `images`: the folder the names of `imgpose` are relative to (see
 /// [`s20_io::dataset::read_image`]); `trajectory`: the export step's `trajectory.txt`; `tmp`: a
 /// folder for the views of the parts while the gains are found (removed at the end).
@@ -2048,21 +2048,21 @@ pub fn colorize(
         Some(g) => match crate::gpu::ZBuffer::new(g, p, n, &blocks.order) {
             Ok(z) => {
                 job.log(&match &z.no_normals {
-                    None => format!("colour: the points each image sees on the GPU ({})", g.name),
+                    None => format!("color: the points each image sees on the GPU ({})", g.name),
                     Some(e) => format!(
-                        "colour: z-buffers on the GPU ({}), the points each image sees on the CPU                          (no room for the normals: {e})",
+                        "color: z-buffers on the GPU ({}), the points each image sees on the CPU                          (no room for the normals: {e})",
                         g.name
                     ),
                 });
                 Some(z)
             }
             Err(e) => {
-                job.log(&format!("colour: z-buffers on the CPU (GPU: {e:#})"));
+                job.log(&format!("color: z-buffers on the CPU (GPU: {e:#})"));
                 None
             }
         },
         None => {
-            job.log("colour: z-buffers on the CPU");
+            job.log("color: z-buffers on the CPU");
             None
         }
     };
@@ -2081,7 +2081,7 @@ pub fn colorize(
         Some(Some(free)) => {
             let n = ((free as f64 * a.tile_memory / BYTES_PER_POINT) as usize).max(1_000_000);
             job.log(&format!(
-                "colour: up to {:.1} M points a part ({:.1} of {:.1} GB available)",
+                "color: up to {:.1} M points a part ({:.1} of {:.1} GB available)",
                 n as f64 / 1e6,
                 free as f64 * a.tile_memory / 1e9,
                 free as f64 / 1e9
@@ -2142,7 +2142,7 @@ pub fn colorize(
             rects.push(out);
         }
     }
-    // the progress: the views about 80% of the time, the gains 3%, the colours the rest, each part
+    // the progress: the views about 80% of the time, the gains 3%, the colors the rest, each part
     // by its points (the park 2026-10-07 10-31: 325, 11 and 70 of 406 s)
     let all = rects.iter().map(&count_in).sum::<usize>().max(1) as f64;
     let mut before = vec![0.0];
@@ -2154,10 +2154,10 @@ pub fn colorize(
     };
     drop(counts);
     job.log(&format!(
-        "colour: {} points, {} images, {} blocks, {} parts ({:.1} s)",
+        "color: {} points, {} images, {} blocks, {} parts ({:.1} s)",
         p.len(),
         poses.len(),
-        scene.blocks.centres.len(),
+        scene.blocks.centers.len(),
         rects.len(),
         start.elapsed().as_secs_f64()
     ));
@@ -2176,7 +2176,7 @@ pub fn colorize(
             .into_par_iter()
             .filter(|&i| grown.contains(base_xy(p[i as usize])))
             .collect();
-        ColourPart { out, ids }
+        ColorPart { out, ids }
     };
     for (k, &out) in rects.iter().enumerate() {
         let part = part_of(out);
@@ -2207,7 +2207,7 @@ pub fn colorize(
             memory.push(kept);
         }
         job.log(&format!(
-            "colour: part {} of {}: {} points ({:.0} s)",
+            "color: part {} of {}: {} points ({:.0} s)",
             k + 1,
             rects.len(),
             part.ids.len(),
@@ -2232,7 +2232,7 @@ pub fn colorize(
         g = local_gains(&g, &times, a.gain_window);
     }
     job.log(&format!(
-        "colour: gains of {taken} entries (cell and image, of cells seen twice or more): put in order {sorted:.1} s, solved {:.1} s, over time {:.1} s",
+        "color: gains of {taken} entries (cell and image, of cells seen twice or more): put in order {sorted:.1} s, solved {:.1} s, over time {:.1} s",
         solved - sorted,
         t.elapsed().as_secs_f64() - solved
     ));
@@ -2254,18 +2254,18 @@ pub fn colorize(
             })
             .collect();
         job.log(&format!(
-            "colour: gains (R/G/B) q05 {} q50 {} q95 {}",
+            "color: gains (R/G/B) q05 {} q50 {} q95 {}",
             qs[0], qs[1], qs[2]
         ));
     }
     let gained = start.elapsed().as_secs_f64();
-    job.report("colour gains", 84, 100);
-    // 3. the colours, part by part
+    job.report("color gains", 84, 100);
+    // 3. the colors, part by part
     let mut rgb: Vec<Option<[f32; 3]>> = vec![None; p.len()];
     let mut memory = memory.into_iter();
     for (k, &out) in rects.iter().enumerate() {
         job.check()?;
-        share(k, 0.84, 1.0).report("colour blend", 0, 1);
+        share(k, 0.84, 1.0).report("color blend", 0, 1);
         let part = part_of(out);
         let kept = if several {
             Kept::load(&tmp.join(format!("{k}.views")), part.ids.len(), a.keep)?
@@ -2279,7 +2279,7 @@ pub fn colorize(
     if let Some(audit) = &audit {
         audit.write(&poses)?;
     }
-    job.report("colour blend", 1, 1);
+    job.report("color blend", 1, 1);
     let total = start.elapsed().as_secs_f64();
     let cpu: Vec<String> = STAGE_NAMES
         .iter()
@@ -2292,7 +2292,7 @@ pub fn colorize(
         })
         .collect();
     job.log(&format!(
-        "colour seconds: gathering {gathered:.0} (CPU: {}, cell means {:.0}; merge on one thread {:.0}; views empty {}, decoded {}), gains {:.0}, blending {:.0}",
+        "color seconds: gathering {gathered:.0} (CPU: {}, cell means {:.0}; merge on one thread {:.0}; views empty {}, decoded {}), gains {:.0}, blending {:.0}",
         cpu.join(", "),
         SECONDS[7].swap(0, std::sync::atomic::Ordering::Relaxed) as f64 * 1e-9,
         SECONDS[8].swap(0, std::sync::atomic::Ordering::Relaxed) as f64 * 1e-9,
@@ -2302,7 +2302,7 @@ pub fn colorize(
         total - gained
     ));
     job.log(&format!(
-        "colour: {} of {} points coloured ({:.1} s)",
+        "color: {} of {} points colored ({:.1} s)",
         rgb.iter().filter(|c| c.is_some()).count(),
         p.len(),
         start.elapsed().as_secs_f64()
@@ -2387,7 +2387,7 @@ mod tests {
 
     #[test]
     fn the_gains_summed_in_parallel_are_those_summed_one_by_one_to_the_bit() {
-        // cells seen by a few of 40 images, with colours and counts of a pseudo-random sequence
+        // cells seen by a few of 40 images, with colors and counts of a pseudo-random sequence
         let mut x = 0x9e3779b97f4a7c15u64;
         let mut next = || {
             x ^= x << 13;
@@ -2402,11 +2402,11 @@ mod tests {
             for s in 0..seen as u32 {
                 let image = (first + 3 * s) % 40;
                 let level = 30. + (cell % 200) as f32;
-                let colour = [0, 1, 2].map(|j| {
+                let color = [0, 1, 2].map(|j| {
                     level * (1. + 0.1 * ((image as f32 + j as f32) * 0.37).sin())
                         + (next() % 7) as f32
                 });
-                entries.push((cell, image, 10 + (next() % 60) as u32, colour));
+                entries.push((cell, image, 10 + (next() % 60) as u32, color));
             }
         }
         entries.sort_unstable_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
@@ -2505,7 +2505,7 @@ mod tests {
         for _ in 0..2000 {
             let mut d = [[0f32; LANES]; 3];
             let mut exact = Vec::new();
-            // `l` fills one lane of the three coordinates, as the colouring does
+            // `l` fills one lane of the three coordinates, as the coloring does
             #[allow(clippy::needless_range_loop)]
             for l in 0..LANES {
                 let x = V::new(rnd() - 0.5, rnd() - 0.5, rnd() - 0.5) * 60.;
@@ -2585,13 +2585,13 @@ mod tests {
         let g = gains(&e, 2);
         let ratio = g[0][0] / g[1][0];
         assert!((ratio - 2.).abs() < 0.2, "gain ratio {ratio}");
-        assert!((g[0][0] * g[1][0] - 1.).abs() < 0.2, "gains are centred");
+        assert!((g[0][0] * g[1][0] - 1.).abs() < 0.2, "gains are centerd");
     }
 
     #[test]
     fn local_gains_keep_the_exposure_of_a_place() {
         // Ten images in the shade (gain 0.6), ten in the sun (1.8), 2 s apart; image 5 is a
-        // step brighter than its neighbours (half their gain).
+        // step brighter than its neighbors (half their gain).
         let mut g: Vec<[f32; 3]> = (0..20)
             .map(|k| [if k < 10 { 0.6 } else { 1.8 }; 3])
             .collect();

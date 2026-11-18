@@ -160,7 +160,7 @@ impl Joint {
     }
 }
 
-/// Mount rotations in degrees and offsets in millimetres, with the raw values.
+/// Mount rotations in degrees and offsets in millimeters, with the raw values.
 pub fn camera_json(c: &Cameras) -> Value {
     let mount: Vec<Value> = c
         .mount

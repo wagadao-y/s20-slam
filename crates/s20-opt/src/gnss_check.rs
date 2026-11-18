@@ -9,9 +9,9 @@
 //! edge one side is wrong:
 //! - the segment after the step when a later step returns to the level before it (an excursion),
 //! - otherwise the side that began at an outage or at the start (wrong integers are usually chosen at a
-//!   (re)initialisation), unless it is much longer than the other side.
+//!   (re)initialization), unless it is much longer than the other side.
 //!
-//! A rejection spreads across short outages to the neighbours that are still at the wrong level. Steps
+//! A rejection spreads across short outages to the neighbors that are still at the wrong level. Steps
 //! smaller than the thresholds are left to the robust GNSS weights and the LiDAR terms.
 
 use s20_geom::so3::V3;
@@ -121,7 +121,7 @@ pub fn screen(t: &[f64], o: &[V3], lio_bad: &[f64], p: &CheckParams) -> (Vec<boo
         }
         k += 1;
     }
-    // spread across short outages to neighbours closer to the wrong level than to the right one
+    // spread across short outages to neighbors closer to the wrong level than to the right one
     loop {
         let mut changed = false;
         for s in 0..ns {
@@ -138,7 +138,7 @@ pub fn screen(t: &[f64], o: &[V3], lio_bad: &[f64], p: &CheckParams) -> (Vec<boo
                 if t[b] - t[a] > p.max_gap {
                     continue;
                 }
-                // offset of the neighbour relative to the wrong segment at their common outage
+                // offset of the neighbor relative to the wrong segment at their common outage
                 let d = if nb > s { o[b] - o[a] } else { o[a] - o[b] };
                 if d.norm() < (d - c).norm() {
                     corr[nb] = Some(c);

@@ -67,7 +67,7 @@ pub const REGION_RADIUS: f64 = 12.0;
 
 /// A region fit is accepted when at least this fraction of the points match at the finest
 /// distance. Lower than for a loop: the regions gather points from the whole of each session
-/// (blurred by the odometry's drift before the optimisation) and each session sees parts the
+/// (blurred by the odometry's drift before the optimization) and each session sees parts the
 /// other does not.
 pub const REGION_MIN_INLIERS: f64 = 0.25;
 
@@ -181,7 +181,7 @@ impl Problem {
                 mb.len()
             );
         }
-        // about the centre of a: small numbers for the alignment
+        // about the center of a: small numbers for the alignment
         let ma: Vec<V3> = ma.iter().map(|p| p - ca).collect();
         let mb: Vec<V3> = mb.iter().map(|p| p - cb).collect();
         let ca_ = preprocess(&ma, 0.1, 10);

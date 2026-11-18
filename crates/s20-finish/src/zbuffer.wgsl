@@ -6,7 +6,7 @@ struct Params {
     r0: vec4f,    // world -> camera rotation rows
     r1: vec4f,
     r2: vec4f,
-    t: vec4f,     // camera centre
+    t: vec4f,     // camera center
     k03: vec4f,   // fisheye polynomial k0..k3
     k45: vec4f,   // k4, k5
     a: vec4f,     // a11, a12, a22, u0

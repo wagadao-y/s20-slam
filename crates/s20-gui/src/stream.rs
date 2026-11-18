@@ -73,7 +73,7 @@ pub fn fingerprint(paths: &[PathBuf], options: impl Hash) -> Result<u64> {
 
 pub fn check_cancel(cancel: &AtomicBool) -> Result<()> {
     if cancel.load(Ordering::Relaxed) {
-        bail!("preview cancelled");
+        bail!("preview canceled");
     }
     Ok(())
 }

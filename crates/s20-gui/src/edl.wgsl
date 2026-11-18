@@ -1,6 +1,6 @@
 // Eye-Dome Lighting, after Potree's edl.fs (adapted from CloudCompare's qEDL by
-// Christian Boucheny). Darkens pixels that lie behind their neighbours in log2
-// view depth, so shape reads without normals or colour. Depth 0 is background.
+// Christian Boucheny). Darkens pixels that lie behind their neighbors in log2
+// view depth, so shape reads without normals or color. Depth 0 is background.
 struct Edl { radius: f32, strength: f32, padding: vec2<f32> };
 @group(0) @binding(0) var color: texture_2d<f32>;
 @group(0) @binding(1) var depth: texture_2d<f32>;
@@ -33,11 +33,11 @@ fn srgb_from_linear(rgb: vec3<f32>) -> vec3<f32> {
     for (var i = 0; i < 8; i++) {
         let angle = f32(i) * 0.7853982;
         let offset = vec2(cos(angle), sin(angle)) * edl.radius;
-        let neighbour = clamp(vec2<i32>(round(position.xy + offset)), vec2(0), size - 1);
-        let neighbour_w = textureLoad(depth, neighbour, 0).r;
-        // Background neighbours do not darken silhouettes, as in Potree.
-        if neighbour_w > 0.0 {
-            sum += max(0.0, center - log2(neighbour_w));
+        let neighbor = clamp(vec2<i32>(round(position.xy + offset)), vec2(0), size - 1);
+        let neighbor_w = textureLoad(depth, neighbor, 0).r;
+        // Background neighbors do not darken silhouettes, as in Potree.
+        if neighbor_w > 0.0 {
+            sum += max(0.0, center - log2(neighbor_w));
         }
     }
     let shade = exp(-sum / 8.0 * 300.0 * edl.strength);

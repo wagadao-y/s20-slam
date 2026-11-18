@@ -1,8 +1,8 @@
 //! Undo and redo of the trajectory corrections, and their saved revisions.
 //!
 //! Every change of the corrections is written to the work folder at once (`s20_edits.json`, the
-//! working state the optimisation uses); it becomes a revision only when the user saves (Ctrl+S)
-//! or when the optimisation runs with it. Undo and redo replace the working state with an earlier
+//! working state the optimization uses); it becomes a revision only when the user saves (Ctrl+S)
+//! or when the optimization runs with it. Undo and redo replace the working state with an earlier
 //! one, kept in memory for this session.
 use super::*;
 use crate::lang::tl;
@@ -183,7 +183,7 @@ impl App {
         saved.map_or(self.edits != Edits::default(), |s| *s != self.edits)
     }
 
-    /// Saves the working corrections as a revision (by the user, or as the optimisation runs with
+    /// Saves the working corrections as a revision (by the user, or as the optimization runs with
     /// them); nothing when they are those of the last revision.
     pub(super) fn save_revision(&mut self, by_run: bool) {
         if self.config().is_none() || (!by_run && !self.edits_unsaved()) {

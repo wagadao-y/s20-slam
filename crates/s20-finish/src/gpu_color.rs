@@ -1,7 +1,7 @@
-//! The colours of an image's visible points on the GPU (`colour.wgsl`), after its visible pass
-//! ([`ZBuffer::encode_visible`]): their colours, scores and grazing flags, the image's cell means
+//! The colors of an image's visible points on the GPU (`color.wgsl`), after its visible pass
+//! ([`ZBuffer::encode_visible`]): their colors, scores and grazing flags, the image's cell means
 //! around each point and the cells the gains take, as the CPU's `Scene::view` and `gather` in
-//! color.rs. The cells' sums are integers (the packed colours), so the threads' order does not
+//! color.rs. The cells' sums are integers (the packed colors), so the threads' order does not
 //! matter and a run gives the same as the next; they and the score in single precision differ
 //! a little from the CPU's (double).
 
@@ -25,10 +25,10 @@ struct Params {
     first: [u32; 4],
 }
 
-/// The colour passes and their layout.
+/// The color passes and their layout.
 pub(crate) struct Pipes {
     layout: wgpu::BindGroupLayout,
-    colour: wgpu::ComputePipeline,
+    color: wgpu::ComputePipeline,
     around_mean: wgpu::ComputePipeline,
     gain_cells: wgpu::ComputePipeline,
 }
@@ -38,12 +38,12 @@ impl Pipes {
         let gpu = z.gpu;
         anyhow::ensure!(
             gpu.limits.max_storage_buffers_per_shader_stage >= 12,
-            "too few storage buffers for the colour passes"
+            "too few storage buffers for the color passes"
         );
         let dev = &gpu.device;
         let module = dev.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("colour"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("colour.wgsl").into()),
+            label: Some("color"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("color.wgsl").into()),
         });
         let entry = |binding, ty| wgpu::BindGroupLayoutEntry {
             binding,
@@ -58,7 +58,7 @@ impl Pipes {
         let ro = wgpu::BufferBindingType::Storage { read_only: true };
         let rw = wgpu::BufferBindingType::Storage { read_only: false };
         let layout = dev.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("colour"),
+            label: Some("color"),
             entries: &[
                 entry(0, wgpu::BufferBindingType::Uniform),
                 entry(1, ro),
@@ -76,7 +76,7 @@ impl Pipes {
             ],
         });
         let pl = dev.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("colour"),
+            label: Some("color"),
             bind_group_layouts: &[Some(&layout)],
             immediate_size: 0,
         });
@@ -91,7 +91,7 @@ impl Pipes {
             })
         };
         Ok(Pipes {
-            colour: pipeline("colour"),
+            color: pipeline("color"),
             around_mean: pipeline("around_mean"),
             gain_cells: pipeline("gain_cells"),
             layout,
@@ -110,8 +110,8 @@ struct Set {
     counts: wgpu::Buffer,
 }
 
-/// A part's points and cells on the GPU for [`ZBuffer::colours`], and the sets of buffers.
-pub struct ColourPart {
+/// A part's points and cells on the GPU for [`ZBuffer::colors`], and the sets of buffers.
+pub struct ColorPart {
     slot_of: wgpu::Buffer,
     cell_of: wgpu::Buffer,
     around: wgpu::Buffer,
@@ -121,9 +121,9 @@ pub struct ColourPart {
     free: Condvar,
 }
 
-/// An image's coloured points: slot, score, grazing, colour and the cells' mean (packed), and
-/// its gain entries (cell, points, mean colour).
-pub struct Colours {
+/// An image's colored points: slot, score, grazing, color and the cells' mean (packed), and
+/// its gain entries (cell, points, mean color).
+pub struct Colors {
     pub pts: Vec<u32>,
     pub score: Vec<f32>,
     pub wide: Vec<bool>,
@@ -132,13 +132,13 @@ pub struct Colours {
     pub gain: Vec<(u32, u32, [f32; 3])>,
 }
 
-/// The camera and the score's terms of an image for [`ZBuffer::colours`].
+/// The camera and the score's terms of an image for [`ZBuffer::colors`].
 pub struct Shot<'a> {
     pub cam: &'a ZCamera,
     pub reach: f32,
     pub graze: bool,
-    /// the camera's centre (the points' frame) and the turn term (turn weight x omega / 30)
-    pub centre: [f32; 3],
+    /// the camera's center (the points' frame) and the turn term (turn weight x omega / 30)
+    pub center: [f32; 3],
     pub turn: f32,
     /// soft and hard angles off the axis (the hard one the largest f32 not beyond it, so that
     /// "beyond" is as in double), the slope beyond the soft one
@@ -200,37 +200,37 @@ fn grown(
 }
 
 impl ZBuffer {
-    /// The colour passes, made once (None: they could not be).
+    /// The color passes, made once (None: they could not be).
     fn pipes(&self) -> Option<&Pipes> {
-        self.colour
+        self.color
             .get_or_init(|| {
                 self.gpu
                     .checked(|| Pipes::new(self))
-                    .map_err(|e| eprintln!("colours on the CPU (GPU: {e:#})"))
+                    .map_err(|e| eprintln!("colors on the CPU (GPU: {e:#})"))
                     .ok()
             })
             .as_ref()
     }
 
-    /// A part's points and cells for [`ZBuffer::colours`]: each point's slot (in block order,
-    /// u32::MAX where not coloured), each slot's cell and its place among the 8 cells around it
+    /// A part's points and cells for [`ZBuffer::colors`]: each point's slot (in block order,
+    /// u32::MAX where not colored), each slot's cell and its place among the 8 cells around it
     /// (the grid's fractions, 10 bits each), those cells, the cells the part owns, and the most
-    /// points of a cell (its colour sums must not overflow).
-    pub fn colour_part(
+    /// points of a cell (its color sums must not overflow).
+    pub fn color_part(
         &self,
         slot_of: &[u32],
         cell_of: &[[u32; 2]],
         around: &[[u32; 8]],
         owned: &[bool],
         most_in_cell: usize,
-    ) -> Result<ColourPart> {
+    ) -> Result<ColorPart> {
         anyhow::ensure!(self.no_normals.is_none(), "no normals on the GPU");
-        // a cell's sum of colours x 256 (at most 65535 a point) within 32 bits
+        // a cell's sum of colors x 256 (at most 65535 a point) within 32 bits
         anyhow::ensure!(
             (most_in_cell as u64) * 65535 <= u32::MAX as u64,
-            "{most_in_cell} points in a cell: their colour sums would overflow"
+            "{most_in_cell} points in a cell: their color sums would overflow"
         );
-        self.pipes().context("no colour passes")?;
+        self.pipes().context("no color passes")?;
         let most = self.max_places() * 20;
         anyhow::ensure!(
             (around.len() * 32) as u64 <= most && (owned.len() * 16) as u64 <= most,
@@ -238,11 +238,11 @@ impl ZBuffer {
         );
         self.gpu.checked(|| {
             let owned: Vec<u32> = owned.iter().map(|&o| o as u32).collect();
-            Ok(ColourPart {
-                slot_of: upload(self, slot_of, "colour slots")?,
-                cell_of: upload(self, cell_of.as_flattened(), "colour cells")?,
-                around: upload(self, around.as_flattened(), "colour around")?,
-                owned: upload(self, &owned, "colour owned")?,
+            Ok(ColorPart {
+                slot_of: upload(self, slot_of, "color slots")?,
+                cell_of: upload(self, cell_of.as_flattened(), "color cells")?,
+                around: upload(self, around.as_flattened(), "color around")?,
+                owned: upload(self, &owned, "color owned")?,
                 cells: owned.len() as u32,
                 sets: Mutex::new((Vec::new(), 0)),
                 free: Condvar::new(),
@@ -250,18 +250,18 @@ impl ZBuffer {
         })
     }
 
-    /// The coloured points of an image (see [`Colours`]): its visible pass over `blocks`
-    /// (`grids`: the z-buffer's window minima, then its depth slopes), then the colour passes.
+    /// The colored points of an image (see [`Colors`]): its visible pass over `blocks`
+    /// (`grids`: the z-buffer's window minima, then its depth slopes), then the color passes.
     #[allow(clippy::too_many_arguments)]
-    pub fn colours(
+    pub fn colors(
         &self,
-        part: &ColourPart,
+        part: &ColorPart,
         shot: &Shot,
         blocks: &[Block],
         zw: usize,
         zh: usize,
         grids: &[f32],
-    ) -> Result<Colours> {
+    ) -> Result<Colors> {
         // a set of buffers: a free one, a new one while there are fewer than SETS, else wait
         let mut set = {
             let mut s = part.sets.lock().unwrap();
@@ -280,7 +280,7 @@ impl ZBuffer {
             if set.is_none() {
                 set = Some(self.new_set(part));
             }
-            self.colours_with(part, set.as_mut().unwrap(), shot, blocks, zw, zh, grids)
+            self.colors_with(part, set.as_mut().unwrap(), shot, blocks, zw, zh, grids)
         });
         let mut s = part.sets.lock().unwrap();
         match (set, r.is_ok()) {
@@ -292,46 +292,46 @@ impl ZBuffer {
         r
     }
 
-    fn new_set(&self, part: &ColourPart) -> Set {
+    fn new_set(&self, part: &ColorPart) -> Set {
         let dev = &self.gpu.device;
         use wgpu::BufferUsages as U;
         let empty = |label: &str, usage: U| (0, storage(dev, 16, usage, label));
         Set {
-            img: empty("colour image", U::STORAGE | U::COPY_DST),
-            out: empty("colour visible", U::STORAGE | U::COPY_SRC),
-            res: empty("colour results", U::STORAGE | U::COPY_SRC),
-            gains: empty("colour gains", U::STORAGE | U::COPY_SRC),
-            back: empty("colour read back", U::MAP_READ | U::COPY_DST),
+            img: empty("color image", U::STORAGE | U::COPY_DST),
+            out: empty("color visible", U::STORAGE | U::COPY_SRC),
+            res: empty("color results", U::STORAGE | U::COPY_SRC),
+            gains: empty("color gains", U::STORAGE | U::COPY_SRC),
+            back: empty("color read back", U::MAP_READ | U::COPY_DST),
             sums: storage(
                 dev,
                 part.cells as u64 * 16,
                 U::STORAGE | U::COPY_DST,
-                "colour sums",
+                "color sums",
             ),
             counts: storage(
                 dev,
                 16,
                 U::STORAGE | U::COPY_SRC | U::COPY_DST,
-                "colour counts",
+                "color counts",
             ),
         }
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn colours_with(
+    fn colors_with(
         &self,
-        part: &ColourPart,
+        part: &ColorPart,
         set: &mut Set,
         shot: &Shot,
         blocks: &[Block],
         zw: usize,
         zh: usize,
         grids: &[f32],
-    ) -> Result<Colours> {
+    ) -> Result<Colors> {
         let dev = &self.gpu.device;
-        let pipes = self.pipes().context("no colour passes")?;
+        let pipes = self.pipes().context("no color passes")?;
         let total: u64 = blocks.iter().map(|b| b.count as u64).sum();
-        let empty = Colours {
+        let empty = Colors {
             pts: Vec::new(),
             score: Vec::new(),
             wide: Vec::new(),
@@ -357,7 +357,7 @@ impl ZBuffer {
             bytes,
             bytes.max(most * 20),
             U::STORAGE | U::COPY_DST,
-            "colour image",
+            "color image",
         );
         if shot.image.len().is_multiple_of(4) {
             self.gpu.queue.write_buffer(&set.img.1, 0, shot.image);
@@ -367,7 +367,7 @@ impl ZBuffer {
             self.gpu.queue.write_buffer(&set.img.1, 0, &padded);
         }
         let grid = dev.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("colour grids"),
+            label: Some("color grids"),
             contents: bytemuck::cast_slice(grids),
             usage: U::STORAGE,
         });
@@ -379,8 +379,8 @@ impl ZBuffer {
             .min(most);
         loop {
             for (buf, label, usage) in [
-                (&mut set.out, "colour visible", U::STORAGE | U::COPY_SRC),
-                (&mut set.res, "colour results", U::STORAGE | U::COPY_SRC),
+                (&mut set.out, "color visible", U::STORAGE | U::COPY_SRC),
+                (&mut set.res, "color results", U::STORAGE | U::COPY_SRC),
             ] {
                 grown(dev, buf, places * 20, most * 20, usage, label);
             }
@@ -392,7 +392,7 @@ impl ZBuffer {
                 room * 20,
                 most * 20,
                 U::STORAGE | U::COPY_SRC,
-                "colour gains",
+                "color gains",
             );
             grown(
                 dev,
@@ -400,10 +400,10 @@ impl ZBuffer {
                 16 + (places + room) * 20,
                 16 + (most + most / 20 + 1) * 20,
                 U::MAP_READ | U::COPY_DST,
-                "colour read back",
+                "color read back",
             );
             let mut enc = dev.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("colour"),
+                label: Some("color"),
             });
             enc.clear_buffer(&set.counts, 0, None);
             enc.clear_buffer(&set.sums, 0, None);
@@ -425,13 +425,13 @@ impl ZBuffer {
                 let nrm = nrm.as_ref().context("no normals")?;
                 let end = self.parts.get(k + 1).map_or(u32::MAX, |p| p.0);
                 let params = Params {
-                    t: [shot.centre[0], shot.centre[1], shot.centre[2], shot.turn],
+                    t: [shot.center[0], shot.center[1], shot.center[2], shot.turn],
                     angles: [shot.soft, shot.hard, shot.slope, 0.],
                     size: [shot.width, shot.height, places as u32, part.cells],
                     first: [*first, end, room as u32, 0],
                 };
                 let uni = dev.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("colour params"),
+                    label: Some("color params"),
                     contents: bytemuck::bytes_of(&params),
                     usage: U::UNIFORM,
                 });
@@ -470,7 +470,7 @@ impl ZBuffer {
                     })
                     .collect();
                 let bind = dev.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("colour"),
+                    label: Some("color"),
                     layout: &pipes.layout,
                     entries: &entries,
                 });
@@ -483,12 +483,12 @@ impl ZBuffer {
             };
             {
                 let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some("colour"),
+                    label: Some("color"),
                     timestamp_writes: None,
                 });
-                // the colours (and the cells' sums) of every points' buffer, then their means
+                // the colors (and the cells' sums) of every points' buffer, then their means
                 let (x, y) = groups(places);
-                for pipe in [&pipes.colour, &pipes.around_mean] {
+                for pipe in [&pipes.color, &pipes.around_mean] {
                     for (_, bind) in &binds {
                         pass.set_pipeline(pipe);
                         pass.set_bind_group(0, bind, &[]);
@@ -518,7 +518,7 @@ impl ZBuffer {
             let g = g.min(room);
             // the results and the gain entries, read back together
             let mut enc = dev.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("colour read"),
+                label: Some("color read"),
             });
             if n > 0 {
                 enc.copy_buffer_to_buffer(&set.res.1, 0, &set.back.1, 16, n * 20);
@@ -529,7 +529,7 @@ impl ZBuffer {
             let index = self.gpu.queue.submit([enc.finish()]);
             return self.fetch(&set.back.1, index, 16 + (n + g) * 20, |w| {
                 let (n, g) = (n as usize, g as usize);
-                let mut out = Colours {
+                let mut out = Colors {
                     pts: Vec::with_capacity(n),
                     score: Vec::with_capacity(n),
                     wide: Vec::with_capacity(n),

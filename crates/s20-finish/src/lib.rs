@@ -6,7 +6,7 @@
 pub mod color;
 pub mod freespace;
 pub mod gpu;
-pub mod gpu_colour;
+pub mod gpu_color;
 pub mod gpu_free;
 pub mod gpu_transient;
 pub mod load;
@@ -105,7 +105,7 @@ pub struct FinishParams {
     pub fast_plane: bool,
     /// The consensus tries the local planes (within `consensus_seed_radius`) around this many
     /// seed cells, the first nearest the query and the rest by farthest-point sampling, so the
-    /// result does not depend on the order of the neighbour list.
+    /// result does not depend on the order of the neighbor list.
     pub consensus_seeds: usize,
     pub consensus_seed_radius: f64,
     /// The planes are fitted once per cell of this size (m) and side (octant of the viewing ray),
@@ -180,9 +180,9 @@ pub struct FinishParams {
     /// none at `mls_taper_end` (0: off), as PointClouds Studio 2.7.0.
     pub mls_taper_start: f64,
     pub mls_taper_end: f64,
-    /// Representative observed point nearest each cell centre, never a centroid. 0: all.
+    /// Representative observed point nearest each cell center, never a centroid. 0: all.
     pub sample_leaf: f64,
-    /// After finishing, keep one point per cell of this size (the one nearest the cell centre,
+    /// After finishing, keep one point per cell of this size (the one nearest the cell center,
     /// on the finished positions); 0: off.
     pub post_leaf: f64,
     /// Radius (m) of the disc of cell moments a query's plane is fitted on.
@@ -191,7 +191,7 @@ pub struct FinishParams {
     pub mls_strength: f64,
     /// Consensus inlier distance, used in support selection, not the deletion threshold.
     pub plane_band: f64,
-    /// A plane must explain this share of the neighbourhood's weight.
+    /// A plane must explain this share of the neighborhood's weight.
     pub min_plane_fraction: f64,
     /// Planarity tests: smallest / middle eigenvalue and plane σ (m).
     pub max_plane_ratio: f64,
@@ -204,7 +204,7 @@ pub struct FinishParams {
     pub tile_obs: usize,
 }
 /// The expected error (m) of an observation measured at this range: 1.6 mm, growing by 2.8 mm
-/// per metre (the MID-360's error grows with the range). With `reject_sigma` 2.5: 4 mm or 0.7%
+/// per meter (the MID-360's error grows with the range). With `reject_sigma` 2.5: 4 mm or 0.7%
 /// of the range.
 pub fn range_sigma(range: f64) -> f64 {
     SIGMA_MIN.max(SIGMA_PER_M * range)
@@ -441,7 +441,7 @@ pub struct Part {
     pub out: Rect,
 }
 
-/// The representative observation nearest each cell centre of size `leaf` (all when 0), among
+/// The representative observation nearest each cell center of size `leaf` (all when 0), among
 /// the `active` ones.
 fn sample_ids(
     raw: &[Observation],
@@ -557,7 +557,7 @@ pub fn finish_part(
     if p.post_leaf > 0. {
         // Second uniform sampling on the finished (projected) positions: the points of one
         // surface that the first grid kept in several cells across its noise layer collapse onto
-        // it, and only the one nearest each cell centre stays.
+        // it, and only the one nearest each cell center stays.
         let inv = 1. / p.post_leaf;
         let mut cells: Vec<([i64; 3], f64, usize)> = out
             .iter()

@@ -13,7 +13,7 @@
 //!
 //! A BROTLI node is, for its points in Morton order, attribute by attribute: the position as a 3D
 //! Morton code of its integer coordinates (16 bytes: the code of the upper 16 bits of each, then
-//! that of the lower), the intensity, the colour as the Morton code of its three 16-bit values
+//! that of the lower), the intensity, the color as the Morton code of its three 16-bit values
 //! (8 bytes) and the GPS time (8-byte float), the last two when written; the whole compressed with Brotli (quality 5: PotreeConverter takes 6, slower for
 //! files 0.05 % smaller). See ref/potree/src/modules/loader/2.0 (OctreeLoader.js,
 //! DecoderWorker_brotli.js).
@@ -41,7 +41,7 @@ const COUNT_LEVEL: u32 = 7;
 /// Bits of the key: a point's cell at this level along each axis (see [`Pt::key`]).
 const KEY_BITS: u32 = 30;
 const HIERARCHY_ENTRY: usize = 22;
-/// The record of a point in a chunk file: coordinates (3 × i32), colour (3 × u16), intensity;
+/// The record of a point in a chunk file: coordinates (3 × i32), color (3 × u16), intensity;
 /// then the GPS time (f64) when it is written.
 const RECORD: usize = 20;
 const RECORD_TIME: usize = RECORD + 8;
@@ -104,9 +104,9 @@ pub fn is_current(dir: &Path, source: &Path) -> bool {
 /// What to keep of the source.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct WriteOptions {
-    /// the colour (else only the positions and intensities)
+    /// the color (else only the positions and intensities)
     pub rgb: bool,
-    /// the GPS times (`gps-time`, as PotreeConverter's: the Potree viewer colours and filters by it)
+    /// the GPS times (`gps-time`, as PotreeConverter's: the Potree viewer colors and filters by it)
     pub gps_time: bool,
     /// points of this class are left out (the dynamic points)
     pub skip_class: Option<u8>,
@@ -172,7 +172,7 @@ struct Build<'a> {
 
 fn check(cancel: &AtomicBool) -> Result<()> {
     if cancel.load(Ordering::Relaxed) {
-        bail!(crate::job::Cancelled);
+        bail!(crate::job::Canceled);
     }
     Ok(())
 }
@@ -207,7 +207,7 @@ impl Build<'_> {
 
     /// Node `name` at `level` over its children: it takes its sample from their points, which
     /// are then written (a leaf left without points goes). The sample is PotreeConverter's
-    /// Poisson-disk one: the points by their distance to the node's centre, each taken unless one
+    /// Poisson-disk one: the points by their distance to the node's center, each taken unless one
     /// taken is closer than the spacing (found with a grid of the spacing).
     fn join(&self, level: u32, name: Vec<u8>, mut children: Vec<Pending>) -> Result<Pending> {
         check(self.cancel)?;
@@ -1416,7 +1416,7 @@ mod tests {
     }
 
     #[test]
-    fn without_colour_and_rewritten_in_place() {
+    fn without_color_and_rewritten_in_place() {
         let dir = Temp::new();
         let src = dir.0.join("a_uncolorized.las");
         let pts = cloud(120);
@@ -1431,8 +1431,8 @@ mod tests {
         assert_eq!(read_all(&t).len(), pts.len());
         let cancel = AtomicBool::new(true);
         let e = write(&src, &out, opt, &cancel, &|_, _| {}).unwrap_err();
-        assert!(crate::job::is_cancelled(&e));
-        // a cancelled build leaves the octree there as it was
+        assert!(crate::job::is_canceled(&e));
+        // a canceled build leaves the octree there as it was
         assert!(is_current(&out, &src));
         assert!(!dir.0.join("a_uncolorized.las_converted.tmp").exists());
     }

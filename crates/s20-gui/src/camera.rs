@@ -167,7 +167,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn projects_target_to_centre_and_right_to_the_right() {
+    fn projects_target_to_center_and_right_to_the_right() {
         for ortho in [false, true] {
             let c = Camera {
                 target: [3.0, -2.0, 1.0],

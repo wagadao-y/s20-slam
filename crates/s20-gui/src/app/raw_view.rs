@@ -97,7 +97,7 @@ pub(super) struct GnssFiles {
 }
 
 /// The position solutions of session `k`: its PPK result when there is one, else the receiver's
-/// real-time RTK as extracted (on the device clock, back to UTC by the synchronisation).
+/// real-time RTK as extracted (on the device clock, back to UTC by the synchronization).
 fn positioning(
     cfg: &RunConfig,
     k: usize,
@@ -105,7 +105,7 @@ fn positioning(
     job: &s20_io::job::Job,
 ) -> Result<Positioning, String> {
     if let Ok(r) = s20_pipeline::ppk::read(&cfg.ppk_file_of(k)) {
-        // a FIX told apart by the directions that fixed it, and whether the optimisation uses it
+        // a FIX told apart by the directions that fixed it, and whether the optimization uses it
         let directions = r.directions();
         return Ok(Positioning {
             source: "PPK".into(),
@@ -144,7 +144,7 @@ fn positioning(
     })
 }
 
-/// The colours of the solution states in the charts, as [`Fix::ALL`].
+/// The colors of the solution states in the charts, as [`Fix::ALL`].
 const FIX_COLORS: [egui::Color32; Fix::ALL.len()] = [
     egui::Color32::from_rgb(110, 200, 120),
     egui::Color32::from_rgb(190, 215, 90),
@@ -870,7 +870,7 @@ fn local_time(utc: f64) -> String {
         .unwrap_or_default()
 }
 
-/// The colours of the satellite systems in the charts.
+/// The colors of the satellite systems in the charts.
 const SYSTEM_COLORS: [egui::Color32; 6] = [
     egui::Color32::from_rgb(90, 160, 255),
     egui::Color32::from_rgb(240, 110, 100),

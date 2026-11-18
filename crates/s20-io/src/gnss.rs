@@ -10,7 +10,7 @@ pub const FIX: f64 = 50.0;
 #[derive(Clone, Copy, Debug)]
 pub struct Fix {
     pub t: f64,
-    /// Local east/north/up position (metres).
+    /// Local east/north/up position (meters).
     pub p: [f64; 3],
     /// PPK: east/north/up standard deviations (m). Receiver RTK retains its
     /// lat/lon/height deviations; legacy RTK weighting uses configured sigmas.

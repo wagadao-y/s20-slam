@@ -24,7 +24,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
-/// A displayed point: f32 offset from its chunk's origin and an sRGB colour (16 bytes, a GPU vertex).
+/// A displayed point: f32 offset from its chunk's origin and an sRGB color (16 bytes, a GPU vertex).
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct ViewPoint {
@@ -55,7 +55,7 @@ impl NodePoints {
 pub struct LodNode {
     pub center: DVec3,
     pub radius: f64,
-    /// median nearest-neighbour distance among the first chunk's points
+    /// median nearest-neighbor distance among the first chunk's points
     pub sample_nn: f64,
     pub total: usize,
     pub chunks: Vec<Arc<NodePoints>>,
@@ -65,9 +65,9 @@ pub struct LodNode {
     pub time: Option<[f64; 2]>,
 }
 
-/// The grey of a reflectivity for the preview: the scans' colour, and every point's alpha (see
+/// The gray of a reflectivity for the preview: the scans' color, and every point's alpha (see
 /// `render::Coloring`).
-pub fn reflectivity_grey(reflectivity: u16) -> u8 {
+pub fn reflectivity_gray(reflectivity: u16) -> u8 {
     (40.0 + reflectivity.min(150) as f32 / 150.0 * 200.0) as u8
 }
 
@@ -113,7 +113,7 @@ pub struct Scene {
     pub sessions: Vec<SceneSession>,
     /// file the trajectory came from
     pub traj_file: Option<PathBuf>,
-    /// per-knot quality of the optimised trajectory
+    /// per-knot quality of the optimized trajectory
     pub quality: Option<crate::quality::Quality>,
     /// Whether the loaded trajectory used RTK, computed once when its quality is loaded.
     pub rtk_used: bool,
@@ -129,11 +129,11 @@ pub struct Scene {
     pub source: Option<PreviewSource>,
     /// why the cloud asked for is not shown (none shown instead)
     pub unavailable: Option<String>,
-    /// whether the points carry image colours (else a height ramp is offered)
+    /// whether the points carry image colors (else a height ramp is offered)
     pub has_color: bool,
     pub bounds: Option<(DVec3, DVec3)>,
     pub z_range: Option<[f64; 2]>,
-    /// largest full-density neighbour distance used for adaptive sizes: 3 times the typical one
+    /// largest full-density neighbor distance used for adaptive sizes: 3 times the typical one
     pub nn_cap: f64,
     /// the nodes' octree, for the output cloud
     pub octree: Option<Arc<Octree>>,
@@ -273,7 +273,7 @@ pub fn lod_node(pts: &[([f64; 3], [u8; 4])]) -> Option<LodNode> {
     })
 }
 
-/// Median nearest-neighbour distance among a chunk's points (0 for fewer than two).
+/// Median nearest-neighbor distance among a chunk's points (0 for fewer than two).
 fn median_nn(c: &NodePoints) -> f64 {
     if c.len() < 2 {
         return 0.0;
@@ -293,15 +293,15 @@ fn median_nn(c: &NodePoints) -> f64 {
 }
 
 impl LodNode {
-    /// Neighbour distance with all points drawn. Points spread on surfaces: the distance shrinks
+    /// Neighbor distance with all points drawn. Points spread on surfaces: the distance shrinks
     /// with the square root of the point count.
     pub fn full_nn(&self) -> f64 {
         self.sample_nn * (self.total.min(FIRST_CHUNK) as f64 / self.total as f64).sqrt()
     }
 
-    /// Grid spacing of `k` drawn points, for Potree's adaptive size: the full-density neighbour
+    /// Grid spacing of `k` drawn points, for Potree's adaptive size: the full-density neighbor
     /// distance (at most `cap`, so sparse nodes of stray points are not drawn as large discs), grown
-    /// by the square root of the thinning; the median neighbour distance of random points is about
+    /// by the square root of the thinning; the median neighbor distance of random points is about
     /// half the grid spacing.
     pub fn spacing(&self, k: usize, cap: f64) -> f32 {
         let full = self.full_nn().min(cap);
@@ -334,7 +334,7 @@ fn robust_bounds(nodes: &[LodNode]) -> Option<(DVec3, DVec3)> {
     Some((lo, hi))
 }
 
-/// The heights to colour over: those of the space the points take (cells of a quarter metre)
+/// The heights to color over: those of the space the points take (cells of a quarter meter)
 /// rather than of the points, so that where the scanner stayed long does not take the whole
 /// ramp; the extreme 0.5 % of the cells at either end left out.
 pub fn height_range(points: impl Iterator<Item = DVec3>) -> Option<[f64; 2]> {
@@ -613,7 +613,7 @@ impl Octree {
 const OCTREE_RESIDENT: usize = 4 * stream::OVERVIEW_POINTS;
 
 /// The output cloud's octree in `dir` as preview nodes: the overview loaded, the other nodes
-/// streamed; colours as the cloud has them (`colored`), the reflectivity's grey in the alpha.
+/// streamed; colors as the cloud has them (`colored`), the reflectivity's gray in the alpha.
 fn octree_preview(
     dir: &Path,
     origin: [f64; 3],
@@ -677,7 +677,7 @@ fn octree_preview(
         let at_world = DVec3::from(at) + o;
         let points = (0..p.xyz.len())
             .map(|j| {
-                let grey = reflectivity_grey(p.intensity.as_ref().map_or(0, |v| v[j]));
+                let gray = reflectivity_gray(p.intensity.as_ref().map_or(0, |v| v[j]));
                 let color = match &p.rgb {
                     Some(c) if colored => {
                         let c = c[j];
@@ -685,10 +685,10 @@ fn octree_preview(
                             (c[0] >> 8) as u8,
                             (c[1] >> 8) as u8,
                             (c[2] >> 8) as u8,
-                            grey,
+                            gray,
                         ]
                     }
-                    _ => [200, 200, 200, grey],
+                    _ => [200, 200, 200, gray],
                 };
                 ViewPoint {
                     offset: std::array::from_fn(|d| (p.xyz[j][d] - at_world[d]) as f32),
@@ -718,9 +718,9 @@ fn scan_dependencies(cfg: &RunConfig) -> Vec<PathBuf> {
     paths
 }
 
-/// The trajectory rows of every session to show, in time order, with the sessions: the optimised
+/// The trajectory rows of every session to show, in time order, with the sessions: the optimized
 /// trajectory where it holds a session, else the session's odometry (or the device's trajectory,
-/// for [`TrajectorySource::Device`]). With several sessions, those not in the optimised trajectory
+/// for [`TrajectorySource::Device`]). With several sessions, those not in the optimized trajectory
 /// (not placed yet, each in its own frame) are moved beside the others so that they do not overlap.
 /// Trajectory rows of all sessions, the sessions, the file the trajectory came from.
 type SessionRows = (Vec<[f64; 8]>, Vec<SceneSession>, Option<PathBuf>);
@@ -1035,7 +1035,7 @@ pub fn load(
     );
     if let Some(b) = robust_bounds(&s.nodes) {
         s.bounds = Some(b);
-        // typical full-density neighbour distance, by points
+        // typical full-density neighbor distance, by points
         let mut v: Vec<(f64, usize)> = s.nodes.iter().map(|n| (n.full_nn(), n.total)).collect();
         v.sort_by(|a, b| a.0.total_cmp(&b.0));
         let half = s.points() / 2;
@@ -1387,7 +1387,7 @@ mod trajectory_tests {
         )
         .unwrap();
         assert!((scene.nodes[0].chunks[0].position(0) - DVec3::new(101., 2., 3.)).length() < 1e-6);
-        // Migration: an old coloured cloud cannot be overlaid in the new frame.
+        // Migration: an old colored cloud cannot be overlaid in the new frame.
         s20_pipeline::frames::record(&cfg.data(), &[&cfg.colored()], None).unwrap();
         let old = load(
             cfg,
@@ -1674,7 +1674,7 @@ mod trajectory_tests {
             assert!(scene.octree.is_some());
             let chunk = &scene.nodes[0].chunks[0];
             assert!((chunk.position(0) - DVec3::new(1.0, 2.0, 3.0)).length() < 1e-6);
-            // the reflectivity's grey in the alpha
+            // the reflectivity's gray in the alpha
             assert_eq!(chunk.points[0].color, [255, 128, 16, 140]);
             let dir = s20_io::potree::converted_dir(&cfg.colored());
             assert!(s20_io::potree::is_current(&dir, &cfg.colored()));
@@ -1706,7 +1706,7 @@ mod trajectory_tests {
     }
 
     #[test]
-    fn the_uncoloured_cloud_is_shown_when_chosen_with_the_points_colouring_dropped() {
+    fn the_uncolored_cloud_is_shown_when_chosen_with_the_points_coloring_dropped() {
         use s20_io::las::LasPoint;
         let fixture = Fixture::new(1);
         let cfg = &fixture.0;
@@ -1718,7 +1718,7 @@ mod trajectory_tests {
             })
             .collect();
         s20_io::las::write(&cfg.uncolored(), &points, 1e-4, [0.0; 3]).unwrap();
-        // colouring dropped three
+        // coloring dropped three
         s20_io::las::write(&cfg.colored(), &points[3..], 1e-4, [0.0; 3]).unwrap();
         for (want, n) in [(PreviewSource::Uncolored, 10), (PreviewSource::Colored, 7)] {
             let scene = load(

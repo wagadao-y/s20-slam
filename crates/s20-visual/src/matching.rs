@@ -1,5 +1,5 @@
-//! Matching descriptors between two images: nearest neighbours by L2 with Lowe's ratio test, kept
-//! only when mutual, then the fundamental matrix by RANSAC on normalised image coordinates (x/z,
+//! Matching descriptors between two images: nearest neighbors by L2 with Lowe's ratio test, kept
+//! only when mutual, then the fundamental matrix by RANSAC on normalized image coordinates (x/z,
 //! y/z of the rays), as `cv2.findFundamentalMat(FM_RANSAC)` with the larger of the two
 //! point-to-epipolar-line distances.
 
@@ -61,7 +61,7 @@ pub fn mutual_ratio(a: &[[u8; 128]], b: &[[u8; 128]], ratio: f32) -> Vec<(usize,
         .collect()
 }
 
-/// Eight-point fundamental matrix (Hartley normalisation, rank two).
+/// Eight-point fundamental matrix (Hartley normalization, rank two).
 fn eight_point(p: &[[f64; 2]], q: &[[f64; 2]]) -> Option<Matrix3<f64>> {
     let norm = |v: &[[f64; 2]]| -> Matrix3<f64> {
         let n = v.len() as f64;
@@ -122,7 +122,7 @@ fn error(f: &Matrix3<f64>, p: [f64; 2], q: [f64; 2]) -> f64 {
     (d1 * d1 * s1).max(d2 * d2 * s2)
 }
 
-/// Inliers of the fundamental matrix found by RANSAC (threshold in normalised coordinates).
+/// Inliers of the fundamental matrix found by RANSAC (threshold in normalized coordinates).
 pub fn ransac_fundamental(
     p: &[[f64; 2]],
     q: &[[f64; 2]],

@@ -2,7 +2,7 @@
 //!
 //! Each voxel keeps the mean and covariance of the points (and of their transformed covariances) inserted
 //! into it. Voxels not touched for `lru_horizon` insertions are removed every `lru_clear_cycle` insertions.
-//! Nearest-neighbour search only looks at the voxel containing the query (search_offsets = 1).
+//! Nearest-neighbor search only looks at the voxel containing the query (search_offsets = 1).
 
 use crate::cloud::CovCloud;
 use crate::so3::{M3, V3};
@@ -133,7 +133,7 @@ impl GaussianVoxelMap {
         Some((v, (v.mean - q).norm_squared()))
     }
 
-    /// Voxel whose mean is nearest to `q` among the one containing it and its 6 face neighbours
+    /// Voxel whose mean is nearest to `q` among the one containing it and its 6 face neighbors
     /// (small_gicp `search_offsets = 7`).
     #[inline]
     pub fn nearest7(&self, q: &V3) -> Option<(&GaussianVoxel, f64)> {

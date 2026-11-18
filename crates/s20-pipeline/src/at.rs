@@ -113,7 +113,7 @@ impl PointAt {
     }
 }
 
-/// The sessions of an optimisation, to turn [`At`] into times on the common axis.
+/// The sessions of an optimization, to turn [`At`] into times on the common axis.
 pub struct Clock {
     pub names: Vec<String>,
     /// per session: start of its first scan, end of its trajectory (s, shifted)

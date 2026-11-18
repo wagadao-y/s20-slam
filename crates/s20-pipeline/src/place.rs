@@ -1,4 +1,4 @@
-//! Placing the sessions in a common frame before the optimisation: from the GNSS fixes, or from
+//! Placing the sessions in a common frame before the optimization: from the GNSS fixes, or from
 //! the links to a session already placed (two times at the same place, or matched points). See
 //! `s20_opt::links`.
 
@@ -96,8 +96,8 @@ impl Matches {
         Ok(out)
     }
 
-    /// The centres of the matched points (world, current states).
-    fn centres(&self, pr: &Problem) -> (V3, V3) {
+    /// The centers of the matched points (world, current states).
+    fn centers(&self, pr: &Problem) -> (V3, V3) {
         let n = self.pairs.len() as f64;
         let ca = self.pairs.iter().map(|p| p.0.world(pr)).sum::<V3>() / n;
         let cb = self.pairs.iter().map(|p| p.1.world(pr)).sum::<V3>() / n;
@@ -112,7 +112,7 @@ impl Matches {
         let b: Vec<V3> = self.pairs.iter().map(|p| p.1.world(pr)).collect();
         if a.len() >= 2 {
             let (r, t) = place_points(&a, &b);
-            // and a few degrees either way: points picked by hand are a few centimetres off
+            // and a few degrees either way: points picked by hand are a few centimeters off
             [0.0f64, 3.0, -3.0]
                 .iter()
                 .map(|d| {
@@ -141,7 +141,7 @@ fn register_matches(
     name: &str,
     job: &Job,
 ) -> Result<(M3, V3)> {
-    let (ca, cb) = m.centres(pr);
+    let (ca, cb) = m.centers(pr);
     let f = pr.register_regions(m.a, &ca, m.b, &cb, guesses, &p.loop_reg, p.rmax)?;
     job.log(&format!(
         "{name}: matched {:.0}% of the points, guesses {:.2} m apart",
@@ -255,7 +255,7 @@ pub(crate) fn place_sessions(
                 register_matches(pr, &rev, &g, p, &what, job)?
             };
             let s = if placed[m.a] { m.b } else { m.a };
-            let (ca, cb) = m.centres(pr);
+            let (ca, cb) = m.centers(pr);
             let c = if s == m.b { cb } else { ca };
             let (yaw, d) = place(pr, s, &r, &t, &c);
             job.log(&format!(
@@ -285,7 +285,7 @@ pub(crate) fn place_sessions(
         job.check()?;
         let what = format!("matched points {} - {}", name(m.a), name(m.b));
         let (r, t) = register_matches(pr, m, &[(M3::identity(), V3::zeros())], p, &what, job)?;
-        let (ca, cb) = m.centres(pr);
+        let (ca, cb) = m.centers(pr);
         let ka = pr.nearest_knot(m.a, &ca).context("no knot")?;
         let kb = pr.nearest_knot(m.b, &cb).context("no knot")?;
         let mut rel = pr.link_factor(ka, kb, &r, &t, &p.loop_reg);

@@ -107,7 +107,7 @@ impl App {
         if let Some(f) = &job.log_file {
             f.line(&match &r {
                 Ok(_) => tl("---- 完了", "---- Done").to_string(),
-                Err(e) if is_cancelled(e) => tl("---- 中断しました", "---- Cancelled").to_string(),
+                Err(e) if is_canceled(e) => tl("---- 中断しました", "---- Canceled").to_string(),
                 Err(e) => tr!("---- エラー: {e:#}", "---- Error: {e:#}"),
             });
         }
@@ -164,7 +164,7 @@ impl App {
                     ),
                 }
             }
-            Err(e) if is_cancelled(&e) => (false, tl("中止しました", "Cancelled").to_string()),
+            Err(e) if is_canceled(&e) => (false, tl("中止しました", "Canceled").to_string()),
             Err(e) => (
                 false,
                 tr!("求められませんでした: {e:#}", "Could not compute it: {e:#}"),

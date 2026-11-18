@@ -61,7 +61,7 @@ pub fn from_quat(q: [f64; 4]) -> M3 {
     *u.to_rotation_matrix().matrix()
 }
 
-/// Re-orthonormalise a rotation matrix that accumulated rounding error.
+/// Re-orthonormalize a rotation matrix that accumulated rounding error.
 pub fn normalize(r: &M3) -> M3 {
     from_quat(to_quat(r))
 }

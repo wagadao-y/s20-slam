@@ -29,7 +29,7 @@ pub struct Input {
     pub imgpose: PathBuf,
     /// the calibration with the device correction
     pub calib: PathBuf,
-    /// the uncoloured cloud and its sampling step
+    /// the uncolored cloud and its sampling step
     pub cloud: PathBuf,
     pub step: usize,
     pub out: PathBuf,
@@ -52,10 +52,10 @@ pub struct Input {
     /// how far the cameras may move from the calibration given: mount rotation (degrees) and
     /// offset (mm), principal point (pixels), fisheye angle scale and cubic term
     pub camera_prior: CameraPrior,
-    /// also match more pairs (two images apart, the other camera's neighbouring frames, revisits),
+    /// also match more pairs (two images apart, the other camera's neighboring frames, revisits),
     /// join the matches into tracks, adjust them after the refinement (`bundle`) and write those
     /// poses to this file: the images agree with one another (for Gaussian Splatting), while `out`,
-    /// each image fitted to the cloud, is for the colouring
+    /// each image fitted to the cloud, is for the coloring
     pub tracks: Option<PathBuf>,
     /// with `tracks`: also every track triangulated with those poses, written to this file with how
     /// well it is determined (see [`write_track_points`]): image points for the surfaces the laser
@@ -79,7 +79,7 @@ pub struct FeatureSettings {
 pub struct CameraPrior {
     pub mount_deg: f64,
     pub mount_mm: f64,
-    pub centre_px: f64,
+    pub center_px: f64,
     pub angle: f64,
 }
 
@@ -88,14 +88,14 @@ impl CameraPrior {
     pub const MAKER: CameraPrior = CameraPrior {
         mount_deg: 2.,
         mount_mm: 20.,
-        centre_px: 20.,
+        center_px: 20.,
         angle: 0.01,
     };
     /// from a calibration solved on the device's recordings: about their spread between recordings
     pub const DEVICE: CameraPrior = CameraPrior {
         mount_deg: 0.05,
         mount_mm: 2.,
-        centre_px: 0.5,
+        center_px: 0.5,
         angle: 0.0002,
     };
 }
@@ -969,7 +969,7 @@ pub fn run(input: &Input, job: &Job) -> Result<serde_json::Value> {
         iterations: if fit { 25 } else { 12 },
         mount_rot_sigma: p.mount_deg.to_radians(),
         mount_pos_sigma: p.mount_mm / 1000.,
-        centre_sigma: p.centre_px,
+        center_sigma: p.center_px,
         angle_sigma: p.angle,
         cubic_sigma: p.angle,
         ..Default::default()
@@ -987,7 +987,7 @@ pub fn run(input: &Input, job: &Job) -> Result<serde_json::Value> {
         &|done, all| refining.report("refining", done as u64, all as u64),
     );
     drop(train);
-    // the refined poses with the solved mounts (for the colouring), and the tracks' adjustment
+    // the refined poses with the solved mounts (for the coloring), and the tracks' adjustment
     let refined: Vec<Pose> = (0..poses.poses.len())
         .map(|i| {
             mounted(

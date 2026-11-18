@@ -635,7 +635,7 @@ fn run_menu_names_the_range_that_will_run_and_the_shown_result_tells_when_it_is_
     app.stale_why.insert(Step::Lio, s20_pipeline::Stale::Params);
     app.scene.source = None;
     assert_eq!(app.shown_stale(), None);
-    // the optimised scans depend on the LIO
+    // the optimized scans depend on the LIO
     app.scene.source = Some(PreviewSource::Scans);
     app.scene.trajectory_source = TrajectorySource::Optimized;
     assert_eq!(
@@ -694,7 +694,7 @@ fn one_preview_choice_sets_the_cloud_and_trajectory_and_names_what_is_shown() {
     assert_eq!(app.source_label(), "スキャン点群（機体）");
     app.scene.source = Some(PreviewSource::Colored);
     assert_eq!(app.source_label(), "出力点群（着色済み）");
-    // the uncoloured cloud chosen: no colour, said so
+    // the uncolored cloud chosen: no color, said so
     app.set_preview(Preview::OutputUncolored);
     app.scene.source = Some(PreviewSource::Uncolored);
     assert!(
@@ -720,7 +720,7 @@ fn only_previews_of_finished_steps_are_chosen_and_the_nearest_replaces_one_that_
     std::fs::create_dir_all(cfg.output()).unwrap();
     std::fs::write(cfg.opt_file(), "").unwrap();
     std::fs::write(cfg.uncolored(), "").unwrap();
-    // the uncoloured cloud alone does not make the coloured one
+    // the uncolored cloud alone does not make the colored one
     assert_eq!(app.preview_missing(Preview::Output), Some(Step::Colorize));
     assert_eq!(app.nearest_preview(), Some(Preview::OutputUncolored));
     // a cloud generation that did not finish
@@ -780,13 +780,13 @@ fn saved_quality_and_edits_tabs_open_the_trajectory_tab() {
 fn point_colors_are_kept_per_cloud_and_fall_back_where_they_cannot_show() {
     let mut app = crate::app::tests::app();
     app.scene.source = Some(PreviewSource::Scans);
-    // the scans have no image colours: grey by reflectivity
+    // the scans have no image colors: gray by reflectivity
     app.s.point_color_scans = PointColor::Rgb;
     assert_eq!(app.point_color(), PointColor::Reflectivity);
     assert_eq!(app.coloring(), Coloring::Reflectivity);
     app.s.point_color_scans = PointColor::Plain;
     assert_eq!(app.coloring(), Coloring::Plain);
-    // the output cloud keeps its own choice; uncoloured, it falls back to the height
+    // the output cloud keeps its own choice; uncolored, it falls back to the height
     app.scene.source = Some(PreviewSource::Colored);
     assert_eq!(app.point_color(), PointColor::Rgb);
     app.scene.source = Some(PreviewSource::Uncolored);
@@ -855,7 +855,7 @@ fn ctrl_z_undoes_a_correction_ctrl_s_saves_it_and_a_run_keeps_its_corrections() 
     frame(&mut app, key(egui::Key::S, egui::Modifiers::COMMAND));
     assert_eq!(cfg.revisions().len(), 1);
     assert_eq!(cfg.revisions()[0].name, "保存 1");
-    // a run of the optimisation keeps changed corrections, and only changed ones
+    // a run of the optimization keeps changed corrections, and only changed ones
     app.edits.loops.clear();
     app.save_edits();
     app.save_revision(true);
@@ -1010,7 +1010,7 @@ fn height_clip_slider_cuts_from_its_ends_and_lets_go_at_them() {
     let mut app = crate::app::tests::app();
     app.scene.z_range = Some([-2.0, 8.0]);
     let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800., 600.));
-    // top 24, bottom 500: 47.6 pixels a metre
+    // top 24, bottom 500: 47.6 pixels a meter
     let (x, top, bottom) = (rect.right() - 22., 24., 500.);
     let frame = |app: &mut App, events: Vec<egui::Event>| {
         let mut output = ctx.run_ui(

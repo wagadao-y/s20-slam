@@ -1,5 +1,5 @@
 //! Point clouds with per-point covariances and their preprocessing (small_gicp `preprocess_points`):
-//! voxel-grid downsampling (per-voxel mean) and covariance estimation from k nearest neighbours.
+//! voxel-grid downsampling (per-voxel mean) and covariance estimation from k nearest neighbors.
 
 use crate::so3::{M3, V3};
 use kiddo::{KdTree, SquaredEuclidean};
@@ -64,8 +64,8 @@ pub fn voxelgrid_sampling(points: &[V3], leaf: f64) -> Vec<V3> {
     out
 }
 
-/// Covariances from `k` nearest neighbours, regularised to eigenvalues (1e-3, 1, 1) like small_gicp.
-/// Points with fewer than 5 neighbours get the identity.
+/// Covariances from `k` nearest neighbors, regularised to eigenvalues (1e-3, 1, 1) like small_gicp.
+/// Points with fewer than 5 neighbors get the identity.
 pub fn estimate_covariances(points: &[V3], k: usize) -> Vec<M3> {
     if points.is_empty() {
         return Vec::new();

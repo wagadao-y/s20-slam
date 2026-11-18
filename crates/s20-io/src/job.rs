@@ -14,18 +14,18 @@ pub struct Job {
     log: Arc<LogFn>,
 }
 
-/// The error a cancelled job returns.
+/// The error a canceled job returns.
 #[derive(Debug)]
-pub struct Cancelled;
-impl std::fmt::Display for Cancelled {
+pub struct Canceled;
+impl std::fmt::Display for Canceled {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("cancelled")
+        f.write_str("canceled")
     }
 }
-impl std::error::Error for Cancelled {}
+impl std::error::Error for Canceled {}
 
-pub fn is_cancelled(e: &anyhow::Error) -> bool {
-    e.downcast_ref::<Cancelled>().is_some()
+pub fn is_canceled(e: &anyhow::Error) -> bool {
+    e.downcast_ref::<Canceled>().is_some()
 }
 
 impl Job {
@@ -49,10 +49,10 @@ impl Job {
         )
     }
 
-    /// Fails with [`Cancelled`] once cancellation was requested.
+    /// Fails with [`Canceled`] once cancellation was requested.
     pub fn check(&self) -> Result<()> {
         if self.cancel.load(Ordering::Relaxed) {
-            bail!(Cancelled);
+            bail!(Canceled);
         }
         Ok(())
     }
@@ -134,7 +134,7 @@ mod tests {
         drop(seen);
         job.named("colorize")
             .part(0.0, 0.5)
-            .report("colour images", 1, 2);
+            .report("color images", 1, 2);
         let seen = all.lock().unwrap();
         assert_eq!(seen.last().unwrap().0, "colorize");
         assert!((seen.last().unwrap().1 - 0.25).abs() < 1e-9);

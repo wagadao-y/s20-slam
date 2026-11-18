@@ -28,12 +28,12 @@ pub struct Params {
     pub ar_ratio: f64,
     /// Lower bounds (m) on the horizontal / vertical standard deviation used when
     /// forward and backward solutions are checked for agreement (4 sigma, ENU).
-    /// FIX covariance is often millimetres, below the accuracy of the corrections.
+    /// FIX covariance is often millimeters, below the accuracy of the corrections.
     pub fix_check_sd_h: f64,
     pub fix_check_sd_v: f64,
     /// Lower bounds (m) on the FLOAT side's horizontal / vertical standard deviation, added to
     /// the above, when a FIX of one direction is checked against FLOAT of the other. FLOAT
-    /// covariance is millimetres while converging FLOAT is often decimetres off.
+    /// covariance is millimeters while converging FLOAT is often decimeters off.
     pub float_check_sd_h: f64,
     pub float_check_sd_v: f64,
     /// SNR-dependent phase error at RTKLIB's 52 dB-Hz reference; zero disables it.
@@ -157,7 +157,7 @@ pub struct Solution {
     pub utc: f64,
     pub t: f64,
     pub llh: [f64; 3],
-    /// East, north, up standard deviations in metres.
+    /// East, north, up standard deviations in meters.
     pub sd: [f64; 3],
     pub ratio: f64,
     pub age: f64,
@@ -677,7 +677,7 @@ pub fn process(raw: &Path, out: &Path, p: &Params, job: &Job) -> Result<ResultFi
     let [forward_solutions, backward_solutions, solutions] = directions;
     ensure!(
         !solutions.is_empty(),
-        "PPK solution has no overlap with valid SLAM clock synchronisation"
+        "PPK solution has no overlap with valid SLAM clock synchronization"
     );
     let result = ResultFile {
         engine: ENGINE.into(),
@@ -710,7 +710,7 @@ mod tests {
         assert_eq!(unsafe { s20_ppk_test_mixed_consistency() }, 1);
     }
     #[test]
-    fn native_fix_check_accepts_centimetres_and_rejects_decimetres() {
+    fn native_fix_check_accepts_centimeters_and_rejects_decimeters() {
         unsafe extern "C" {
             fn s20_ppk_test_fix_floor() -> i32;
         }
@@ -745,7 +745,7 @@ mod tests {
         }
     }
     #[test]
-    fn fix_check_floors_default_to_centimetres_and_are_validated() {
+    fn fix_check_floors_default_to_centimeters_and_are_validated() {
         let p: Params = serde_json::from_str(r#"{"interval":1.0}"#).unwrap();
         assert_eq!((p.fix_check_sd_h, p.fix_check_sd_v), (0.01, 0.02));
         assert!(p.validate().is_ok());
@@ -770,7 +770,7 @@ mod tests {
         assert!(off.validate().is_ok());
     }
     #[test]
-    fn float_check_floors_default_to_decimetres_and_are_validated() {
+    fn float_check_floors_default_to_decimeters_and_are_validated() {
         let p: Params = serde_json::from_str(r#"{"interval":1.0}"#).unwrap();
         assert_eq!((p.float_check_sd_h, p.float_check_sd_v), (0.10, 0.20));
         for (h, v) in [(-0.001, 0.2), (0.501, 0.2), (f64::NAN, 0.2), (0.1, 1.001)] {
@@ -820,7 +820,7 @@ mod tests {
         assert!(device_time(&c, 103.).is_none());
     }
     #[test]
-    fn damaged_unicore_resynchronises() {
+    fn damaged_unicore_resynchronizes() {
         let mut b = vec![0; 28];
         b[..3].copy_from_slice(&[0xaa, 0x44, 0xb5]);
         let crc = crc32(&b[..24]);

@@ -50,7 +50,7 @@ pub fn linearize(
 /// Options of [`linearize_opts`]; the defaults are small_gicp's.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Opts {
-    /// search the 6 face neighbours of the voxel too (small_gicp `search_offsets = 7`)
+    /// search the 6 face neighbors of the voxel too (small_gicp `search_offsets = 7`)
     pub search7: bool,
     /// Huber threshold on the Mahalanobis residual sqrt(r^T M r); 0: plain least squares
     pub huber: f64,

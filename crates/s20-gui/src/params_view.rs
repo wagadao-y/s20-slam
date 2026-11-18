@@ -1,6 +1,6 @@
 //! Editor of the processing parameters: the parameters drawn as their JSON tree (numbers, switches,
 //! lists, nested groups) with Japanese labels, and the values that differ from the preset marked.
-//! Walking the serialised tree keeps every parameter editable without a widget per field.
+//! Walking the serialized tree keeps every parameter editable without a widget per field.
 
 use crate::lang::tl;
 use eframe::egui;
@@ -8,7 +8,7 @@ use egui_phosphor::regular as icon;
 use s20_pipeline::ProcessParams;
 use serde_json::{Value, json};
 
-/// Colour of the values that differ from the preset.
+/// Color of the values that differ from the preset.
 pub const CHANGED: egui::Color32 = egui::Color32::from_rgb(230, 190, 70);
 
 /// Number fields that may also be unset (`None`).
@@ -23,8 +23,8 @@ pub fn show(
     expand: bool,
     ppk: bool,
 ) {
-    let mut v = serde_json::to_value(&*p).expect("parameters serialise");
-    let base = serde_json::to_value(preset).expect("parameters serialise");
+    let mut v = serde_json::to_value(&*p).expect("parameters serialize");
+    let base = serde_json::to_value(preset).expect("parameters serialize");
     let mut changed = false;
     if let Value::Object(m) = &mut v {
         for (key, child) in m.iter_mut() {
@@ -114,7 +114,7 @@ fn object(
     changed
 }
 
-/// A list of groups (the optimisation stages): each one, and adding or removing one.
+/// A list of groups (the optimization stages): each one, and adding or removing one.
 fn list(
     ui: &mut egui::Ui,
     section: &str,
@@ -554,7 +554,7 @@ const LABELS: &[(&str, &str, [&str; 2], [&str; 2])] = &[
             "Max correspondence distance when searching again after the check above. If the re-search also fails the check, the first result is used",
         ],
     ),
-    // unified optimisation
+    // unified optimization
     (
         "opt",
         "every",
@@ -1615,7 +1615,7 @@ const LABELS: &[(&str, &str, [&str; 2], [&str; 2])] = &[
             "Tiles (with margins) with more than this are split in 4. Smaller uses less memory and takes longer (about 8 GB at 20 million)",
         ],
     ),
-    // colour
+    // color
     (
         "color",
         "views",

@@ -1355,7 +1355,7 @@ impl App {
             }
             if let StepState::Running(f) = st {
                 let bar = ui.add(egui::ProgressBar::new(f).desired_height(6.0));
-                // the optimisation's phase (PPK, GNSS, loops) on hover, not as a line of its own
+                // the optimization's phase (PPK, GNSS, loops) on hover, not as a line of its own
                 if s == Step::Opt
                     && let Some(job) = &self.job
                     && !job.opt_progress.label.is_empty()
@@ -1365,7 +1365,7 @@ impl App {
             }
         }
         ui.add_space(6.0);
-        // the main action: as wide as the panel, coloured while there is something to run
+        // the main action: as wide as the panel, colored while there is something to run
         let size = egui::vec2(ui.available_width(), 28.0);
         if idle {
             let first = Step::ALL
@@ -1549,7 +1549,7 @@ impl App {
         });
     }
 
-    /// Why colouring `c` cannot show the points shown, if it cannot.
+    /// Why coloring `c` cannot show the points shown, if it cannot.
     pub(super) fn point_color_unavailable(&self, c: PointColor) -> Option<&'static str> {
         match (self.scene.source?, c) {
             (PreviewSource::Scans, PointColor::Rgb) => Some(tl(
@@ -1589,7 +1589,7 @@ impl App {
         }
     }
 
-    /// The colouring chosen for the points shown (the scans and the output cloud keep their own).
+    /// The coloring chosen for the points shown (the scans and the output cloud keep their own).
     fn chosen_point_color(&mut self) -> &mut PointColor {
         if self.scene.source == Some(PreviewSource::Scans) {
             &mut self.s.point_color_scans
@@ -1598,7 +1598,7 @@ impl App {
         }
     }
 
-    /// The colouring drawn: the chosen one, else the default of the points shown.
+    /// The coloring drawn: the chosen one, else the default of the points shown.
     pub(super) fn point_color(&mut self) -> PointColor {
         let chosen = *self.chosen_point_color();
         if self.point_color_unavailable(chosen).is_none() {
@@ -1610,7 +1610,7 @@ impl App {
         }
     }
 
-    /// The colouring for the renderer.
+    /// The coloring for the renderer.
     pub(super) fn coloring(&mut self) -> Coloring {
         match self.point_color() {
             PointColor::Rgb => Coloring::Rgb,
@@ -1623,7 +1623,7 @@ impl App {
         }
     }
 
-    /// The heights coloured over: set by hand, else those of the scene.
+    /// The heights colored over: set by hand, else those of the scene.
     pub(super) fn height_range(&self) -> Option<[f64; 2]> {
         self.height_manual.or(self.scene.z_range)
     }
@@ -1768,7 +1768,7 @@ impl App {
             if !clip[i].is_finite() {
                 continue;
             }
-            // the height cut at, read like the colour range (from the view's origin)
+            // the height cut at, read like the color range (from the view's origin)
             let galley = painter.layout_no_wrap(
                 format!("{:.2} m", clip[i]),
                 egui::FontId::proportional(12.),
@@ -1919,7 +1919,7 @@ impl App {
     }
 }
 
-/// The height ramp's colours, from low to high.
+/// The height ramp's colors, from low to high.
 fn height_ramp(ui: &mut egui::Ui) {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(110.0, 10.0), egui::Sense::hover());
     let n = 32;
@@ -1961,10 +1961,10 @@ impl ScanRange {
     }
 }
 
-/// How the points are coloured, as chosen in the display tab.
+/// How the points are colored, as chosen in the display tab.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub(super) enum PointColor {
-    /// the colours from the camera images
+    /// the colors from the camera images
     Rgb,
     Reflectivity,
     Height,
@@ -2050,11 +2050,11 @@ pub(super) enum Preview {
     ScansDevice,
     /// the scans placed with the LIO trajectory
     ScansLio,
-    /// the scans placed with the optimised trajectory
+    /// the scans placed with the optimized trajectory
     ScansOpt,
-    /// the output cloud before colouring (with the points colouring drops)
+    /// the output cloud before coloring (with the points coloring drops)
     OutputUncolored,
-    /// the coloured output cloud
+    /// the colored output cloud
     Output,
 }
 

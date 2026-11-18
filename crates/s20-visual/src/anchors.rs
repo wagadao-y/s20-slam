@@ -16,7 +16,7 @@ pub const WIDTH: usize = 3504;
 pub const HEIGHT: usize = 4672;
 pub(crate) const CELL: usize = 8;
 
-/// Camera pose: camera-to-world rotation and camera centre.
+/// Camera pose: camera-to-world rotation and camera center.
 #[derive(Clone, Copy, Debug)]
 pub struct Pose {
     pub r: M3,
@@ -27,13 +27,13 @@ pub struct Cloud {
     pub xyz: Vec<[f64; 3]>,
     pub normal: Vec<[f32; 3]>,
     tree: ImmutableKdTree<f64, 3>,
-    /// each point's local plane, computed once (centre, normal, sigma in f32)
+    /// each point's local plane, computed once (center, normal, sigma in f32)
     patches: Vec<OnceLock<Option<[f32; 7]>>>,
 }
 
 #[derive(Clone, Copy, Debug)]
 pub struct Patch {
-    pub centre: V3,
+    pub center: V3,
     pub normal: V3,
     pub sigma: f64,
 }
@@ -92,13 +92,13 @@ impl Cloud {
             .collect()
     }
 
-    /// The local plane around point `i`: 16 or more neighbours within 12 cm, thinner than 7 mm.
+    /// The local plane around point `i`: 16 or more neighbors within 12 cm, thinner than 7 mm.
     pub fn patch(&self, i: usize) -> Option<Patch> {
-        // the centre is kept relative to the point, so f32 stays exact far from the origin
+        // the center is kept relative to the point, so f32 stays exact far from the origin
         let at = self.point(i);
         let p = (*self.patches[i].get_or_init(|| {
             self.fit_patch(i).map(|p| {
-                let d = p.centre - at;
+                let d = p.center - at;
                 [
                     d.x as f32,
                     d.y as f32,
@@ -111,7 +111,7 @@ impl Cloud {
             })
         }))?;
         Some(Patch {
-            centre: at + V3::new(p[0] as f64, p[1] as f64, p[2] as f64),
+            center: at + V3::new(p[0] as f64, p[1] as f64, p[2] as f64),
             normal: V3::new(p[3] as f64, p[4] as f64, p[5] as f64).normalize(),
             sigma: p[6] as f64,
         })
@@ -141,35 +141,35 @@ impl Cloud {
             return None;
         }
         Some(Patch {
-            centre: c,
+            center: c,
             normal: e.eigenvectors.column(order[0]).into_owned(),
             sigma: l0.max(0.).sqrt(),
         })
     }
 
-    /// Points within the cylinder from `centre` to `point` (radius growing with range) that lie off
+    /// Points within the cylinder from `center` to `point` (radius growing with range) that lie off
     /// the anchored plane on the camera side (`visual_surface_occlusion.occluders`).
-    pub fn occluders(&self, centre: &V3, point: &V3, normal: &V3) -> usize {
-        self.occluders_up_to(centre, point, normal, usize::MAX)
+    pub fn occluders(&self, center: &V3, point: &V3, normal: &V3) -> usize {
+        self.occluders_up_to(center, point, normal, usize::MAX)
     }
 
-    /// Whether more than one point occludes the anchored point from `centre` (see [`Cloud::occluders`]).
-    pub fn occluded(&self, centre: &V3, point: &V3, normal: &V3) -> bool {
-        self.occluders_up_to(centre, point, normal, 2) >= 2
+    /// Whether more than one point occludes the anchored point from `center` (see [`Cloud::occluders`]).
+    pub fn occluded(&self, center: &V3, point: &V3, normal: &V3) -> bool {
+        self.occluders_up_to(center, point, normal, 2) >= 2
     }
 
     /// [`Cloud::occluders`], counting no further than `limit`.
-    fn occluders_up_to(&self, centre: &V3, point: &V3, normal: &V3, limit: usize) -> usize {
+    fn occluders_up_to(&self, center: &V3, point: &V3, normal: &V3, limit: usize) -> usize {
         let (radius, angular, margin, near) = (0.02, 0.003, 0.03, 0.3);
-        let ray = point - centre;
+        let ray = point - center;
         let length = ray.norm();
         let ray = ray / length;
-        let side = normal.dot(&(centre - point)).signum();
+        let side = normal.dot(&(center - point)).signum();
         let inside = |i: usize| {
-            let q = self.point(i) - centre;
+            let q = self.point(i) - center;
             let along = q.dot(&ray);
             let lateral = (q - ray * along).norm();
-            let off = side * (q + centre - point).dot(normal);
+            let off = side * (q + center - point).dot(normal);
             along > near && along < length && lateral < radius + angular * along && off > margin
         };
         // balls along the ray, as far apart as the cylinder is wide at its widest and a little
@@ -180,7 +180,7 @@ impl Cloud {
         let mut found = std::collections::HashSet::new();
         let mut t = near + wide / 2.;
         while t - wide / 2. < length {
-            for i in self.within(&(centre + ray * t), reach) {
+            for i in self.within(&(center + ray * t), reach) {
                 if inside(i) && found.insert(i) && found.len() >= limit {
                     return found.len();
                 }
@@ -261,7 +261,7 @@ pub fn zgrid(cloud: &Cloud, pose: &Pose, cam: &Fisheye) -> ZGrid {
 /// it in the z-buffer, that plane, and the depth along the ray.
 pub struct Anchor {
     pub point: V3,
-    pub centre: V3,
+    pub center: V3,
     pub normal: V3,
     pub sigma: f64,
     pub depth: f64,
@@ -317,7 +317,7 @@ pub fn hint(
     let depth = (q - pose.p).dot(&ray);
     (0.3 < depth && depth < 25.).then(|| Anchor {
         point: pose.p + ray * depth,
-        centre: q,
+        center: q,
         normal: V3::zeros(),
         sigma: 0.,
         depth,
@@ -341,14 +341,14 @@ pub fn associate(
         if cosine.abs() < 0.2 {
             continue;
         }
-        let depth = pt.normal.dot(&(pt.centre - pose.p)) / cosine;
+        let depth = pt.normal.dot(&(pt.center - pose.p)) / cosine;
         let point = pose.p + ray * depth;
-        if !(0.3 < depth && depth < 25.) || (point - pt.centre).norm() > 0.12 {
+        if !(0.3 < depth && depth < 25.) || (point - pt.center).norm() > 0.12 {
             continue;
         }
         return Some(Anchor {
             point,
-            centre: pt.centre,
+            center: pt.center,
             normal: pt.normal,
             sigma: pt.sigma,
             depth,
@@ -377,15 +377,15 @@ mod tests {
         let c = wall();
         let p = c.patch(100 * 201 + 100).unwrap();
         assert!(p.sigma < 1e-9 && p.normal.x.abs() > 0.999);
-        let (centre, point, n) = (V3::zeros(), V3::new(2., 0., 3.), V3::new(1., 0., 0.));
-        assert_eq!(c.occluders(&centre, &point, &n), 0);
+        let (center, point, n) = (V3::zeros(), V3::new(2., 0., 3.), V3::new(1., 0., 0.));
+        assert_eq!(c.occluders(&center, &point, &n), 0);
         let mut xyz = c.xyz.clone();
         let mut normal = c.normal.clone();
         for k in 0..6 {
             xyz.push([1. + k as f64 * 1e-3, 0., 1.5]);
             normal.push([1., 0., 0.]);
         }
-        assert!(Cloud::new(xyz, normal).occluders(&centre, &point, &n) >= 5);
+        assert!(Cloud::new(xyz, normal).occluders(&center, &point, &n) >= 5);
     }
 
     #[test]

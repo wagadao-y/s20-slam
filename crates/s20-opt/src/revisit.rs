@@ -3,17 +3,17 @@
 //! way, whether the user marked it or not.
 //!
 //! The trajectory is cut into submaps of `len_s` seconds of one session (the points around the
-//! centre knot, placed by the current states: within a submap the odometry is good to a few
-//! centimetres). Two submaps whose centres are within `max_dist` and that are not neighbours in
+//! center knot, placed by the current states: within a submap the odometry is good to a few
+//! centimeters). Two submaps whose centers are within `max_dist` and that are not neighbors in
 //! time are registered (VGICP from the current relative pose and a few degrees either way); of the
 //! submaps of one pass near a submap only the nearest is taken. An accepted registration becomes a
-//! relative pose factor between the two centre knots, weighted by the registration's information
+//! relative pose factor between the two center knots, weighted by the registration's information
 //! (strong where walls and corners fix the pose, weak along a hedge or a road) scaled so that its
 //! strongest direction has `sig_t` / `sig_r_deg`, and robust (Cauchy, `robust` standard
 //! deviations): where the revisits and the loops disagree, the disagreement goes where the points
 //! fix the least, and a wrong registration pulls little. A registration along a path (the points
 //! hardly fix the position along it) is trusted less as a whole: in a wood the passes share few
-//! points and its rotation and position across the path scatter by decimetres.
+//! points and its rotation and position across the path scatter by decimeters.
 
 use crate::Problem;
 use crate::imu::Preint;
@@ -33,13 +33,13 @@ type M6 = SMatrix<f64, 6, 6>;
 pub struct RevisitParams {
     /// find and use the revisits (off: only the loops marked)
     pub enabled: bool,
-    /// a submap holds the knots within half this many seconds of its centre (s)
+    /// a submap holds the knots within half this many seconds of its center (s)
     pub len_s: f64,
-    /// and the points within this distance of its centre knot (m)
+    /// and the points within this distance of its center knot (m)
     pub radius: f64,
-    /// two submaps of one session are a revisit when their centres are this far apart in time (s)
+    /// two submaps of one session are a revisit when their centers are this far apart in time (s)
     pub min_gap_s: f64,
-    /// submaps whose centres are within this distance are registered (m)
+    /// submaps whose centers are within this distance are registered (m)
     pub max_dist: f64,
     /// fraction of the points matched at the finest distance for a registration to be used
     /// (passes that see a wall from far apart share few points but fix each other well)
@@ -62,7 +62,7 @@ impl Default for RevisitParams {
     fn default() -> Self {
         RevisitParams {
             // without GNSS they keep the passes of a place together where the odometry drifted (in
-            // a park checked against RTK, the worst pairs from 1-3 m to decimetres); with GNSS they
+            // a park checked against RTK, the worst pairs from 1-3 m to decimeters); with GNSS they
             // change little
             enabled: true,
             len_s: 15.0,
@@ -99,7 +99,7 @@ impl RevisitParams {
 /// A registered pair of submaps.
 #[derive(Clone, Debug)]
 pub struct Revisit {
-    /// the factor between the centre knots (weighted, not yet robust)
+    /// the factor between the center knots (weighted, not yet robust)
     pub rel: RelPose,
     pub inliers: f64,
     pub spread_m: f64,
@@ -112,7 +112,7 @@ pub struct Revisit {
     pub weak: f64,
 }
 
-/// A submap: the points around its centre knot in that knot's frame, as the registration takes
+/// A submap: the points around its center knot in that knot's frame, as the registration takes
 /// them (target voxels, source points).
 struct Submap {
     target: GaussianVoxelMap,
@@ -120,8 +120,8 @@ struct Submap {
 }
 
 impl Problem {
-    /// The centre knots of the submaps: every `len_s` seconds of each session.
-    pub fn submap_centres(&self, rp: &RevisitParams) -> Vec<usize> {
+    /// The center knots of the submaps: every `len_s` seconds of each session.
+    pub fn submap_centers(&self, rp: &RevisitParams) -> Vec<usize> {
         let mut out = Vec::new();
         let mut next = f64::NEG_INFINITY;
         for k in 0..self.kt.len() {
@@ -136,10 +136,10 @@ impl Problem {
         out
     }
 
-    /// The pairs of centre knots to register: within `max_dist`, of other sessions or at least
+    /// The pairs of center knots to register: within `max_dist`, of other sessions or at least
     /// `min_gap_s` apart; of the submaps of one pass near a submap, the nearest.
     pub fn revisit_pairs(&self, rp: &RevisitParams) -> Vec<(usize, usize)> {
-        let c = self.submap_centres(rp);
+        let c = self.submap_centers(rp);
         let mut out = Vec::new();
         for i in 0..c.len() {
             let (a, pa) = (c[i], self.states[c[i]].p);
@@ -186,7 +186,7 @@ impl Problem {
         }
     }
 
-    /// Registers the submaps of the pairs of centre knots, on the current states.
+    /// Registers the submaps of the pairs of center knots, on the current states.
     pub fn register_revisits(&self, rp: &RevisitParams, pairs: &[(usize, usize)]) -> Vec<Revisit> {
         let pre = self.map_preint();
         let mut knots: Vec<usize> = pairs.iter().flat_map(|&(a, b)| [a, b]).collect();
@@ -204,7 +204,7 @@ impl Problem {
 
     /// Finds and registers the revisits again on the current states (between the stages, as the
     /// loops are measured again) and puts them in place of the previous ones: a submap measured
-    /// on a distorted odometry is measured again on a better one, and passes that were metres
+    /// on a distorted odometry is measured again on a better one, and passes that were meters
     /// apart before the loops pulled them together are registered from close by (along a path
     /// the registration reaches the right place only from there).
     pub fn remeasure_revisits(&mut self, rp: &RevisitParams, log: &dyn Fn(&str)) {

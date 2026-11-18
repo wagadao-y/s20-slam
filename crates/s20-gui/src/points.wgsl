@@ -1,9 +1,9 @@
 struct Camera {
     matrix: mat4x4<f32>, viewport: vec2<f32>, size: f32, adaptive: f32, tint: vec4<f32>,
     depth: vec4<f32>, highlight_box: mat4x4<f32>, box_highlight_on: f32,
-    // 0 own colour, 1 grey by reflectivity (the alpha), 2 height, 3 tint shaded by reflectivity, 4 grey
+    // 0 own color, 1 gray by reflectivity (the alpha), 2 height, 3 tint shaded by reflectivity, 4 gray
     color_mode: f32,
-    pixels_per_metre: f32, segment: u32,
+    pixels_per_meter: f32, segment: u32,
     // Height in the ramp's 0..1 range as dot(ramp, (position, 1)).
     ramp: vec4<f32>,
     // Spacing of the drawn points for adaptive size, when the whole draw has one (else per point).
@@ -13,7 +13,7 @@ struct Camera {
     clip: vec2<f32>,
     height: vec4<f32>,
 };
-// Turbo colour map (Google), polynomial fit, sRGB output: of t in 0..1, the part 0.12..0.88 (the
+// Turbo color map (Google), polynomial fit, sRGB output: of t in 0..1, the part 0.12..0.88 (the
 // ends hardly show on the dark background; as TURBO_RANGE in app.rs).
 fn turbo(u: f32) -> vec3<f32> {
     let t = 0.12 + u * 0.76;
@@ -32,7 +32,7 @@ struct Out {
 };
 // sRGB highlight matching the box edges.
 const BOX_HIGHLIGHT = vec3<f32>(1.0, 0.863, 0.314);
-// sRGB colour of points a move would take (flag bit 0).
+// sRGB color of points a move would take (flag bit 0).
 const HIGHLIGHT = vec3<f32>(1.0, 0.188, 0.188);
 @vertex fn vertex(@builtin(vertex_index) id: u32, @builtin(instance_index) point: u32, @location(0) position: vec3<f32>, @location(1) color: vec4<f32>, @location(2) flags: u32, @location(3) spacing: f32) -> Out {
     let corners = array<vec2<f32>, 6>(vec2(-1.0,-1.0),vec2(1.0,-1.0),vec2(1.0,1.0),vec2(-1.0,-1.0),vec2(1.0,1.0),vec2(-1.0,1.0));
@@ -49,7 +49,7 @@ const HIGHLIGHT = vec3<f32>(1.0, 0.188, 0.188);
         // Potree's adaptive size: 1.7 times the point's spacing, on screen.
         let s = select(spacing, camera.node_spacing, camera.node_spacing > 0.0);
         let world = camera.adaptive * 1.7 * s;
-        size = clamp(world * camera.pixels_per_metre / out.position.w, camera.size, camera.max_size);
+        size = clamp(world * camera.pixels_per_meter / out.position.w, camera.size, camera.max_size);
     }
     out.position = vec4(out.position.xy + corners[id] * size / camera.viewport * out.position.w, out.position.zw);
     out.corner = corners[id];
@@ -64,7 +64,7 @@ const HIGHLIGHT = vec3<f32>(1.0, 0.188, 0.188);
     } else if mode == 4u {
         base = vec3(0.78);
     }
-    // Mix the tint in sRGB, like the colours it replaces (as the colour itself when by tint).
+    // Mix the tint in sRGB, like the colors it replaces (as the color itself when by tint).
     let tint = select(camera.tint.a, 0.0, mode == 3u);
     // the alpha carries the reflectivity: the splats are opaque
     out.color = vec4(mix(base, camera.tint.rgb, tint), 1.0);

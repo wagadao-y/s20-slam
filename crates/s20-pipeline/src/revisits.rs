@@ -1,4 +1,4 @@
-//! Revisits found and registered automatically in the optimisation (see `s20_opt::revisit`), and
+//! Revisits found and registered automatically in the optimization (see `s20_opt::revisit`), and
 //! the check of a trajectory by them: how doubled the points of two passes at the same place are.
 
 use crate::Clock;
@@ -54,7 +54,7 @@ pub(crate) fn add(pr: &mut Problem, rp: &RevisitParams, clock: &Clock, job: &Job
     marked
 }
 
-/// After the optimisation: the factors the robust weighting let go (residual beyond its scale),
+/// After the optimization: the factors the robust weighting let go (residual beyond its scale),
 /// the worst first.
 pub(crate) fn report(pr: &Problem, rp: &RevisitParams, marked: usize, clock: &Clock, job: &Job) {
     let mut off: Vec<(f64, usize)> = pr
@@ -118,7 +118,7 @@ fn summary(pr: &Problem, found: &[Revisit], what: &str, job: &Job) {
     }
 }
 
-/// Checks a trajectory (`knots`, as the optimisation writes them) by its revisits: registers the
+/// Checks a trajectory (`knots`, as the optimization writes them) by its revisits: registers the
 /// pairs of submaps (those of `pairs`, a file this wrote, else found on this trajectory) and
 /// writes per pair how far the registration is from the trajectory to `out` (CSV).
 pub fn eval(

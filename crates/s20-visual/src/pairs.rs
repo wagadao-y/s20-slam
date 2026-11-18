@@ -54,7 +54,7 @@ pub fn features(
     Ok(f)
 }
 
-/// Matches kept by the fundamental matrix on normalised coordinates (threshold 3 px at `focal`).
+/// Matches kept by the fundamental matrix on normalized coordinates (threshold 3 px at `focal`).
 pub fn matches(a: &Features, b: &Features, focal: f64) -> Vec<(usize, usize)> {
     let pairs = matching::mutual_ratio(&a.desc, &b.desc, 0.8);
     if pairs.len() < 12 {

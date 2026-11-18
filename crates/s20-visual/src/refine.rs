@@ -28,7 +28,7 @@ pub struct Settings {
     pub fit_camera: bool,
     pub angle_sigma: f64,
     pub cubic_sigma: f64,
-    pub centre_sigma: f64,
+    pub center_sigma: f64,
     /// also solve each camera's mount, with these priors (rad, m)
     pub fit_mount: bool,
     pub mount_rot_sigma: f64,
@@ -47,7 +47,7 @@ impl Default for Settings {
             fit_camera: false,
             angle_sigma: 0.01,
             cubic_sigma: 0.01,
-            centre_sigma: 20.,
+            center_sigma: 20.,
             fit_mount: false,
             mount_rot_sigma: 2f64.to_radians(),
             mount_pos_sigma: 0.02,
@@ -260,7 +260,7 @@ fn bend_with_derivative(ray: &V3, dx: &V3, dy: &V3, k: &Intrinsic) -> (V3, SMatr
     let mut j = SMatrix::<f64, 3, 4>::zeros();
     j.set_column(0, &(along * theta));
     j.set_column(1, &(along * theta.powi(3)));
-    // the pixel's move: the ray normalised, its angle and its direction around the axis
+    // the pixel's move: the ray normalized, its angle and its direction around the axis
     let da_dtheta = 1. + k[0] + 3. * k[1] * theta * theta;
     for (col, d) in [(2, dx), (3, dy)] {
         let dr = (d - r * r.dot(d)) / n;
@@ -578,8 +578,8 @@ pub fn refine_camera_with(
     let camera_prior = Matrix6::from_diagonal(&Vector6::new(
         1. / s.angle_sigma.powi(2),
         1. / s.cubic_sigma.powi(2),
-        1. / s.centre_sigma.powi(2),
-        1. / s.centre_sigma.powi(2),
+        1. / s.center_sigma.powi(2),
+        1. / s.center_sigma.powi(2),
         1.,
         1.,
     ));
@@ -591,7 +591,7 @@ pub fn refine_camera_with(
         1. / s.mount_pos_sigma.powi(2),
         1. / s.mount_pos_sigma.powi(2),
     ));
-    // an image no observation reaches still follows its neighbours along the chain
+    // an image no observation reaches still follows its neighbors along the chain
     let mut active = vec![false; n];
     for (o, u) in obs.iter().zip(use_obs) {
         if *u {

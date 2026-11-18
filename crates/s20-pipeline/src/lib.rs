@@ -68,7 +68,7 @@ pub fn lio(
     Ok(())
 }
 
-/// RTK use in the optimisation.
+/// RTK use in the optimization.
 #[derive(Clone, Debug)]
 pub struct RtkOptions {
     pub params: s20_opt::RtkParams,
@@ -93,7 +93,7 @@ fn enu_frame(
     CoordinateFrame::local_enu(origin)
 }
 
-/// Unified optimisation of one or more sessions' LIO results (one file per session of `data`, see
+/// Unified optimization of one or more sessions' LIO results (one file per session of `data`, see
 /// `s20_io::dataset::sessions`): writes the dense trajectory `out` and `<out>_knots.txt`.
 /// Loops are pairs of times at the same place (`start-end` is (0.5, -0.5)).
 pub fn opt(
@@ -226,7 +226,7 @@ pub fn opt(
             )?
         };
         job.log(&format!(
-            "GNSS coordinate frame: {frame:?} (metres; z is local up, not elevation)"
+            "GNSS coordinate frame: {frame:?} (meters; z is local up, not elevation)"
         ));
         let mut fixes = if ppk.is_empty() {
             s20_io::gnss::load_fixes(&g, &frame, &s20_io::gnss::Validity::default())
@@ -321,7 +321,7 @@ pub fn opt(
         }
     }
     // a loop the user asked for and that cannot be used would give a result they do not expect:
-    // stop before the (long) optimisation instead of running without it
+    // stop before the (long) optimization instead of running without it
     if !rejected.is_empty() {
         bail!(
             "{} of {} loops could not be used; move or remove them and run again:\n{}",
@@ -352,7 +352,7 @@ pub fn opt(
     s20_io::dataset::write_tum(
         out,
         &pr.dense(p, 0.01),
-        "t x y z qx qy qz qw (world_T_imu, sensor clock; unified optimisation)",
+        "t x y z qx qy qz qw (world_T_imu, sensor clock; unified optimization)",
     )?;
     let knots = pr.knots();
     if !knots.is_empty() {
@@ -363,7 +363,7 @@ pub fn opt(
         };
         job.log(&format!(
             "accelerometer bias (median over the knots): {:.3},{:.3},{:.3} m/s^2 \
-             (the LIO's ba0 when the fixes held the optimisation)",
+             (the LIO's ba0 when the fixes held the optimization)",
             med(14),
             med(15),
             med(16)
@@ -392,7 +392,7 @@ pub fn opt(
     Ok(())
 }
 
-/// Per-knot quality written next to an optimised trajectory.
+/// Per-knot quality written next to an optimized trajectory.
 pub fn quality_file(traj: &Path) -> PathBuf {
     PathBuf::from(traj.to_string_lossy().replace(".txt", "_quality.txt"))
 }
@@ -551,7 +551,7 @@ pub fn cloud(
 
 /// The dense trajectory as TUM rows, written by [`export`] beside the trajectory it is made from.
 pub const TUM_FILE: &str = "trajectory_100hz_tum.txt";
-/// The camera poses colouring reads, written by [`export`] beside the trajectory (the maker's are
+/// The camera poses coloring reads, written by [`export`] beside the trajectory (the maker's are
 /// in the `images/` folder, when it is asked for).
 pub const IMG_POSE_FILE: &str = "ImgPose.txt";
 
@@ -597,7 +597,7 @@ pub fn export(data: &Path, traj: &Path, out: &Path, calib: Option<&Path>, job: &
     }
     job.log(&format!("trajectory: {n} poses -> {}", out.display()));
     if n > 0 {
-        // with the times, by which the Potree viewer colours the trajectory
+        // with the times, by which the Potree viewer colors the trajectory
         let opt = s20_io::potree::WriteOptions {
             gps_time: true,
             ..Default::default()
@@ -619,7 +619,7 @@ pub fn export(data: &Path, traj: &Path, out: &Path, calib: Option<&Path>, job: &
 /// poses as `ImgPose.txt` and `xyzopk.txt`, the cameras as `Left.opt` and `Right.opt`) and a COLMAP
 /// model beside it (`sparse/0`, `masks/`, `gauge.txt`; its images those of `images/`), so that the
 /// output folder opens as a dataset in Gaussian Splatting tools. `imgpose` and `calib`: the image
-/// poses and the calibration of the colouring (refined), `colored` the coloured cloud (the COLMAP
+/// poses and the calibration of the coloring (refined), `colored` the colored cloud (the COLMAP
 /// model's seed points). `colmap`: other poses for the COLMAP model (the tracks' of the refinement,
 /// written beside the photos as `ImgPose-3dgs.txt`).
 #[allow(clippy::too_many_arguments)]
@@ -763,7 +763,7 @@ pub fn potree_step(
     Ok(())
 }
 
-/// Colours a LAS / LAZ file from the fisheye images (see [`s20_finish::color`]); points no image
+/// Colors a LAS / LAZ file from the fisheye images (see [`s20_finish::color`]); points no image
 /// sees are left out. `imgpose` and `trajectory`: the export step's `ImgPose.txt` and
 /// `trajectory.txt`; `data`: the folder whose [`frames`] hold those of the cloud and the poses.
 /// Only the points' positions and normals are held; the other fields are read again to write.
@@ -802,7 +802,7 @@ pub fn colorize(
     let (read, write) = (job.part(0.0, 0.035), job.part(0.95, 1.0));
     let (mut xyz, mut nrm) = (Vec::with_capacity(rd.len()), Vec::with_capacity(rd.len()));
     loop {
-        read.report("colour read", xyz.len() as u64, total);
+        read.report("color read", xyz.len() as u64, total);
         let pts = rd.read(CHUNK)?;
         if pts.is_empty() {
             break;
@@ -836,14 +836,14 @@ pub fn colorize(
     )?;
     let mut at = 0;
     loop {
-        write.report("colour write", at as u64, total);
+        write.report("color write", at as u64, total);
         let mut pts = rd.read(CHUNK)?;
         if pts.is_empty() {
             break;
         }
-        let colours = &rgb[at..at + pts.len()];
+        let colors = &rgb[at..at + pts.len()];
         at += pts.len();
-        let mut c = colours.iter();
+        let mut c = colors.iter();
         pts.retain_mut(|q| match c.next().copied().flatten() {
             Some(c) => {
                 q.rgb = las_rgb(c);
@@ -860,7 +860,7 @@ pub fn colorize(
     Ok(())
 }
 
-/// The 16-bit LAS colour of an 8-bit-scale colour, in whole 8-bit levels: Potree reads a channel
+/// The 16-bit LAS color of an 8-bit-scale color, in whole 8-bit levels: Potree reads a channel
 /// of 255 or less as 8-bit, so a near-black fraction (1..=255 in 16 bits) would show at full
 /// brightness.
 fn las_rgb(c: [f32; 3]) -> [u16; 3] {
@@ -911,7 +911,7 @@ impl Edits {
 }
 
 /// A saved state of the corrections, kept in the work folder (`edits_revisions/<id>.json`): saved
-/// by the user, or when the optimisation ran with them.
+/// by the user, or when the optimization ran with them.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct EditsRevision {
     /// the file's name: the time saved (ms) and a counter, so that the names sort by time
@@ -919,7 +919,7 @@ pub struct EditsRevision {
     pub name: String,
     /// seconds since 1970
     pub saved_at: u64,
-    /// saved when the optimisation ran (not by the user)
+    /// saved when the optimization ran (not by the user)
     #[serde(default)]
     pub by_run: bool,
     pub edits: Edits,
@@ -943,7 +943,7 @@ struct PreviousResult {
 pub enum Stale {
     /// an earlier step's result is newer
     Earlier,
-    /// the corrections changed after it (optimisation)
+    /// the corrections changed after it (optimization)
     Edits,
     /// its settings changed since it ran
     Params,
@@ -1057,7 +1057,7 @@ pub fn file_digest(p: &Path) -> String {
 }
 
 fn json<T: serde::Serialize>(x: &T) -> serde_json::Value {
-    serde_json::to_value(x).expect("parameters serialise")
+    serde_json::to_value(x).expect("parameters serialize")
 }
 
 /// The steps of a whole run, in order.
@@ -1081,7 +1081,7 @@ impl Step {
         matches!(self, Step::Extract | Step::Lio)
     }
 
-    /// Steps that write their result only once they have finished: a run cancelled or failed
+    /// Steps that write their result only once they have finished: a run canceled or failed
     /// before that leaves the previous result whole.
     fn writes_at_end(self) -> bool {
         matches!(self, Step::Lio | Step::Opt)
@@ -1113,7 +1113,7 @@ impl Step {
     }
 }
 
-/// The parameters that do not change a step's result (how the cloud or the colouring is cut in
+/// The parameters that do not change a step's result (how the cloud or the coloring is cut in
 /// tiles), left out of its record and of the comparison with it (older records may hold them).
 const UNCOMPARED: [&str; 4] = ["tile_size", "tile_points", "tile_obs", "tile_memory"];
 fn comparable(mut v: serde_json::Value) -> serde_json::Value {
@@ -1132,7 +1132,7 @@ fn comparable(mut v: serde_json::Value) -> serde_json::Value {
 #[serde(default)]
 pub struct ProcessParams {
     pub lio: s20_lio::Params,
-    /// unified optimisation, with the registration of the loops
+    /// unified optimization, with the registration of the loops
     pub opt: s20_opt::Params,
     pub rtk: s20_opt::RtkParams,
     pub ppk: s20_ppk::Params,
@@ -1183,7 +1183,7 @@ impl ProcessParams {
     }
 
     pub fn to_json(&self) -> String {
-        serde_json::to_string_pretty(self).expect("parameters serialise")
+        serde_json::to_string_pretty(self).expect("parameters serialize")
     }
 
     pub fn from_json(s: &str) -> Result<Self> {
@@ -1205,7 +1205,7 @@ pub struct WorkSettings {
     pub laz: bool,
     /// the export writes the photos with their poses (`images/`)
     pub images: bool,
-    /// every image's pose is refined against the cloud before the colouring
+    /// every image's pose is refined against the cloud before the coloring
     pub refine: bool,
 }
 
@@ -1256,7 +1256,7 @@ pub struct SessionCfg {
 ///
 /// Each session keeps its extraction and odometry in `sessions/<name>/{data,runs}`, one session
 /// as well as several; `data/` holds the set of all sessions (`sessions.txt`, the joined IMU and
-/// GNSS tables, the common origin), `runs/` the optimisation of all of them and `output/` the
+/// GNSS tables, the common origin), `runs/` the optimization of all of them and `output/` the
 /// products. `project.json` lists the sessions (none in a work folder whose last one was taken
 /// out).
 #[derive(Clone, Debug)]
@@ -1267,17 +1267,17 @@ pub struct RunConfig {
     pub params: ProcessParams,
     /// use RTK when the receiver has fixes
     pub rtk: bool,
-    /// Compute raw PPK and use it instead of receiver RTK in the optimisation.
+    /// Compute raw PPK and use it instead of receiver RTK in the optimization.
     pub ppk: bool,
     pub rtk_exclude: Vec<(At, At)>,
-    /// whether a run continues to the colorize step (running that step itself always colours)
+    /// whether a run continues to the colorize step (running that step itself always colors)
     pub color: bool,
     /// point clouds written LASzip-compressed (`.laz`) rather than as `.las`
     pub laz: bool,
     /// the last step writes the maker's `images/` folder (the photos with their poses) and a COLMAP
     /// model beside it in the output folder ([`Step::Images`])
     pub images: bool,
-    /// every image's pose is refined against the cloud ([`Step::Refine`]) and the colouring uses
+    /// every image's pose is refined against the cloud ([`Step::Refine`]) and the coloring uses
     /// them; without `device_calib` the cameras are solved too, from the recording alone
     pub refine: bool,
     /// the device's calibration (`s20 calibrate-cameras`), in place of the maker's
@@ -1580,7 +1580,7 @@ impl RunConfig {
     pub fn session_runs(&self, k: usize) -> PathBuf {
         self.session_dir(k).join("runs")
     }
-    /// The data folder the optimisation and the later steps read (all sessions).
+    /// The data folder the optimization and the later steps read (all sessions).
     pub fn data(&self) -> PathBuf {
         self.work.join("data")
     }
@@ -1617,8 +1617,8 @@ impl RunConfig {
     pub fn refined_calib(&self) -> PathBuf {
         self.runs().join("calibration-refined.yaml")
     }
-    /// The image poses and the calibration the colouring uses.
-    pub fn colour_inputs(&self) -> (PathBuf, PathBuf) {
+    /// The image poses and the calibration the coloring uses.
+    pub fn color_inputs(&self) -> (PathBuf, PathBuf) {
         if !self.refine {
             return (
                 self.opt_file().with_file_name(IMG_POSE_FILE),
@@ -1661,7 +1661,7 @@ impl RunConfig {
         self.output()
             .join(format!("pointcloud_uncolorized.{}", self.cloud_ext()))
     }
-    /// The coloured cloud, by a fixed name as [`RunConfig::uncolored`].
+    /// The colored cloud, by a fixed name as [`RunConfig::uncolored`].
     pub fn colored(&self) -> PathBuf {
         self.output()
             .join(format!("pointcloud_colorized.{}", self.cloud_ext()))
@@ -1854,7 +1854,7 @@ impl RunConfig {
     }
 
     /// Whether a step's result is older than what it was made from: the result of an earlier step
-    /// (run again since), or, for the optimisation, the user's corrections.
+    /// (run again since), or, for the optimization, the user's corrections.
     pub fn stale(&self, step: Step) -> bool {
         self.staleness(step).is_some()
     }
@@ -2073,7 +2073,7 @@ impl RunConfig {
     }
 
     /// Runs one step (for every session when it runs per session). Its record says "running"
-    /// until the step finishes, so a run that is cancelled or fails is not taken for a finished one
+    /// until the step finishes, so a run that is canceled or fails is not taken for a finished one
     /// even when it left files behind.
     pub fn run_step(&self, step: Step, job: &Job) -> Result<()> {
         self.run_step_for(step, false, job)
@@ -2134,7 +2134,7 @@ impl RunConfig {
     }
 
     /// After a run that did not finish: the previous result stays finished if the run did not
-    /// touch it (its record as before), so a cancelled run does not lose it.
+    /// touch it (its record as before), so a canceled run does not lose it.
     fn restore_result(
         &self,
         step: Step,
@@ -2183,7 +2183,7 @@ impl RunConfig {
                         s20_ppk::process(&s.raw, &self.ppk_file_of(j), &self.params.ppk, job)?;
                     }
                 }
-                // The UI can switch phases before loading and assembling the optimisation.
+                // The UI can switch phases before loading and assembling the optimization.
                 job.report("opt load", 0, 0);
                 let lio_files: Vec<PathBuf> = (0..self.sessions.len())
                     .map(|j| self.lio_file_of(j))
@@ -2249,7 +2249,7 @@ impl RunConfig {
                     ratio: 0.75,
                     calib_out: self.device_calib.is_none().then(|| self.refined_calib()),
                     camera_prior: s20_visual::run::CameraPrior::MAKER,
-                    // the tracks (their poses and points) only for the COLMAP model: the colouring
+                    // the tracks (their poses and points) only for the COLMAP model: the coloring
                     // takes the poses fitted to the cloud
                     tracks: self.images.then(|| self.tracked_poses()),
                     track_points: self.images.then(|| self.tracked_points()),
@@ -2275,7 +2275,7 @@ impl RunConfig {
                 frames::record(&self.data(), &written, frame)?;
             }
             Step::Images => {
-                let (imgpose, calib) = self.colour_inputs();
+                let (imgpose, calib) = self.color_inputs();
                 // the COLMAP model with the poses of the tracks, when refined
                 let tracked = self.tracked_poses();
                 let colmap = (self.refine && tracked.exists()).then_some(tracked.as_path());
@@ -2308,7 +2308,7 @@ impl RunConfig {
                 }
             }
             Step::Colorize => {
-                let (imgpose, calib) = self.colour_inputs();
+                let (imgpose, calib) = self.color_inputs();
                 colorize(
                     &self.data(),
                     &self.uncolored(),
@@ -2367,15 +2367,15 @@ impl RunConfig {
             if step < first && self.done(step) && !tracks_missing {
                 continue;
             }
-            // without colouring, a run stops before the colorize step (unless that step is asked for)
+            // without coloring, a run stops before the colorize step (unless that step is asked for)
             if step == Step::Colorize && !self.color && first != Step::Colorize {
                 continue;
             }
-            // the image poses are refined for the colouring, when asked for
+            // the image poses are refined for the coloring, when asked for
             if step == Step::Refine && (!self.refine || (!self.color && first != Step::Refine)) {
                 continue;
             }
-            // the images follow the colouring (the seed points of the COLMAP model), when asked for
+            // the images follow the coloring (the seed points of the COLMAP model), when asked for
             if step == Step::Images && (!self.images || (!self.color && first != Step::Images)) {
                 continue;
             }
@@ -2409,7 +2409,7 @@ mod tests {
     }
 
     #[test]
-    fn las_colours_are_whole_8_bit_levels_never_in_the_8_bit_range_unless_black() {
+    fn las_colors_are_whole_8_bit_levels_never_in_the_8_bit_range_unless_black() {
         assert_eq!(las_rgb([0.9, 0.4, 5.9]), [257, 0, 6 * 257]);
         assert_eq!(las_rgb([-3., 255., 300.]), [0, 65535, 65535]);
         for k in 0..=2550 {
@@ -2535,7 +2535,7 @@ mod tests {
         assert_eq!(c.staleness(Step::Lio), None);
         c.params.lio.down *= 2.0;
         assert_eq!(c.staleness(Step::Lio), Some(Stale::Params));
-        // the optimisation also follows the RTK switch
+        // the optimization also follows the RTK switch
         c.params.lio.down /= 2.0;
         std::fs::write(c.opt_file(), "x").unwrap();
         c.write_record(Step::Opt, None, true).unwrap();
@@ -2552,7 +2552,7 @@ mod tests {
         std::fs::create_dir_all(c.runs()).unwrap();
         std::fs::write(c.opt_file(), "x").unwrap();
         c.write_record(Step::Opt, None, true).unwrap();
-        // the optimisation fails (no odometry) before it writes its result
+        // the optimization fails (no odometry) before it writes its result
         let log = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
         let l = log.clone();
         let job = Job::new(|_, _, _| {}, move |s| l.lock().unwrap().push(s.into()));
@@ -2652,7 +2652,7 @@ mod tests {
         touch(&c.result_of(Step::Extract, Some(2)), 20);
         assert_eq!(c.staleness_of(Step::Lio, Some(0)), None);
         assert_eq!(c.staleness_of(Step::Lio, Some(2)), Some(Stale::Earlier));
-        // the optimisation follows every session
+        // the optimization follows every session
         touch(&c.opt_file(), 15);
         assert_eq!(c.staleness(Step::Opt), Some(Stale::Earlier));
         touch(&c.opt_file(), 40);
@@ -2939,9 +2939,9 @@ mod tests {
         assert_eq!(p.cloud.anchor_grid, 0.03);
     }
     #[test]
-    fn the_tiles_leave_the_cloud_and_colour_records_current() {
+    fn the_tiles_leave_the_cloud_and_color_records_current() {
         let mut c = RunConfig::new(PathBuf::from("raw"), PathBuf::from("work"));
-        let (cloud, colour) = (c.step_params(Step::Cloud), c.step_params(Step::Colorize));
+        let (cloud, color) = (c.step_params(Step::Cloud), c.step_params(Step::Colorize));
         // a record of an older version, with the tile settings
         let mut old = json(&c.params.cloud);
         assert!(old.get("tile_obs").is_some());
@@ -2951,7 +2951,7 @@ mod tests {
         c.params.cloud.tile_size = 25.;
         c.params.color.tile_memory = 0.2;
         assert_eq!(c.step_params(Step::Cloud), cloud);
-        assert_eq!(c.step_params(Step::Colorize), colour);
+        assert_eq!(c.step_params(Step::Colorize), color);
         c.params.cloud.anchor_grid = 0.02;
         assert_ne!(c.step_params(Step::Cloud), cloud);
     }
@@ -2977,7 +2977,7 @@ mod tests {
     }
 
     #[test]
-    fn ppk_engine_update_invalidates_completed_optimisation() {
+    fn ppk_engine_update_invalidates_completed_optimization() {
         let work = std::env::temp_dir().join(format!("s20_ppk_engine_{}", std::process::id()));
         let raw = work.join("raw");
         let mut c = RunConfig::new(raw.clone(), work.clone());
@@ -3019,12 +3019,12 @@ mod tests {
         std::fs::remove_dir_all(work).unwrap();
     }
 
-    /// The cloud and colouring of a real work folder (`S20_PROGRESS_WORK`; its output is made
+    /// The cloud and coloring of a real work folder (`S20_PROGRESS_WORK`; its output is made
     /// again) report their progress under the step's name, only going forward, and along the way
     /// rather than all at the end.
     #[test]
     #[ignore]
-    fn cloud_and_colour_progress_goes_forward() {
+    fn cloud_and_color_progress_goes_forward() {
         use std::sync::{Arc, Mutex};
         let work = PathBuf::from(std::env::var("S20_PROGRESS_WORK").expect("S20_PROGRESS_WORK"));
         let cfg = RunConfig::of_sessions(RunConfig::open_work(&work).unwrap(), work);

@@ -7,7 +7,7 @@
 use super::*;
 use crate::lang::tl;
 
-/// The colour of the matched points' markers and the lines between them: none of the sessions'
+/// The color of the matched points' markers and the lines between them: none of the sessions'
 /// or the corrections'.
 pub(super) const MATCH: [u8; 3] = [245, 245, 245];
 

@@ -6,7 +6,7 @@
 //! - Update: VGICP of the deskewed scan against the local Gaussian voxel map. At each iterate the registration
 //!   is linearised (H, b in the right perturbation [w, v] of world_T_imu) and fused with the IMU prior in
 //!   information form. Directions without geometric constraint follow the IMU prediction.
-//! - Initialisation: gravity direction and gyro bias from the initial static period, or from a previous run.
+//! - Initialization: gravity direction and gyro bias from the initial static period, or from a previous run.
 //! - Heading hold: in intervals the user marks (round hills, featureless slopes, where the registration drags
 //!   the heading), the update leaves the rotation about the vertical and the gyro bias as the IMU predicts them:
 //!   over minutes the gyro with the bias estimated before holds the heading better than such a registration.
@@ -28,7 +28,7 @@ use s20_io::dataset::LidarData;
 
 pub const GRAV: f64 = 9.80665;
 pub const LIDAR_IMU_T: [f64; 3] = [-0.011, -0.02329, 0.04412];
-/// Accelerometer bias of the S20 used so far (m/s^2, body), as the PPK unified optimisations of the
+/// Accelerometer bias of the S20 used so far (m/s^2, body), as the PPK unified optimizations of the
 /// park recordings (three of them) estimated it.
 pub const S20_BA0: [f64; 3] = [-0.13, 0.0, -0.10];
 
@@ -59,7 +59,7 @@ pub struct Params {
     pub nba: f64,
     pub num_neighbors: usize,
     pub lidar_imu_t: [f64; 3],
-    /// registration: also search the 6 face-neighbour voxels
+    /// registration: also search the 6 face-neighbor voxels
     pub search7: bool,
     /// registration: Huber threshold on the Mahalanobis residual (0: off)
     pub huber: f64,
@@ -113,7 +113,7 @@ impl Default for Params {
             huber: 0.0,
             // indoors and outdoors: validated on the 97 min park recording 2026-10-15 (tilt 3.2 -> 0.17
             // deg mean), on the park recordings with PPK references and indoors (tilt 0.48 ->
-            // 0.19 deg, the optimised trajectory within 6 mm); see docs/processing.md
+            // 0.19 deg, the optimized trajectory within 6 mm); see docs/processing.md
             grav: true,
             grav_sd: 0.2,
             grav_win: 3.0,
@@ -491,7 +491,7 @@ pub fn run(
     let ids: Vec<usize> = (i0..i1.min(data.len())).collect();
     let lever = V3::from(prm.lidar_imu_t);
 
-    // --- initialisation from the static start
+    // --- initialization from the static start
     let first = data.scan(ids[0]);
     let t_first = first.t.iter().copied().fold(f64::INFINITY, f64::min);
     let m: Vec<usize> = (0..imu.t.len())

@@ -27,7 +27,7 @@ fn put(gpu: &Gpu, order: &[u32], v: &[[f32; 3]], label: &str) -> Result<wgpu::Bu
     Ok(buf)
 }
 
-/// The camera of a z-buffer (single precision): world -> camera rotation rows, its centre in
+/// The camera of a z-buffer (single precision): world -> camera rotation rows, its center in
 /// the points' frame, the polynomial fisheye, the image size and the range limit.
 #[derive(Clone, Copy, Debug)]
 pub struct ZCamera {
@@ -77,17 +77,17 @@ pub struct ZBuffer {
     visible_layout: wgpu::BindGroupLayout,
     /// the points the last image saw (the room the next one is given first)
     pub(crate) last_seen: std::sync::atomic::AtomicU64,
-    /// the colour passes (`colour.wgsl`), made on first use (None: they could not be)
-    pub(crate) colour: std::sync::OnceLock<Option<crate::gpu_colour::Pipes>>,
+    /// the color passes (`color.wgsl`), made on first use (None: they could not be)
+    pub(crate) color: std::sync::OnceLock<Option<crate::gpu_color::Pipes>>,
 }
 
-/// A block of points for [`ZBuffer::visible`]: its points (first, count) and its centre, and
-/// the centre less the camera's (the points are projected from it, as the CPU's `Lens`).
+/// A block of points for [`ZBuffer::visible`]: its points (first, count) and its center, and
+/// the center less the camera's (the points are projected from it, as the CPU's `Lens`).
 #[derive(Clone, Copy, Debug)]
 pub struct Block {
     pub first: u32,
     pub count: u32,
-    pub centre: [f32; 3],
+    pub center: [f32; 3],
     pub to: [f32; 3],
 }
 
@@ -112,7 +112,7 @@ struct VRange {
     first: u32,
     thread: u32,
     pad: [u32; 2],
-    centre: [f32; 4],
+    center: [f32; 4],
     to: [f32; 4],
 }
 
@@ -320,7 +320,7 @@ impl ZBuffer {
             visible,
             visible_layout,
             last_seen: std::sync::atomic::AtomicU64::new(0),
-            colour: std::sync::OnceLock::new(),
+            color: std::sync::OnceLock::new(),
         })
     }
 
@@ -431,7 +431,7 @@ impl ZBuffer {
                         first: s,
                         thread: threads,
                         pad: [0; 2],
-                        centre: [b.centre[0], b.centre[1], b.centre[2], 0.],
+                        center: [b.center[0], b.center[1], b.center[2], 0.],
                         to: [b.to[0], b.to[1], b.to[2], 0.],
                     });
                     threads += e - s;
