@@ -22,7 +22,7 @@ The steps are extract → lio → opt → cloud → export → refine → colori
 | `--ppk` | Compute and use PPK ([PPK](ppk.md), in Japanese) |
 | `--no_color` | Do not color |
 | `--las` | Write the point clouds as LAS (LAZ by default) |
-| `--images` | After coloring, write the photos with their refined poses to `output/images` (in PointClouds Studio's layout) and a COLMAP model beside them |
+| `--images` | After coloring, write the photos with their refined poses to `output/images` (in PointClouds Studio's layout) and a COLMAP model beside them (image pose refinement then also finds the poses for 3DGS) |
 | `--no_refine` | Do not refine the image poses |
 | `--device_calibration` | Use the device calibration (made by `calibrate-device`) instead of the maker's factory calibration file (`calibration.yaml`) |
 | `--redo` | Redo the import and LIO even when they are there |

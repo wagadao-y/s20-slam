@@ -615,7 +615,8 @@ impl App {
                      カメラの情報（Left.opt・Right.opt）を output/images に PointClouds Studio と同じ形で出力します。\
                      あわせて COLMAP 形式（output/sparse/0・masks・gauge.txt）も出力するので、output フォルダーを\
                      そのまま 3DGS ツール（Spirula Studio など）のデータセットとして開けます。\
-                     PointClouds Studio のマスク画像は出力しません", "After colorization, writes the camera photos with their positions and orientations (refined ImgPose.txt, xyzopk.txt) and the camera information (Left.opt, Right.opt) to output/images in PointClouds Studio's format. It also writes the COLMAP format (output/sparse/0, masks, gauge.txt), so the output folder opens as is as a dataset in 3DGS tools (Spirula Studio and others). PointClouds Studio's mask images are not written"),
+                     PointClouds Studio のマスク画像は出力しません。オンのときは、画像の姿勢合わせで 3DGS 用の姿勢\
+                     （写真どうしが合う姿勢）も求めるので、画像の姿勢合わせが長くなります", "After colorization, writes the camera photos with their positions and orientations (refined ImgPose.txt, xyzopk.txt) and the camera information (Left.opt, Right.opt) to output/images in PointClouds Studio's format. It also writes the COLMAP format (output/sparse/0, masks, gauge.txt), so the output folder opens as is as a dataset in 3DGS tools (Spirula Studio and others). PointClouds Studio's mask images are not written. When on, image pose refinement also finds the poses for 3DGS (the photos agreeing with one another) and takes longer"),
                 )
                 .on_disabled_hover_text(tl("実行中は変更できません", "Can't be changed while processing"))
                 .changed()
@@ -639,8 +640,8 @@ impl App {
                 .checkbox(&mut self.s.refine, tl("画像の姿勢合わせ", "Image pose refinement"))
                 .on_hover_text(
                     tl("着色の前に、写真の特徴点を点群に合わせて、画像ごとの位置・向きを少しずつ直します\
-                     （1 撮影で 2〜5 分）。機体の校正がなければ、カメラの取り付け・魚眼・主点もその撮影から求めます。\
-                     色のにじみや二重化が減ります", "Before colorization, fits the photos' feature points to the point cloud and nudges each image's position and orientation (2-5 minutes per recording). Without a device calibration, the camera mounting, fisheye and principal point are also solved from the recording. Reduces color bleeding and doubling"),
+                     （屋外の 19 分の撮影、画像 4650 枚で約 9 分）。機体の校正がなければ、カメラの取り付け・魚眼・主点もその撮影から求めます。\
+                     色のにじみや二重化が減ります", "Before colorization, fits the photos' feature points to the point cloud and nudges each image's position and orientation (about 9 minutes for a 19-minute outdoor recording of 4650 images). Without a device calibration, the camera mounting, fisheye and principal point are also solved from the recording. Reduces color bleeding and doubling"),
                 )
                 .on_disabled_hover_text(tl("実行中は変更できません", "Can't be changed while processing"))
                 .changed()

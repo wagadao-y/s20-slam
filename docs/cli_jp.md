@@ -22,7 +22,7 @@ s20 run <生データ1>,<生データ2>,... <作業フォルダー> --outdoor   
 | `--ppk` | PPK を計算して使う（[PPK](ppk.md)） |
 | `--no_color` | 着色しない |
 | `--las` | 点群を LAS で出力する（既定は LAZ） |
-| `--images` | 着色のあと、姿勢合わせ後の写真を `output/images`（PointClouds Studio と同じ形式）に、COLMAP のモデルを横に出力する |
+| `--images` | 着色のあと、姿勢合わせ後の写真を `output/images`（PointClouds Studio と同じ形式）に、COLMAP のモデルを横に出力する（このとき、画像の姿勢合わせで 3DGS 用の姿勢も求める） |
 | `--no_refine` | 画像の姿勢合わせをしない |
 | `--device_calibration` | 機体の校正（`calibrate-device` で作ったもの）を、メーカーの校正ファイル（出荷時の `calibration.yaml`）の代わりに使う |
 | `--redo` | 抽出と LIO があってもやり直す |
