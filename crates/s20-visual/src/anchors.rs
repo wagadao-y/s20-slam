@@ -14,7 +14,7 @@ pub type M3 = Matrix3<f64>;
 
 pub const WIDTH: usize = 3504;
 pub const HEIGHT: usize = 4672;
-const CELL: usize = 8;
+pub(crate) const CELL: usize = 8;
 
 /// Camera pose: camera-to-world rotation and camera centre.
 #[derive(Clone, Copy, Debug)]
@@ -200,6 +200,16 @@ pub struct ZGrid {
 }
 
 impl ZGrid {
+    /// From its cells' points (`w` x `h`, -1 where none).
+    pub(crate) fn from_cells(w: usize, h: usize, idx: Vec<i32>) -> Self {
+        ZGrid { w, h, idx }
+    }
+
+    /// Each cell's point (-1 where none).
+    pub fn cells(&self) -> &[i32] {
+        &self.idx
+    }
+
     /// The cloud points seen, one per cell.
     pub fn ids(&self) -> Vec<usize> {
         self.idx

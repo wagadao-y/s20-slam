@@ -15,3 +15,4 @@ pub mod pairs;
 pub mod refine;
 pub mod run;
 pub mod sift;
+pub mod zgrid_gpu;

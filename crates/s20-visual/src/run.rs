@@ -2,7 +2,7 @@
 //! refine every image's pose, then (with `tracks`) adjust the matches joined into tracks with
 //! their points held near the cloud, and write the corrected `ImgPose.txt` with a report.
 
-use crate::anchors::{Cloud, Pose, V3, ZGrid, associate, zgrid};
+use crate::anchors::{Cloud, Pose, V3, ZGrid, associate};
 use crate::bundle;
 use crate::camera::Fisheye;
 use crate::epipolar;
@@ -646,11 +646,12 @@ pub fn collect(input: &Input, job: &Job) -> Result<Collected> {
         cloud.xyz.len(),
         input.step
     ));
-    let grids: Vec<ZGrid> = (0..poses.names.len())
-        .into_par_iter()
-        .map(|i| zgrid(&cloud, &poses.poses[i], &cams[side(&poses.names[i])]))
+    let views: Vec<(Pose, &Fisheye)> = (0..poses.names.len())
+        .map(|i| (poses.poses[i], &cams[side(&poses.names[i])]))
         .collect();
-    job.log(&format!("z-buffers of {} images", grids.len()));
+    let (grids, on) = crate::zgrid_gpu::zgrids(&cloud, &views);
+    drop(views);
+    job.log(&format!("z-buffers of {} images ({on})", grids.len()));
     let mut pairs = pairs(&poses, &cloud, &grids);
     if input.tracks.is_some() {
         let more = track_pairs(&poses, &cloud, &grids, &pairs);
