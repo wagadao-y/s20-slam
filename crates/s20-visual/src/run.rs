@@ -11,7 +11,7 @@ use crate::pairs::{
     read_image_poses,
 };
 use crate::refine::{
-    Cameras, Correction, Prepared, Settings, apply, mounted, pose_row, prepare, refine_camera,
+    Cameras, Correction, Prepared, Settings, apply, mounted, pose_row, prepare, refine_camera_with,
     residual_with,
 };
 use anyhow::{Context, Result};
@@ -667,8 +667,9 @@ pub fn collect(input: &Input, job: &Job) -> Result<Collected> {
         None => "features: SIFT on the CPU".into(),
     });
     let done = std::sync::atomic::AtomicU64::new(0);
-    // one bar: the features about 60% of the time, the observations 35%
-    let (features_part, observations_part) = (job.part(0.0, 0.6), job.part(0.6, 0.95));
+    // one bar: the features about 55 % of the time, the observations 35 % (4650 images on the
+    // GPU, without the tracks: 274, 167 and the poses' refinement 40 s)
+    let (features_part, observations_part) = (job.part(0.0, 0.55), job.part(0.55, 0.9));
     let feats = features_of(poses.names.len(), &used, |i| {
         job.check()?;
         let name = &poses.names[i];
@@ -974,7 +975,8 @@ pub fn run(input: &Input, job: &Job) -> Result<serde_json::Value> {
         ..Default::default()
     };
     let mut camera = Cameras::default();
-    let c = refine_camera(
+    let refining = job.part(0.9, 1.0);
+    let c = refine_camera_with(
         &poses.poses,
         &obs,
         &prepared,
@@ -982,6 +984,7 @@ pub fn run(input: &Input, job: &Job) -> Result<serde_json::Value> {
         &chain,
         &settings,
         &mut camera,
+        &|done, all| refining.report("refining", done as u64, all as u64),
     );
     drop(train);
     // the refined poses with the solved mounts (for the colouring), and the tracks' adjustment

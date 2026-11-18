@@ -1,18 +1,26 @@
 //! The memory this process holds, for the log.
 
-/// The process's resident memory now and at its highest (bytes), or None where it is not known.
+/// The memory the process holds now and at its highest (bytes), or None where it is not known:
+/// on Windows what it allocated (its private commit), without the pages of the files it maps (a
+/// recording's images read through a map counted in its working set).
 #[cfg(windows)]
 pub fn process() -> Option<(u64, u64)> {
     use windows_sys::Win32::System::ProcessStatus::{
-        GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS,
+        GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS, PROCESS_MEMORY_COUNTERS_EX,
     };
     use windows_sys::Win32::System::Threading::GetCurrentProcess;
-    let mut c: PROCESS_MEMORY_COUNTERS = unsafe { std::mem::zeroed() };
-    c.cb = std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32;
-    // SAFETY: c is a PROCESS_MEMORY_COUNTERS with its size set, as the call requires; the
-    // pseudo handle of the current process needs no closing
-    (unsafe { GetProcessMemoryInfo(GetCurrentProcess(), &mut c, c.cb) } != 0)
-        .then_some((c.WorkingSetSize as u64, c.PeakWorkingSetSize as u64))
+    let mut c: PROCESS_MEMORY_COUNTERS_EX = unsafe { std::mem::zeroed() };
+    c.cb = std::mem::size_of::<PROCESS_MEMORY_COUNTERS_EX>() as u32;
+    // SAFETY: c is a PROCESS_MEMORY_COUNTERS_EX with its size set, which the call takes in place
+    // of a PROCESS_MEMORY_COUNTERS; the pseudo handle of the current process needs no closing
+    (unsafe {
+        GetProcessMemoryInfo(
+            GetCurrentProcess(),
+            (&raw mut c).cast::<PROCESS_MEMORY_COUNTERS>(),
+            c.cb,
+        )
+    } != 0)
+        .then_some((c.PrivateUsage as u64, c.PeakPagefileUsage as u64))
 }
 
 /// The process's resident memory now and at its highest (bytes), or None where it is not known.

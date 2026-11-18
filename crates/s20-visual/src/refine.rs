@@ -184,8 +184,9 @@ pub fn residual_with(o: &Obs, g: &Prepared, a: &Pose, b: &Pose, camera: &Cameras
 /// left and the right mount.
 type J = SMatrix<f64, 2, 32>;
 
+#[cfg(test)]
 #[allow(clippy::too_many_arguments)]
-fn jacobian(
+fn jacobian_numeric(
     o: &Obs,
     g: &Prepared,
     a: &Pose,
@@ -236,6 +237,157 @@ fn jacobian(
         let rm = residual_with(o, g, &apply(a, &ma), &apply(b, &mb), &mk);
         j[(0, k)] = (rp[0] - rm[0]) / (2. * h);
         j[(1, k)] = (rp[1] - rm[1]) / (2. * h);
+    }
+    (r0, j)
+}
+
+/// [`bend`] and its derivative by the change `k` (columns `k[0]`..`k[3]`).
+fn bend_with_derivative(ray: &V3, dx: &V3, dy: &V3, k: &Intrinsic) -> (V3, SMatrix<f64, 3, 4>) {
+    let raw = ray + dx * k[2] + dy * k[3];
+    let n = raw.norm();
+    let r = raw / n;
+    let rho = r.xy().norm();
+    let theta = rho.atan2(r.z);
+    let angle = theta + k[0] * theta + k[1] * theta.powi(3);
+    let (sa, ca) = angle.sin_cos();
+    let (c, s) = if rho > 1e-12 {
+        (r.x / rho, r.y / rho)
+    } else {
+        (1., 0.)
+    };
+    // along the angle
+    let along = V3::new(c * ca, s * ca, -sa);
+    let mut j = SMatrix::<f64, 3, 4>::zeros();
+    j.set_column(0, &(along * theta));
+    j.set_column(1, &(along * theta.powi(3)));
+    // the pixel's move: the ray normalised, its angle and its direction around the axis
+    let da_dtheta = 1. + k[0] + 3. * k[1] * theta * theta;
+    for (col, d) in [(2, dx), (3, dy)] {
+        let dr = (d - r * r.dot(d)) / n;
+        let (drho, dc, ds) = if rho > 1e-12 {
+            let drho = (r.x * dr.x + r.y * dr.y) / rho;
+            (
+                drho,
+                dr.x / rho - r.x * drho / (rho * rho),
+                dr.y / rho - r.y * drho / (rho * rho),
+            )
+        } else {
+            (0., 0., 0.)
+        };
+        let dtheta = (r.z * drho - rho * dr.z) / (rho * rho + r.z * r.z);
+        let da = da_dtheta * dtheta;
+        j.set_column(
+            col,
+            &V3::new(dc * sa + c * ca * da, ds * sa + s * ca * da, -sa * da),
+        );
+    }
+    (bend(ray, dx, dy, k), j)
+}
+
+/// The skew matrix of `v`: `skew(v) x = v x x`.
+fn skew(v: &V3) -> M3 {
+    M3::new(0., -v.z, v.y, v.z, 0., -v.x, -v.y, v.x, 0.)
+}
+
+/// SO(3)'s left Jacobian at rotation vector `w`: exp(w + d) = exp(Jl(w) d) exp(w) to first order.
+fn left_jacobian(w: &V3) -> M3 {
+    let t = w.norm();
+    let k = skew(w);
+    if t < 1e-6 {
+        return M3::identity() + k * 0.5 + k * k / 6.;
+    }
+    M3::identity() + k * ((1. - t.cos()) / (t * t)) + k * k * ((t - t.sin()) / (t * t * t))
+}
+
+/// The residual of an observation ([`residual_with`]) and its derivative by the two images'
+/// corrections and the cameras (the columns of [`J`]), by the chain rule: the ray of image a
+/// meets the anchored plane, the point seen from image b. The rotation vectors' columns are
+/// those of their own steps (the corrections and the mounts change by adding to them).
+#[allow(clippy::too_many_arguments)]
+fn jacobian(
+    o: &Obs,
+    g: &Prepared,
+    a: &Pose,
+    b: &Pose,
+    ca: &Correction,
+    cb: &Correction,
+    camera: &Cameras,
+    s: &Settings,
+) -> ([f64; 2], J) {
+    let (a0, b0) = (apply(a, ca), apply(b, cb));
+    let (ma, mb) = (&camera.mount[g.side[0]], &camera.mount[g.side[1]]);
+    let (pa, pb) = (mounted(&a0, ma), mounted(&b0, mb));
+    let (ua, jua) =
+        bend_with_derivative(&g.ray_a, &g.da[0], &g.da[1], &camera.intrinsic[g.side[0]]);
+    let (ub, jub) = bend_with_derivative(
+        &g.measured,
+        &g.db[0],
+        &g.db[1],
+        &camera.intrinsic[g.side[1]],
+    );
+    let dir = pa.r * ua;
+    let denom = o.normal.dot(&dir);
+    let depth = o.normal.dot(&(o.world - pa.p)) / denom;
+    let x = pa.p + dir * depth;
+    let v = pb.r.transpose() * (x - pb.p);
+    let nv = v.norm();
+    let e = v / nv;
+    let d = e - ub;
+    let r0 = [d.dot(&g.ta) * g.focal, d.dot(&g.tb) * g.focal];
+    // the residual by e, by v; the point by image a's changes (along its ray onto the plane)
+    let je = SMatrix::<f64, 2, 3>::from_rows(&[
+        (g.ta * g.focal).transpose(),
+        (g.tb * g.focal).transpose(),
+    ]);
+    let gv = je * (M3::identity() - e * e.transpose()) / nv;
+    let gx = gv * pb.r.transpose();
+    let onto = M3::identity() - dir * o.normal.transpose() / denom;
+    let gp = gx * onto;
+    let mut j = J::zeros();
+    // image a: its rotation (left, at the correction's vector) and offset
+    let ra = -gp * skew(&(x - a0.p)) * left_jacobian(&ca.fixed_rows::<3>(0).into_owned());
+    j.fixed_view_mut::<2, 3>(0, 0).copy_from(&ra);
+    j.fixed_view_mut::<2, 3>(0, 3).copy_from(&gp);
+    // image b
+    let rb = gv
+        * pb.r.transpose()
+        * skew(&(x - b0.p))
+        * left_jacobian(&cb.fixed_rows::<3>(0).into_owned());
+    j.fixed_view_mut::<2, 3>(0, 6).copy_from(&rb);
+    j.fixed_view_mut::<2, 3>(0, 9)
+        .copy_from(&(-gv * pb.r.transpose()));
+    // the cameras: a column of each side the observation has (one side for both images: the sums)
+    for side in 0..2 {
+        if !g.side.contains(&side) {
+            continue;
+        }
+        let (on_a, on_b) = (g.side[0] == side, g.side[1] == side);
+        if s.fit_camera {
+            let mut jk = SMatrix::<f64, 2, 4>::zeros();
+            if on_a {
+                jk += gp * pa.r * jua * depth;
+            }
+            if on_b {
+                jk -= je * jub;
+            }
+            j.fixed_view_mut::<2, 4>(0, 12 + 4 * side).copy_from(&jk);
+        }
+        if s.fit_mount {
+            let m = &camera.mount[side];
+            let jr = left_jacobian(&-V3::new(m[0], m[1], m[2]));
+            let (mut rot, mut off) = (SMatrix::<f64, 2, 3>::zeros(), SMatrix::<f64, 2, 3>::zeros());
+            if on_a {
+                // the ray turns within the camera; the camera moves within the image's frame
+                rot -= gp * pa.r * skew(&ua) * depth * jr;
+                off += gp * a0.r;
+            }
+            if on_b {
+                rot += gv * skew(&v) * jr;
+                off -= gv * pb.r.transpose() * b0.r;
+            }
+            j.fixed_view_mut::<2, 3>(0, 20 + 6 * side).copy_from(&rot);
+            j.fixed_view_mut::<2, 3>(0, 23 + 6 * side).copy_from(&off);
+        }
     }
     (r0, j)
 }
@@ -392,6 +544,21 @@ pub fn refine_camera(
     s: &Settings,
     camera: &mut Cameras,
 ) -> Vec<Correction> {
+    refine_camera_with(poses, obs, prepared, use_obs, chain, s, camera, &|_, _| {})
+}
+
+/// [`refine_camera`], telling `progress` (iterations done, at most) as it goes.
+#[allow(clippy::too_many_arguments)]
+pub fn refine_camera_with(
+    poses: &[Pose],
+    obs: &[Obs],
+    prepared: &[Prepared],
+    use_obs: &[bool],
+    chain: &[(usize, usize)],
+    s: &Settings,
+    camera: &mut Cameras,
+    progress: &dyn Fn(usize, usize),
+) -> Vec<Correction> {
     let n = poses.len();
     let mut c = vec![Correction::zeros(); n];
     let prior = Matrix6::from_diagonal(&Vector6::new(
@@ -438,7 +605,8 @@ pub fn refine_camera(
         active[i] = true;
         active[j] = true;
     }
-    for _ in 0..s.iterations {
+    for it in 0..s.iterations {
+        progress(it, s.iterations);
         let cam = *camera;
         let (blocks, grad) = obs
             .par_iter()
@@ -581,6 +749,75 @@ pub fn pose_row(r: &M3) -> ([f64; 3], [f64; 4]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_jacobian_by_the_chain_rule_is_the_numeric_one() {
+        let cam = Fisheye {
+            k: [0.01, -0.004, 0.002, 0., 0., 0.],
+            a11: 1000.,
+            a12: 0.5,
+            a22: 1001.,
+            u0: 1752.,
+            v0: 2336.,
+        };
+        let cams = [cam.clone(), cam];
+        let a = Pose {
+            r: *Rotation3::from_euler_angles(0.1, -0.05, 0.2).matrix(),
+            p: V3::new(0.1, -0.2, 0.05),
+        };
+        let b = Pose {
+            r: *Rotation3::from_euler_angles(0.05, 0.25, 0.15).matrix(),
+            p: V3::new(0.7, 0.1, -0.05),
+        };
+        let camera = Cameras {
+            intrinsic: [[0.003, -0.002, 2., -1.5], [-0.002, 0.001, -1., 3.]],
+            mount: [
+                [0.004, -0.003, 0.002, 0.01, -0.02, 0.005],
+                [-0.002, 0.005, 0.001, -0.01, 0.01, 0.02],
+            ],
+        };
+        let (ca, cb) = (
+            Correction::new(0.002, -0.001, 0.003, 0.01, -0.005, 0.002),
+            Correction::new(-0.003, 0.002, 0.001, -0.004, 0.006, -0.01),
+        );
+        let s = Settings {
+            fit_camera: true,
+            fit_mount: true,
+            ..Default::default()
+        };
+        for (sides, k) in [((0, 1), 0), ((0, 0), 1), ((1, 1), 2), ((1, 0), 3)] {
+            let t = k as f64;
+            let world = V3::new(0.3 + 0.2 * t, -0.4 + 0.1 * t, 4.);
+            let normal = V3::new(0.1, -0.2, 1.).normalize();
+            let la = a.r.transpose() * (world - a.p);
+            let lb = b.r.transpose() * (world - b.p);
+            let o = Obs {
+                a: 0,
+                b: 1,
+                fa: 0,
+                fb: 0,
+                uv_a: cams[sides.0].project([la.x, la.y, la.z]),
+                uv_b: cams[sides.1].project([lb.x, lb.y, lb.z]),
+                world,
+                normal,
+                depth: la.norm(),
+            };
+            let g = prepare(&o, &cams, sides.0, sides.1);
+            let (r1, j1) = jacobian(&o, &g, &a, &b, &ca, &cb, &camera, &s);
+            let (r0, j0) = jacobian_numeric(&o, &g, &a, &b, &ca, &cb, &camera, &s);
+            assert!((r1[0] - r0[0]).abs() < 1e-9 && (r1[1] - r0[1]).abs() < 1e-9);
+            // each entry to a millionth of itself (or of a pixel-equivalent per unit)
+            for c in 0..32 {
+                for row in 0..2 {
+                    let (x, y) = (j1[(row, c)], j0[(row, c)]);
+                    assert!(
+                        (x - y).abs() < 1e-6 * y.abs().max(1.),
+                        "sides {sides:?}, column {c}, row {row}: {x} against {y}"
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn recovers_a_rotation_of_one_image_from_anchored_observations() {

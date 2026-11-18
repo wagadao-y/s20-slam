@@ -379,11 +379,65 @@ pub fn read_image(path: &Path) -> Result<Vec<u8>> {
     if let Ok(b) = fs::read(path) {
         return Ok(b);
     }
-    let (_, dir, o, n) = bag_image(path)?;
-    let map = Source::map(&dir)?;
-    map.get(o..o + n)
-        .map(<[u8]>::to_vec)
-        .with_context(|| format!("image {} lies outside the bag", path.display()))
+    let (src, _, o, n) = bag_image(path)?;
+    // a plain read at the image's place, not through a map of the bag: the pages read stay in
+    // the system's file cache instead of the process (4650 images: tens of GB in its working set)
+    let bag = open_bag(&src)?;
+    let mut buf = vec![0u8; n];
+    read_exact_at(&bag, &mut buf, o as u64)
+        .with_context(|| format!("image {} lies outside the bag", path.display()))?;
+    Ok(buf)
+}
+
+/// The bag of `src`, opened once in the process (its size checked against the index).
+fn open_bag(src: &Source) -> Result<Arc<fs::File>> {
+    static BAGS: OnceLock<Mutex<HashMap<PathBuf, Arc<fs::File>>>> = OnceLock::new();
+    let mut bags = BAGS.get_or_init(Default::default).lock().unwrap();
+    if let Some(f) = bags.get(&src.bag) {
+        return Ok(f.clone());
+    }
+    let f = fs::File::open(&src.bag)
+        .with_context(|| format!("open the bag {} (moved?)", src.bag.display()))?;
+    let size = f.metadata()?.len();
+    if size != src.size {
+        bail!(
+            "{} has {size} bytes, its index was made from {}: extract again",
+            src.bag.display(),
+            src.size
+        );
+    }
+    let f = Arc::new(f);
+    bags.insert(src.bag.clone(), f.clone());
+    Ok(f)
+}
+
+/// `buf.len()` bytes of `f` from `offset`, from any thread (no shared position).
+#[cfg(unix)]
+fn read_exact_at(f: &fs::File, buf: &mut [u8], offset: u64) -> std::io::Result<()> {
+    std::os::unix::fs::FileExt::read_exact_at(f, buf, offset)
+}
+
+/// `buf.len()` bytes of `f` from `offset`, from any thread (no shared position).
+#[cfg(windows)]
+fn read_exact_at(f: &fs::File, mut buf: &mut [u8], mut offset: u64) -> std::io::Result<()> {
+    use std::os::windows::fs::FileExt;
+    while !buf.is_empty() {
+        match f.seek_read(buf, offset) {
+            Ok(0) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::UnexpectedEof,
+                    "the bag ends before the image",
+                ));
+            }
+            Ok(n) => {
+                buf = &mut buf[n..];
+                offset += n as u64;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(())
 }
 
 /// Where the JPEG bytes of an image are: its own file, or a range of the bag.
