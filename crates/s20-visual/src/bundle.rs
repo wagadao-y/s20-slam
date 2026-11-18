@@ -171,8 +171,9 @@ pub fn tracks(
         });
         members[g].push(k);
     }
+    // (in parallel, in the groups' order: each sighting's bearing takes the camera's inverse)
     members
-        .iter()
+        .par_iter()
         .enumerate()
         .filter_map(|(g, m)| {
             let mut images: Vec<usize> = m.iter().map(|&k| nodes[k].0).collect();

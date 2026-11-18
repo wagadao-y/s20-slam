@@ -390,7 +390,8 @@ fn gsize(octave: u32) -> vec2<i32> {
 // a candidate's dominant orientations (OpenCV's calcOrientationHist and the peak search)
 @compute @workgroup_size(64)
 fn orient(@builtin(global_invocation_id) id: vec3<u32>) {
-    if id.x >= P.count {
+    // the candidates found (dispatched for as many as there is room for)
+    if id.x >= min(atomicLoad(&counters[0]), P.max_out) {
         return;
     }
     let kp = cands[id.x];

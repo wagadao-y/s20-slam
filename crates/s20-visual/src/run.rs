@@ -345,9 +345,11 @@ fn free_tracks(
     cams: &[Fisheye; 2],
     intrinsic: &[crate::refine::Intrinsic; 2],
     names: &[String],
+    log: &dyn Fn(&str),
 ) -> Vec<bundle::Track> {
     // from 30 cm to a little beyond where the ray meets the cloud (6 m where it does not)
     let (near, gate, ratio) = (0.3, 4., 0.75);
+    let started = std::time::Instant::now();
     let matches: Vec<((usize, usize), (usize, usize))> = f
         .pairs
         .par_iter()
@@ -383,6 +385,11 @@ fn free_tracks(
             found.into_iter().map(move |(i, j)| ((a, i), (b, j)))
         })
         .collect();
+    log(&format!(
+        "{} pairs matched along the epipolar lines ({:.1} s)",
+        matches.len(),
+        started.elapsed().as_secs_f64()
+    ));
     // union-find over (image, feature)
     let mut id: HashMap<(usize, usize), usize> = HashMap::new();
     let mut nodes: Vec<(usize, usize)> = Vec::new();
@@ -442,8 +449,9 @@ fn free_tracks(
     }
     let mut roots: Vec<usize> = groups.keys().copied().collect();
     roots.sort_unstable();
+    // (in parallel, in the roots' order: each sighting's bearing takes the camera's inverse)
     roots
-        .into_iter()
+        .into_par_iter()
         .filter_map(|r| {
             let m = &groups[&r];
             let mut images: Vec<usize> = m.iter().map(|&k| nodes[k].0).collect();
@@ -1056,7 +1064,14 @@ pub fn run(input: &Input, job: &Job) -> Result<serde_json::Value> {
         if let Some(points_out) = &input.track_points {
             let started = std::time::Instant::now();
             let loose = match &free {
-                Some(f) => free_tracks(f, &solved, &cams, &camera.intrinsic, &poses.names),
+                Some(f) => free_tracks(
+                    f,
+                    &solved,
+                    &cams,
+                    &camera.intrinsic,
+                    &poses.names,
+                    &|m: &str| job.log(m),
+                ),
                 None => Vec::new(),
             };
             job.log(&format!(

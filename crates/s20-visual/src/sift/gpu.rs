@@ -14,6 +14,15 @@ use std::sync::{Mutex, OnceLock};
 /// Room for the candidates and their orientations of one image, and for the keypoints kept.
 const MAX_CANDS: u32 = 1 << 18;
 const MAX_KEPT: u32 = 1 << 16;
+/// What the first submission brings back of the candidates and their orientations (more only
+/// when there are more).
+const READ_CANDS: u32 = 1 << 16;
+const READ_ORIS: u32 = 1 << 17;
+/// The read-back buffer: the counters, the candidates, the orientations, the descriptors.
+const BACK_CANDS: u64 = 256;
+const BACK_ORIS: u64 = BACK_CANDS + MAX_CANDS as u64 * 48;
+const BACK_DESC: u64 = BACK_ORIS + MAX_CANDS as u64 * 8;
+const BACK_SIZE: u64 = BACK_DESC + MAX_KEPT as u64 * 128;
 /// Uniform slots of one image's passes.
 const SLOTS: usize = 512;
 const SLOT: u64 = 256;
@@ -115,6 +124,8 @@ struct Sized {
     desc: wgpu::Buffer,
     uniforms: wgpu::Buffer,
     bind: wgpu::BindGroup,
+    /// read back through this (`BACK_*`)
+    back: wgpu::Buffer,
     /// the octaves' sizes and offsets: (w, h, gauss offset, dog offset)
     octaves: Vec<(usize, usize, usize, usize)>,
     scratch: usize,
@@ -128,7 +139,9 @@ pub(super) struct GpuSift {
     kernels: wgpu::Buffer,
     /// each sigma's (offset into the kernels, half width)
     taps: Vec<(u32, u32)>,
-    sized: Mutex<Option<Sized>>,
+    /// two sets of buffers: an image on the GPU while another's results are read back
+    sized: [Mutex<Option<Sized>>; 2],
+    turn: std::sync::atomic::AtomicUsize,
 }
 
 const DOUBLE: usize = 0;
@@ -246,7 +259,8 @@ impl GpuSift {
             pipelines,
             kernels,
             taps,
-            sized: Mutex::new(None),
+            sized: [Mutex::new(None), Mutex::new(None)],
+            turn: std::sync::atomic::AtomicUsize::new(0),
         })
     }
 
@@ -329,8 +343,15 @@ impl GpuSift {
                 },
             ],
         });
+        let back = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("sift read back"),
+            size: BACK_SIZE,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
         Sized {
             key: (w, h, double_first),
+            back,
             gauss,
             _dog: dog,
             cands,
@@ -354,7 +375,14 @@ impl GpuSift {
         contrast: f32,
         double_first: bool,
     ) -> Result<(Vec<Keypoint>, Vec<[u8; 128]>)> {
-        let mut guard = self.sized.lock().unwrap();
+        // a free set of buffers, else wait for one in turn
+        let mut guard = match self.sized.iter().find_map(|m| m.try_lock().ok()) {
+            Some(g) => g,
+            None => {
+                let k = self.turn.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % 2;
+                self.sized[k].lock().unwrap()
+            }
+        };
         self.gpu.checked(|| {
             if guard
                 .as_ref()
@@ -496,36 +524,70 @@ impl GpuSift {
                 );
             }
         }
-        ensure!(params.len() + 2 <= SLOTS, "too many passes");
+        // 2. their orientations (as many threads as there is room for; each candidate's from the
+        // counter), and the counts, candidates and orientations brought back
+        let orient = params.len();
+        params.push(Params {
+            max_out: MAX_CANDS,
+            ..octs
+        });
+        steps.push((ORIENT, orient, MAX_CANDS.div_ceil(64), 1));
+        ensure!(params.len() < SLOTS, "too many passes");
         gpu.queue
             .write_buffer(&s.gauss, (s.src * 4) as u64, bytemuck::cast_slice(&img.px));
         gpu.queue
             .write_buffer(&s.counters, 0, bytemuck::cast_slice(&[0u32; 4]));
         self.write_params(s, &params);
-        self.dispatch(s, &steps);
-        let counts = read::<u32>(gpu, &s.counters, 16)?;
+        let index = self.dispatch(
+            s,
+            &steps,
+            &[
+                (&s.counters, 0, 0, 16),
+                (&s.cands, 0, BACK_CANDS, READ_CANDS as u64 * 48),
+                (&s.oris, 0, BACK_ORIS, READ_ORIS as u64 * 8),
+            ],
+        );
+        let (counts, mut cands, mut oris) = {
+            let view = self.fetch(s, index, BACK_ORIS + READ_ORIS as u64 * 8)?;
+            let counts: Vec<u32> = bytemuck::pod_collect_to_vec(&view[..16]);
+            let n = counts[0].min(READ_CANDS) as usize;
+            let m = counts[1].min(READ_ORIS) as usize;
+            let c = BACK_CANDS as usize;
+            let o = BACK_ORIS as usize;
+            let cands: Vec<Cand> = bytemuck::pod_collect_to_vec(&view[c..c + n * 48]);
+            let oris: Vec<Ori> = bytemuck::pod_collect_to_vec(&view[o..o + m * 8]);
+            drop(view);
+            s.back.unmap();
+            (counts, cands, oris)
+        };
         ensure!(
             counts[0] <= MAX_CANDS,
             "too many candidates ({})",
             counts[0]
         );
-        let n = counts[0];
-        // 2. their orientations
-        let p = Params {
-            count: n,
-            max_out: MAX_CANDS,
-            ..octs
-        };
-        self.write_params(s, &[p]);
-        self.dispatch(s, &[(ORIENT, 0, n.div_ceil(64).max(1), 1)]);
-        let counts = read::<u32>(gpu, &s.counters, 16)?;
         ensure!(
             counts[1] <= MAX_CANDS,
             "too many orientations ({})",
             counts[1]
         );
-        let cands: Vec<Cand> = read(gpu, &s.cands, n as u64 * 48)?;
-        let oris: Vec<Ori> = read(gpu, &s.oris, counts[1] as u64 * 8)?;
+        if counts[0] > READ_CANDS || counts[1] > READ_ORIS {
+            // (more than usual: all of them)
+            let (n, m) = (counts[0] as u64, counts[1] as u64);
+            let index = self.dispatch(
+                s,
+                &[],
+                &[
+                    (&s.cands, 0, BACK_CANDS, n * 48),
+                    (&s.oris, 0, BACK_ORIS, m * 8),
+                ],
+            );
+            let view = self.fetch(s, index, BACK_ORIS + m * 8)?;
+            let (c, o) = (BACK_CANDS as usize, BACK_ORIS as usize);
+            cands = bytemuck::pod_collect_to_vec(&view[c..c + n as usize * 48]);
+            oris = bytemuck::pod_collect_to_vec(&view[o..o + m as usize * 8]);
+            drop(view);
+            s.back.unmap();
+        }
         let kps: Vec<Keypoint> = oris
             .iter()
             .map(|o| {
@@ -571,8 +633,20 @@ impl GpuSift {
             ..octs
         };
         self.write_params(s, &[p]);
-        self.dispatch(s, &[(DESCRIBE, 0, (kps.len() as u32).div_ceil(64), 1)]);
-        let words: Vec<u32> = read(gpu, &s.desc, kps.len() as u64 * 128)?;
+        let bytes = kps.len() as u64 * 128;
+        let index = self.dispatch(
+            s,
+            &[(DESCRIBE, 0, (kps.len() as u32).div_ceil(64), 1)],
+            &[(&s.desc, 0, BACK_DESC, bytes)],
+        );
+        let words: Vec<u32> = {
+            let view = self.fetch(s, index, BACK_DESC + bytes)?;
+            let d = BACK_DESC as usize;
+            let v = bytemuck::pod_collect_to_vec(&view[d..d + bytes as usize]);
+            drop(view);
+            s.back.unmap();
+            v
+        };
         let desc = words
             .as_chunks::<32>()
             .0
@@ -597,8 +671,14 @@ impl GpuSift {
         self.gpu.queue.write_buffer(&s.uniforms, 0, &bytes);
     }
 
-    /// The passes (pipeline, uniform slot, workgroups) in order.
-    fn dispatch(&self, s: &Sized, steps: &[(usize, usize, u32, u32)]) {
+    /// The passes (pipeline, uniform slot, workgroups) in order, then the copies (buffer, from,
+    /// to in the read-back buffer, bytes); the submission.
+    fn dispatch(
+        &self,
+        s: &Sized,
+        steps: &[(usize, usize, u32, u32)],
+        copies: &[(&wgpu::Buffer, u64, u64, u64)],
+    ) -> wgpu::SubmissionIndex {
         let slot = SLOT.max(self.gpu.limits.min_uniform_buffer_offset_alignment as u64);
         let mut enc = self
             .gpu
@@ -617,7 +697,37 @@ impl GpuSift {
                 pass.dispatch_workgroups(gx, gy, 1);
             }
         }
-        self.gpu.queue.submit([enc.finish()]);
+        for &(buf, from, to, bytes) in copies {
+            if bytes > 0 {
+                enc.copy_buffer_to_buffer(buf, from, &s.back, to, bytes);
+            }
+        }
+        self.gpu.queue.submit([enc.finish()])
+    }
+
+    /// The first `bytes` of the read-back buffer once submission `index` is done (unmap it after).
+    fn fetch(
+        &self,
+        s: &Sized,
+        index: wgpu::SubmissionIndex,
+        bytes: u64,
+    ) -> Result<wgpu::BufferView> {
+        let slice = s.back.slice(..bytes.max(16));
+        let (tx, rx) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |r| {
+            let _ = tx.send(r);
+        });
+        self.gpu
+            .device
+            .poll(wgpu::PollType::Wait {
+                submission_index: Some(index),
+                timeout: None,
+            })
+            .context("GPU poll")?;
+        rx.recv().context("GPU map")?.context("GPU map")?;
+        slice
+            .get_mapped_range()
+            .map_err(|e| anyhow::anyhow!("GPU map: {e:?}"))
     }
 }
 
@@ -630,39 +740,4 @@ fn storage(gpu: &Gpu, size: u64, label: &str) -> wgpu::Buffer {
             | wgpu::BufferUsages::COPY_SRC,
         mapped_at_creation: false,
     })
-}
-
-/// The first `bytes` of `buf`, as `T`s.
-fn read<T: bytemuck::Pod>(gpu: &Gpu, buf: &wgpu::Buffer, bytes: u64) -> Result<Vec<T>> {
-    if bytes == 0 {
-        return Ok(Vec::new());
-    }
-    let dev = &gpu.device;
-    let back = dev.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("sift read back"),
-        size: bytes,
-        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
-    let mut enc = dev.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-        label: Some("sift read"),
-    });
-    enc.copy_buffer_to_buffer(buf, 0, &back, 0, bytes);
-    gpu.queue.submit([enc.finish()]);
-    let slice = back.slice(..);
-    let (tx, rx) = std::sync::mpsc::channel();
-    slice.map_async(wgpu::MapMode::Read, move |r| {
-        let _ = tx.send(r);
-    });
-    dev.poll(wgpu::PollType::wait_indefinitely())
-        .context("GPU poll")?;
-    rx.recv().context("GPU map")?.context("GPU map")?;
-    let v = {
-        let view = slice
-            .get_mapped_range()
-            .map_err(|e| anyhow::anyhow!("GPU map: {e:?}"))?;
-        bytemuck::cast_slice::<u8, T>(&view).to_vec()
-    };
-    back.unmap();
-    Ok(v)
 }

@@ -60,22 +60,37 @@ fn one_way(
     ratio: f32,
 ) -> Vec<Option<usize>> {
     let (cols, rows) = y.cells.size();
-    let limit = 80f64.to_radians();
-    // (the curve and the features near it in buffers of each thread)
+    // within 80 degrees of y's axis: the lateral distance against the depth (no arctangent)
+    let tan_limit = 80f64.to_radians().tan();
+    // the rays in y's frame: from x's centre (`a`) along each feature's direction
+    let rt = y.pose.r.transpose();
+    let a = rt * (x.pose.p - y.pose.p);
+    // a cell holds a feature within `gate` of a piece only when its centre is within this of it
+    let reach = gate + CELL * std::f64::consts::FRAC_1_SQRT_2;
+    // (the curve, the features near it and which are already in, in buffers of each thread)
     (0..x.features.uv.len())
         .into_par_iter()
         .map_init(
-            || (Vec::with_capacity(SAMPLES), Vec::new()),
-            |(curve, near_curve): &mut (Vec<[f64; 2]>, Vec<usize>), i| {
+            || (Vec::with_capacity(SAMPLES), Vec::new(), Vec::new(), 0u32),
+            |(curve, near_curve, seen, stamp): &mut (Vec<[f64; 2]>, Vec<usize>, Vec<u32>, u32),
+             i| {
                 curve.clear();
                 near_curve.clear();
-                let ray = x.pose.r * V3::from(x.features.ray[i]);
+                if seen.len() < y.features.uv.len() {
+                    seen.resize(y.features.uv.len(), 0);
+                }
+                *stamp = stamp.wrapping_add(1);
+                if *stamp == 0 {
+                    seen.fill(0);
+                    *stamp = 1;
+                }
+                let b = rt * (x.pose.r * V3::from(x.features.ray[i]));
                 let (n, f) = (near, far(i).max(near * 1.5));
                 // the ray's points projected into y, from near to far
                 for k in 0..SAMPLES {
                     let inv = 1. / n + (1. / f - 1. / n) * k as f64 / (SAMPLES - 1) as f64;
-                    let l = y.pose.r.transpose() * (x.pose.p + ray / inv - y.pose.p);
-                    if l.z <= 0. || l.xy().norm().atan2(l.z) > limit {
+                    let l = a + b / inv;
+                    if l.z <= 0. || l.xy().norm() > l.z * tan_limit {
                         continue;
                     }
                     curve.push(y.cam.project([l.x, l.y, l.z]));
@@ -83,7 +98,7 @@ fn one_way(
                 if curve.len() < 2 {
                     return None;
                 }
-                // the features within `gate` of some piece of the curve, each once
+                // the features within `gate` of some piece of the curve, each once, in their order
                 for w in curve.windows(2) {
                     let (lo_x, hi_x) = (w[0][0].min(w[1][0]) - gate, w[0][0].max(w[1][0]) + gate);
                     let (lo_y, hi_y) = (w[0][1].min(w[1][1]) - gate, w[0][1].max(w[1][1]) + gate);
@@ -97,9 +112,16 @@ fn one_way(
                     );
                     for gy in r0.max(0)..=r1.min(rows as isize - 1) {
                         for gx in c0.max(0)..=c1.min(cols as isize - 1) {
+                            let centre = [(gx as f64 + 0.5) * CELL, (gy as f64 + 0.5) * CELL];
+                            if to_segment(centre, w[0], w[1]) > reach {
+                                continue;
+                            }
                             for &j in y.cells.at(gx, gy) {
                                 let j = j as usize;
-                                if to_segment(y.features.uv[j], w[0], w[1]) <= gate {
+                                if seen[j] != *stamp
+                                    && to_segment(y.features.uv[j], w[0], w[1]) <= gate
+                                {
+                                    seen[j] = *stamp;
                                     near_curve.push(j);
                                 }
                             }
@@ -107,7 +129,6 @@ fn one_way(
                     }
                 }
                 near_curve.sort_unstable();
-                near_curve.dedup();
                 let (mut best, mut d1, mut d2) = (usize::MAX, f32::INFINITY, f32::INFINITY);
                 for &j in near_curve.iter() {
                     let d = distance(&x.features.desc[i], &y.features.desc[j]);
