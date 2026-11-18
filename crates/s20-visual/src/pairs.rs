@@ -34,7 +34,7 @@ pub fn features(
         ((full.h as f64) * s).round() as usize,
     );
     let small = image::resize_area(&full, w, h);
-    let (kps, desc) = sift::detect_with(&small, count, contrast, double_first);
+    let (kps, desc) = sift::detect_auto(&small, count, contrast, double_first);
     let (sx, sy) = (w as f64 / full.w as f64, h as f64 / full.h as f64);
     let limit = 80f64.to_radians().cos();
     let mut f = Features {

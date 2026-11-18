@@ -2468,6 +2468,7 @@ dependencies = [
  "rayon",
  "rustc-hash 2.1.3",
  "s20-geom",
+ "s20-gpu",
  "s20-io",
  "serde",
  "serde_json",
@@ -2484,6 +2485,15 @@ dependencies = [
  "kiddo",
  "nalgebra",
  "rayon",
+]
+
+[[package]]
+name = "s20-gpu"
+version = "0.1.5"
+dependencies = [
+ "anyhow",
+ "pollster 0.4.0",
+ "wgpu",
 ]
 
 [[package]]
@@ -2583,13 +2593,16 @@ name = "s20-visual"
 version = "0.1.5"
 dependencies = [
  "anyhow",
+ "bytemuck",
  "image",
  "kiddo",
  "nalgebra",
  "rayon",
+ "s20-gpu",
  "s20-io",
  "serde",
  "serde_json",
+ "wgpu",
  "windows-sys 0.61.2",
  "zune-core",
  "zune-jpeg",

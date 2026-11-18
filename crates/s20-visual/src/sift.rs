@@ -6,6 +6,8 @@
 use crate::image::Gray;
 use rayon::prelude::*;
 
+mod gpu;
+
 const LAYERS: usize = 3;
 const SIGMA: f32 = 1.6;
 const INIT_SIGMA: f32 = 0.5;
@@ -527,9 +529,53 @@ fn descriptor(img: &Gray, kp: &Keypoint) -> [u8; 128] {
     out
 }
 
+/// The keypoints without their duplicates, then the `max_features` strongest (with those as strong
+/// as the last).
+fn select(mut kps: Vec<Keypoint>, max_features: usize) -> Vec<Keypoint> {
+    kps.sort_by(|a, b| {
+        a.x.total_cmp(&b.x)
+            .then(a.y.total_cmp(&b.y))
+            .then(a.size.total_cmp(&b.size))
+            .then(a.angle.total_cmp(&b.angle))
+    });
+    kps.dedup_by(|a, b| a.x == b.x && a.y == b.y && a.size == b.size && a.angle == b.angle);
+    if kps.len() > max_features {
+        kps.sort_by(|a, b| b.response.total_cmp(&a.response));
+        let cut = kps[max_features - 1].response;
+        let keep = kps.iter().take_while(|k| k.response >= cut).count();
+        kps.truncate(keep);
+    }
+    kps
+}
+
 /// Keypoints (in `img` pixels) and descriptors, the `max_features` strongest.
 pub fn detect(img: &Gray, max_features: usize) -> (Vec<Keypoint>, Vec<[u8; 128]>) {
     detect_with(img, max_features, CONTRAST, true)
+}
+
+/// [`detect_with`] on the GPU when there is one (and `S20_NO_GPU` is not set), else (or when the
+/// GPU fails) on the CPU.
+pub fn detect_auto(
+    img: &Gray,
+    max_features: usize,
+    contrast: f32,
+    double_first: bool,
+) -> (Vec<Keypoint>, Vec<[u8; 128]>) {
+    if let Some(g) = gpu::shared() {
+        match g.detect(img, max_features, contrast, double_first) {
+            Ok(r) => return r,
+            Err(e) => {
+                static ONCE: std::sync::Once = std::sync::Once::new();
+                ONCE.call_once(|| eprintln!("SIFT on the CPU for an image (GPU: {e:#})"));
+            }
+        }
+    }
+    detect_with(img, max_features, contrast, double_first)
+}
+
+/// The GPU's name when [`detect_auto`] runs there.
+pub fn gpu_name() -> Option<&'static str> {
+    gpu::name()
 }
 
 /// [`detect`] with another contrast threshold (lower: also the faint features, such as a wooden
@@ -611,20 +657,7 @@ pub fn detect_with(
                 .collect::<Vec<_>>()
         })
         .collect();
-    // duplicates, then the strongest
-    kps.sort_by(|a, b| {
-        a.x.total_cmp(&b.x)
-            .then(a.y.total_cmp(&b.y))
-            .then(a.size.total_cmp(&b.size))
-            .then(a.angle.total_cmp(&b.angle))
-    });
-    kps.dedup_by(|a, b| a.x == b.x && a.y == b.y && a.size == b.size && a.angle == b.angle);
-    if kps.len() > max_features {
-        kps.sort_by(|a, b| b.response.total_cmp(&a.response));
-        let cut = kps[max_features - 1].response;
-        let keep = kps.iter().take_while(|k| k.response >= cut).count();
-        kps.truncate(keep);
-    }
+    let kps = select(kps, max_features);
     let desc = kps
         .par_iter()
         .map(|kp| descriptor(&pyr.gauss[kp.octave][kp.layer], kp))

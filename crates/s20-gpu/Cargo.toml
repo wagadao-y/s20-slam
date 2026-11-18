@@ -1,0 +1,11 @@
+[package]
+name = "s20-gpu"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+wgpu.workspace = true
+pollster.workspace = true

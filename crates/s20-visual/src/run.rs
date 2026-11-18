@@ -646,6 +646,10 @@ pub fn collect(input: &Input, job: &Job) -> Result<Collected> {
     used.sort_unstable();
     used.dedup();
     job.log(&format!("{} pairs over {} images", pairs.len(), used.len()));
+    job.log(&match crate::sift::gpu_name() {
+        Some(name) => format!("features: SIFT on the GPU ({name})"),
+        None => "features: SIFT on the CPU".into(),
+    });
     let done = std::sync::atomic::AtomicU64::new(0);
     // one bar: the features about 60% of the time, the observations 35%
     let (features_part, observations_part) = (job.part(0.0, 0.6), job.part(0.6, 0.95));
