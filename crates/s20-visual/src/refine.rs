@@ -268,6 +268,11 @@ impl Blocks {
         self
     }
 
+    /// The blocks off the diagonal (pairs of images or frames).
+    pub(crate) fn off_len(&self) -> usize {
+        self.off.len()
+    }
+
     fn mul(&self, x: &[Vector6<f64>]) -> Vec<Vector6<f64>> {
         let mut y = vec![Vector6::zeros(); x.len()];
         for (&i, m) in &self.diag {
@@ -285,8 +290,23 @@ fn dot(a: &[Vector6<f64>], b: &[Vector6<f64>]) -> f64 {
     a.iter().zip(b).map(|(x, y)| x.dot(y)).sum()
 }
 
+/// How the conjugate gradients went: the iterations they took.
+pub(crate) struct CgStats {
+    pub(crate) iterations: usize,
+}
+
 /// Preconditioned conjugate gradients on the block system.
 pub(crate) fn pcg(a: &Blocks, b: &[Vector6<f64>], iters: usize, tol: f64) -> Vec<Vector6<f64>> {
+    pcg_counted(a, b, iters, tol).0
+}
+
+/// [`pcg`], with the iterations it took.
+pub(crate) fn pcg_counted(
+    a: &Blocks,
+    b: &[Vector6<f64>],
+    iters: usize,
+    tol: f64,
+) -> (Vec<Vector6<f64>>, CgStats) {
     let n = b.len();
     let inv: Vec<Matrix6<f64>> = (0..n)
         .map(|i| {
@@ -302,7 +322,9 @@ pub(crate) fn pcg(a: &Blocks, b: &[Vector6<f64>], iters: usize, tol: f64) -> Vec
     let mut p = z.clone();
     let mut rz = dot(&r, &z);
     let b_norm = dot(b, b).sqrt().max(1e-30);
+    let mut done = 0;
     for _ in 0..iters {
+        done += 1;
         let ap = a.mul(&p);
         let alpha = rz / dot(&p, &ap).max(1e-300);
         for k in 0..n {
@@ -320,7 +342,7 @@ pub(crate) fn pcg(a: &Blocks, b: &[Vector6<f64>], iters: usize, tol: f64) -> Vec
             p[k] = z[k] + beta * p[k];
         }
     }
-    x
+    (x, CgStats { iterations: done })
 }
 
 /// Refined corrections for every pose (zero where neither an observation nor the chain reaches an image). `chain` lists

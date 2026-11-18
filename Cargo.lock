@@ -2590,6 +2590,7 @@ dependencies = [
  "s20-io",
  "serde",
  "serde_json",
+ "windows-sys 0.61.2",
  "zune-core",
  "zune-jpeg",
 ]

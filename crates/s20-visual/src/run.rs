@@ -627,7 +627,11 @@ pub fn collect(input: &Input, job: &Job) -> Result<Collected> {
             Ok(Some(f))
         })
         .collect::<Result<_>>()?;
-    job.log(&format!("features of {} images", used.len()));
+    job.log(&format!(
+        "features of {} images{}",
+        used.len(),
+        crate::memory::note()
+    ));
     job.check()?;
     let done = std::sync::atomic::AtomicU64::new(0);
     let observed: Vec<(Obs, Kind)> = pairs
@@ -750,7 +754,11 @@ pub fn collect(input: &Input, job: &Job) -> Result<Collected> {
         .into_iter()
         .partition(|(o, k)| for_refinement(o, *k));
     let (obs, kinds): (Vec<Obs>, Vec<Kind>) = mine.into_iter().chain(rest).unzip();
-    job.log(&format!("{} observations", obs.len()));
+    job.log(&format!(
+        "{} observations{}",
+        obs.len(),
+        crate::memory::note()
+    ));
     let prepared: Vec<Prepared> = obs
         .par_iter()
         .map(|o| prepare(o, &cams, side(&poses.names[o.a]), side(&poses.names[o.b])))
@@ -795,19 +803,49 @@ pub fn collect(input: &Input, job: &Job) -> Result<Collected> {
     })
 }
 
+/// Keeps only the held-out observations (with their preparations and kinds), the memory of the
+/// others given back.
+fn keep_held(
+    obs: &mut Vec<Obs>,
+    prepared: &mut Vec<Prepared>,
+    kinds: &mut Vec<Kind>,
+    held: &mut Vec<bool>,
+) {
+    fn keep<T>(v: &mut Vec<T>, by: &[bool]) {
+        let mut k = by.iter();
+        v.retain(|_| *k.next().unwrap());
+        v.shrink_to_fit();
+    }
+    let by = std::mem::take(held);
+    keep(obs, &by);
+    keep(prepared, &by);
+    keep(kinds, &by);
+    *held = vec![true; obs.len()];
+}
+
 pub fn run(input: &Input, job: &Job) -> Result<serde_json::Value> {
     let Collected {
         poses,
         cams,
-        obs,
-        kinds,
-        prepared,
-        held,
+        mut obs,
+        mut kinds,
+        mut prepared,
+        mut held,
         chain,
         used,
         pairs,
         free,
     } = collect(input, job)?;
+    // per image: the observations it takes part in (not held out), and all of them, for the
+    // report: counted now, as only the held-out ones are kept once the tracks are joined
+    let observations = obs.len();
+    let mut count = vec![0usize; poses.poses.len()];
+    for (o, h) in obs.iter().zip(&held) {
+        if !h {
+            count[o.a] += 1;
+            count[o.b] += 1;
+        }
+    }
     // the refinement keeps to its pairs and to the features on planes; the rest is for the tracks
     let train: Vec<bool> = held
         .iter()
@@ -842,6 +880,7 @@ pub fn run(input: &Input, job: &Job) -> Result<serde_json::Value> {
         &settings,
         &mut camera,
     );
+    drop(train);
     // the refined poses with the solved mounts (for the colouring), and the tracks' adjustment
     let refined: Vec<Pose> = (0..poses.poses.len())
         .map(|i| {
@@ -857,11 +896,15 @@ pub fn run(input: &Input, job: &Job) -> Result<serde_json::Value> {
         job.log("joining the matches into tracks");
         let sides: Vec<usize> = poses.names.iter().map(|n| side(n)).collect();
         let tracks = bundle::tracks(&obs, &cams, &camera.intrinsic, &sides, input.holdout);
+        // from here on the observations serve only the held-out checks
+        keep_held(&mut obs, &mut prepared, &mut kinds, &mut held);
         let sightings: usize = tracks.iter().map(|t| t.sightings.len()).sum();
         job.log(&format!(
-            "{} tracks, {} sightings; adjusting them",
+            "{} tracks, {} sightings; adjusting them ({} held-out observations kept{})",
             tracks.len(),
-            sightings
+            sightings,
+            obs.len(),
+            crate::memory::note()
         ));
         let (frame, frames, frame_chain) = frames(&poses);
         // the images of a frame start together: their refinements averaged, as the frame's
@@ -916,9 +959,10 @@ pub fn run(input: &Input, job: &Job) -> Result<serde_json::Value> {
                 None => Vec::new(),
             };
             job.log(&format!(
-                "{} tracks matched along the epipolar lines ({:.1} s)",
+                "{} tracks matched along the epipolar lines ({:.1} s{})",
                 loose.len(),
-                started.elapsed().as_secs_f64()
+                started.elapsed().as_secs_f64(),
+                crate::memory::note()
             ));
             let cloud = free.as_ref().map(|f| &f.cloud);
             let (n, off) =
@@ -1034,16 +1078,10 @@ pub fn run(input: &Input, job: &Job) -> Result<serde_json::Value> {
         .map(|&i| (refined[i].p - poses.poses[i].p).norm() * 1000.)
         .collect();
     // per image: observations it takes part in, its correction, and the held-out residuals touching it
-    let mut count = vec![0usize; poses.poses.len()];
     let mut before = vec![Vec::new(); poses.poses.len()];
     let mut after = vec![Vec::new(); poses.poses.len()];
     for (((o, g), h), k) in obs.iter().zip(&prepared).zip(&held).zip(&kinds) {
-        if !h {
-            count[o.a] += 1;
-            count[o.b] += 1;
-            continue;
-        }
-        if !for_refinement(o, *k) {
+        if !h || !for_refinement(o, *k) {
             continue;
         }
         let r0 = residual_with(o, g, &poses.poses[o.a], &poses.poses[o.b], &none);
@@ -1064,7 +1102,7 @@ pub fn run(input: &Input, job: &Job) -> Result<serde_json::Value> {
         })
         .collect();
     let report = serde_json::json!({
-        "images": used.len(), "pairs": pairs, "observations": obs.len(), "held_out_share": input.holdout,
+        "images": used.len(), "pairs": pairs, "observations": observations, "held_out_share": input.holdout,
         "held_out_median_px_eq": checks,
         "rotation_deg_median": median(rot), "offset_mm_median": median(pos),
         "cameras_solved": solved,

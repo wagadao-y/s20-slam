@@ -10,6 +10,7 @@ pub mod epipolar;
 pub mod image;
 pub mod joint;
 pub mod matching;
+pub mod memory;
 pub mod pairs;
 pub mod refine;
 pub mod run;

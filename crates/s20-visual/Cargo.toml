@@ -16,3 +16,6 @@ s20-io = { path = "../s20-io" }
 image = { version = "0.25.10", default-features = false, features = ["png"] }
 zune-jpeg = "0.5"
 zune-core = "0.5"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_System_ProcessStatus", "Win32_System_Threading"] }

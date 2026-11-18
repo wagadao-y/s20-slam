@@ -9,7 +9,7 @@
 use crate::anchors::{M3, Pose, V3};
 use crate::camera::Fisheye;
 use crate::pairs::Obs;
-use crate::refine::{Blocks, Intrinsic, bend, pcg, ray_and_derivatives};
+use crate::refine::{Blocks, Intrinsic, bend, pcg_counted, ray_and_derivatives};
 use nalgebra::{Matrix3, Matrix6, Rotation3, SMatrix, SymmetricEigen, Vector2, Vector3, Vector6};
 use rayon::prelude::*;
 use std::collections::HashMap;
@@ -759,21 +759,26 @@ pub fn solve(
     let mut accepted = 0;
     while iterations < s.iterations {
         iterations += 1;
-        let lin: Vec<Option<(FrameBlocks, Linear)>> = pb
+        let started = std::time::Instant::now();
+        // each track linearised and its point eliminated at once, into the frames' system
+        // (H_ff - W H_pp^-1 W^T and g_f - W H_pp^-1 g_p); only what the back-substitution needs
+        // is kept per track. (A fold over the tracks themselves: one over `.flatten()`ed options
+        // starts a fold, frames long, for every track.)
+        let mut lin: Vec<Option<Linear>> = Vec::new();
+        lin.resize_with(pb.tracks.len(), || None);
+        let (mut blocks, mut g) = pb
             .tracks
             .par_iter()
             .zip(&pb.pinned)
             .zip(&x)
-            .map(|((t, &pin), x)| pb.linearise(t, pin, x, &rot, &shift, lambda))
-            .collect();
-        // the points eliminated: H_ff - W H_pp^-1 W^T and g_f - W H_pp^-1 g_p
-        let (mut blocks, mut g) = lin
-            .par_iter()
-            .flatten()
+            .zip(lin.par_iter_mut())
             .fold(
                 || (Blocks::default(), vec![Vector6::zeros(); frames]),
-                |(mut b, mut g), (hf, l)| {
-                    for (f, h, gf) in hf {
+                |(mut b, mut g), (((t, &pin), x), slot)| {
+                    let Some((hf, l)) = pb.linearise(t, pin, x, &rot, &shift, lambda) else {
+                        return (b, g);
+                    };
+                    for (f, h, gf) in &hf {
                         b.add(*f, *f, *h);
                         g[*f] += gf;
                     }
@@ -784,18 +789,17 @@ pub fn solve(
                             b.add(*fa, *fb, -(wh * wb.transpose()));
                         }
                     }
+                    *slot = Some(l);
                     (b, g)
                 },
             )
-            .reduce(
-                || (Blocks::default(), vec![Vector6::zeros(); frames]),
-                |(a, mut ga), (b, gb)| {
-                    for (x, y) in ga.iter_mut().zip(gb) {
-                        *x += y;
-                    }
-                    (a.merge(b), ga)
-                },
-            );
+            .reduce_with(|(a, mut ga), (b, gb)| {
+                for (x, y) in ga.iter_mut().zip(gb) {
+                    *x += y;
+                }
+                (a.merge(b), ga)
+            })
+            .unwrap_or_else(|| (Blocks::default(), vec![Vector6::zeros(); frames]));
         let w: Vec<V3> = rot.iter().map(rotvec).collect();
         for f in 0..frames {
             blocks.add(f, f, diag6(rot_prior, pos_prior));
@@ -830,17 +834,27 @@ pub fn solve(
             blocks.add(f, f, Matrix6::from_diagonal(&d));
         }
         let rhs: Vec<Vector6<f64>> = g.iter().map(|v| -v).collect();
-        let step = pcg(&blocks, &rhs, 2000, 1e-10);
-        let mut tx = x.clone();
-        for ((tx, l), x) in tx.iter_mut().zip(&lin).zip(&x) {
-            if let Some((_, l)) = l {
-                let mut r = l.gp;
-                for (f, wf) in &l.w {
-                    r += wf.transpose() * step[*f];
+        let assembled = started.elapsed().as_secs_f64();
+        let (step, cg) = pcg_counted(&blocks, &rhs, 2000, 1e-10);
+        let solved = started.elapsed().as_secs_f64();
+        let off_blocks = blocks.off_len();
+        drop(blocks);
+        // (the tracks' blocks given back by the workers, as they go)
+        let tx: Vec<V3> = lin
+            .into_par_iter()
+            .zip(&x)
+            .map(|(l, x)| match l {
+                Some(l) => {
+                    let mut r = l.gp;
+                    for (f, wf) in &l.w {
+                        r += wf.transpose() * step[*f];
+                    }
+                    x - l.hinv * r
                 }
-                *tx = x - l.hinv * r;
-            }
-        }
+                None => *x,
+            })
+            .collect();
+        let back = started.elapsed().as_secs_f64();
         let trot: Vec<M3> = rot
             .iter()
             .zip(&step)
@@ -851,18 +865,31 @@ pub fn solve(
             .zip(&step)
             .map(|(t, d)| t + d.fixed_rows::<3>(3))
             .collect();
+        let before_cost = started.elapsed().as_secs_f64();
         let tcost = pb.cost(&tx, &trot, &tshift);
         let largest = step
             .iter()
             .map(|d| d.fixed_rows::<3>(0).norm())
             .fold(0f64, f64::max);
+        // where the iteration's time went: the tracks linearised into the frames' system, the
+        // conjugate gradients (their iterations, the frame pairs' blocks), the points back from
+        // the frames' step, the trial cost
+        let total = started.elapsed().as_secs_f64();
+        let took = format!(
+            "{total:.0} s: system {assembled:.0}, cg {:.0} ({} its, {off_blocks} pair blocks), points {:.0}, cost {:.0}{}",
+            solved - assembled,
+            cg.iterations,
+            back - solved,
+            total - before_cost,
+            crate::memory::note()
+        );
         if tcost < cost {
             let gain = (cost - tcost) / cost;
             (x, rot, shift, cost) = (tx, trot, tshift, tcost);
             lambda = (lambda / 3.).max(1e-9);
             accepted += 1;
             log(&format!(
-                "tracks: iteration {iterations}: cost {cost:.6e}, largest turn {:.4} deg",
+                "tracks: iteration {iterations}: cost {cost:.6e}, largest turn {:.4} deg ({took})",
                 largest.to_degrees()
             ));
             if accepted == 3 || accepted == 6 {
@@ -879,6 +906,10 @@ pub fn solve(
                 break;
             }
         } else {
+            log(&format!(
+                "tracks: iteration {iterations}: not taken (cost {tcost:.6e} against {cost:.6e}, damping {lambda:.0e} -> {:.0e}) ({took})",
+                lambda * 10.
+            ));
             lambda *= 10.;
             if lambda > 1e6 {
                 break;
