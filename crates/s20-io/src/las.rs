@@ -240,14 +240,19 @@ impl LasWriter {
         fill: impl Fn(usize, &mut [u8]) + Sync,
     ) -> Result<()> {
         debug_assert!(self.n_extras > 0 || self.record_len == BASE_LEN);
+        let (inv, offset, rl) = (1.0 / self.scale, self.offset, self.record_len);
+        // the bounds of the points as stored (offset + integer x scale): of the coordinates before
+        // rounding, a point at an end lay up to half a step outside them, which PotreeConverter
+        // refuses
+        let scale = self.scale;
         for p in pts {
-            for d in 0..3 {
-                self.lo[d] = self.lo[d].min(p.xyz[d]);
-                self.hi[d] = self.hi[d].max(p.xyz[d]);
+            for (d, (&x, &o)) in p.xyz.iter().zip(&offset).enumerate() {
+                let stored = o + ((x - o) * inv).round() as i32 as f64 * scale;
+                self.lo[d] = self.lo[d].min(stored);
+                self.hi[d] = self.hi[d].max(stored);
             }
         }
         self.n += pts.len() as u64;
-        let (inv, offset, rl) = (1.0 / self.scale, self.offset, self.record_len);
         let record = |i: usize, rec: &mut [u8]| {
             let p = &pts[i];
             for d in 0..3 {
@@ -554,6 +559,36 @@ mod tests {
             assert_eq!(a.rgb, b.rgb);
             assert_eq!(a.classification, b.classification);
         }
+    }
+
+    /// Points off the grid of the scale: the header's bounds hold them as read back (a point at an
+    /// end rounded outside the bounds of the coordinates before rounding, which PotreeConverter
+    /// refuses).
+    #[test]
+    fn the_bounds_hold_the_points_as_stored() {
+        let pts: Vec<LasPoint> = [0.00049, 0.0123, 1.23456, 2.99951]
+            .iter()
+            .map(|&x| LasPoint {
+                xyz: [x, -x, 10. + x],
+                ..Default::default()
+            })
+            .collect();
+        let f = std::env::temp_dir().join(format!("s20_las_bounds_{}.las", std::process::id()));
+        write(&f, &pts, 1e-3, [0.; 3]).unwrap();
+        let (r, info) = read(&f).unwrap();
+        std::fs::remove_file(&f).unwrap();
+        let [lo, hi] = info.bounds;
+        for p in &r {
+            for d in 0..3 {
+                assert!(
+                    lo[d] <= p.xyz[d] && p.xyz[d] <= hi[d],
+                    "{:?} outside {lo:?} {hi:?}",
+                    p.xyz
+                );
+            }
+        }
+        // (the ends rounded: 0.00049 to 0, 2.99951 to 3)
+        assert_eq!((lo[0], hi[0]), (0., 3.));
     }
 
     /// LAZ reads back exactly what LAS stores, over several chunks and a partial last chunk.
