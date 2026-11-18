@@ -1786,11 +1786,19 @@ impl RunConfig {
                 v
             }
             // the tracks' adjustment after the refinement (2: their points, 3: and the points matched
-            // along the epipolar lines, 4: over wider pairs too, 5: joined without repeating an image): older refinements are rerun
-            Step::Refine => match &self.device_calib {
-                Some(d) => serde_json::json!({"device_calibration": file_digest(d), "tracks": 5}),
-                None => serde_json::json!({"fit_camera": true, "tracks": 5}),
-            },
+            // along the epipolar lines, 4: over wider pairs too, 5: joined without repeating an image): older refinements are rerun.
+            // Only with the images (the COLMAP model): without, a refinement with them is as good
+            // (see `staleness_of`)
+            Step::Refine => {
+                let mut v = match &self.device_calib {
+                    Some(d) => serde_json::json!({"device_calibration": file_digest(d)}),
+                    None => serde_json::json!({"fit_camera": true}),
+                };
+                if self.images {
+                    v["tracks"] = 5.into();
+                }
+                v
+            }
             Step::Lio => {
                 // without hold intervals as before, keeping older records current
                 let hold = self.edits().heading_hold;
@@ -1910,9 +1918,17 @@ impl RunConfig {
         {
             return Some(Stale::Params);
         }
-        let params = self
-            .record(step, k)
-            .is_some_and(|r| r.done && comparable(r.params.clone()) != self.step_params(step));
+        let params = self.record(step, k).is_some_and(|r| {
+            let mut was = comparable(r.params.clone());
+            // a refinement with the tracks serves one without them (the images not written)
+            if step == Step::Refine
+                && !self.images
+                && let Some(o) = was.as_object_mut()
+            {
+                o.remove("tracks");
+            }
+            r.done && was != self.step_params(step)
+        });
         (params || (step == Step::Opt && self.ppk && self.record(step, k).is_none()))
             .then_some(Stale::Params)
     }
@@ -2233,15 +2249,30 @@ impl RunConfig {
                     ratio: 0.75,
                     calib_out: self.device_calib.is_none().then(|| self.refined_calib()),
                     camera_prior: s20_visual::run::CameraPrior::MAKER,
-                    tracks: Some(self.tracked_poses()),
-                    track_points: Some(self.tracked_points()),
+                    // the tracks (their poses and points) only for the COLMAP model: the colouring
+                    // takes the poses fitted to the cloud
+                    tracks: self.images.then(|| self.tracked_poses()),
+                    track_points: self.images.then(|| self.tracked_points()),
                     track_features: None,
                     out: self.refined_poses(),
                 };
+                if !self.images {
+                    // those of an earlier refinement no longer go with these poses
+                    for old in [self.tracked_poses(), self.tracked_points()] {
+                        if old.exists() {
+                            std::fs::remove_file(&old)
+                                .with_context(|| format!("remove {}", old.display()))?;
+                        }
+                    }
+                }
                 s20_visual::run::run(&input, &job.named(step.key()))?;
                 let frame = frames::recorded(&self.data(), &imgpose)?;
                 let tracked = self.tracked_poses();
-                frames::record(&self.data(), &[&input.out, &tracked], frame)?;
+                let mut written = vec![input.out.as_path()];
+                if self.images {
+                    written.push(&tracked);
+                }
+                frames::record(&self.data(), &written, frame)?;
             }
             Step::Images => {
                 let (imgpose, calib) = self.colour_inputs();
@@ -2912,6 +2943,27 @@ mod tests {
         c.params.cloud.anchor_grid = 0.02;
         assert_ne!(c.step_params(Step::Cloud), cloud);
     }
+    #[test]
+    fn a_refinement_with_the_tracks_serves_one_without_but_not_the_other_way() {
+        let work = std::env::temp_dir().join(format!("s20_refine_tracks_{}", std::process::id()));
+        let mut c = RunConfig::new(work.join("raw"), work.clone());
+        c.refine = true;
+        std::fs::create_dir_all(c.runs()).unwrap();
+        std::fs::write(c.refined_poses(), "fixture").unwrap();
+        // made with the images, so with the tracks
+        c.images = true;
+        c.write_record(Step::Refine, None, true).unwrap();
+        assert_eq!(c.staleness(Step::Refine), None);
+        c.images = false;
+        assert_eq!(c.staleness(Step::Refine), None);
+        // made without: the images now want the tracks
+        c.write_record(Step::Refine, None, true).unwrap();
+        assert_eq!(c.staleness(Step::Refine), None);
+        c.images = true;
+        assert_eq!(c.staleness(Step::Refine), Some(Stale::Params));
+        std::fs::remove_dir_all(work).unwrap();
+    }
+
     #[test]
     fn ppk_engine_update_invalidates_completed_optimisation() {
         let work = std::env::temp_dir().join(format!("s20_ppk_engine_{}", std::process::id()));
