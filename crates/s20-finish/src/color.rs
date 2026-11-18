@@ -1093,6 +1093,10 @@ fn gains(entries: &[Entry], images: usize) -> Vec<[f32; 3]> {
         a = b;
     }
     let nc = cell_start.len() - 1;
+    assert!(
+        cs.len() < u32::MAX as usize,
+        "more gain entries than 32-bit indices reach"
+    );
     // each image's entries, in their order
     let mut by_image_start = vec![0usize; images + 1];
     for &k in &ks {

@@ -380,6 +380,9 @@ pub fn read_image(path: &Path) -> Result<Vec<u8>> {
         return Ok(b);
     }
     let (src, _, o, n) = bag_image(path)?;
+    if o.checked_add(n).is_none_or(|end| end as u64 > src.size) {
+        bail!("image {} lies outside the bag", path.display());
+    }
     // a plain read at the image's place, not through a map of the bag: the pages read stay in
     // the system's file cache instead of the process (4650 images: tens of GB in its working set)
     let bag = open_bag(&src)?;
@@ -389,11 +392,14 @@ pub fn read_image(path: &Path) -> Result<Vec<u8>> {
     Ok(buf)
 }
 
-/// The bag of `src`, opened once in the process (its size checked against the index).
+/// The bag of `src`, opened once in the process while it keeps the size the index was made from
+/// (checked on every use: a bag replaced at the same path is opened again).
 fn open_bag(src: &Source) -> Result<Arc<fs::File>> {
     static BAGS: OnceLock<Mutex<HashMap<PathBuf, Arc<fs::File>>>> = OnceLock::new();
     let mut bags = BAGS.get_or_init(Default::default).lock().unwrap();
-    if let Some(f) = bags.get(&src.bag) {
+    if let Some(f) = bags.get(&src.bag)
+        && f.metadata().is_ok_and(|m| m.len() == src.size)
+    {
         return Ok(f.clone());
     }
     let f = fs::File::open(&src.bag)
@@ -417,7 +423,8 @@ fn read_exact_at(f: &fs::File, buf: &mut [u8], offset: u64) -> std::io::Result<(
     std::os::unix::fs::FileExt::read_exact_at(f, buf, offset)
 }
 
-/// `buf.len()` bytes of `f` from `offset`, from any thread (no shared position).
+/// `buf.len()` bytes of `f` from `offset`, from any thread (each read says where; on Windows it
+/// also moves the file's cursor, which nothing here relies on).
 #[cfg(windows)]
 fn read_exact_at(f: &fs::File, mut buf: &mut [u8], mut offset: u64) -> std::io::Result<()> {
     use std::os::windows::fs::FileExt;

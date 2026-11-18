@@ -117,6 +117,42 @@ struct VRange {
 /// The points an image sees: (block order, u, v, range, theta), in block order.
 pub type Seen = Vec<(u32, f32, f32, f32, f32)>;
 
+thread_local! {
+    /// Each thread's buffers of the visible pass: its points on the GPU, and their read-back.
+    static VISIBLE_OUT: std::cell::RefCell<Option<(u64, wgpu::Buffer)>> =
+        const { std::cell::RefCell::new(None) };
+    static VISIBLE_BACK: std::cell::RefCell<Option<(u64, wgpu::Buffer)>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// The thread's buffer of `cell`, made again (a quarter larger, up to `most` bytes) when smaller
+/// than `size`.
+fn kept_buffer(
+    cell: &'static std::thread::LocalKey<std::cell::RefCell<Option<(u64, wgpu::Buffer)>>>,
+    dev: &wgpu::Device,
+    size: u64,
+    most: u64,
+    usage: wgpu::BufferUsages,
+    label: &str,
+) -> wgpu::Buffer {
+    cell.with_borrow_mut(|kept| {
+        if let Some((cap, b)) = kept.as_ref()
+            && *cap >= size
+        {
+            return b.clone();
+        }
+        let cap = (size + size / 4).next_multiple_of(256).min(most).max(size);
+        let b = dev.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(label),
+            size: cap,
+            usage,
+            mapped_at_creation: false,
+        });
+        *kept = Some((cap, b.clone()));
+        b
+    })
+}
+
 /// The points the visible pass wrote (index, u, v, range, angle: five words each, in any order)
 /// in the order of their indices, each index once: a bit set per index, each point placed at
 /// the number of the bits before its own (as sorting by the index, without the sort's passes).
@@ -300,8 +336,15 @@ impl ZBuffer {
         zh: usize,
         grids: &[f32],
     ) -> Result<Seen> {
-        self.gpu
-            .checked(|| self.run_visible(cam, reach, graze, blocks, zw, zh, grids))
+        let r = self
+            .gpu
+            .checked(|| self.run_visible(cam, reach, graze, blocks, zw, zh, grids));
+        if r.is_err() {
+            // (a buffer that failed is not kept for the next image)
+            VISIBLE_OUT.with_borrow_mut(|b| *b = None);
+            VISIBLE_BACK.with_borrow_mut(|b| *b = None);
+        }
+        r
     }
     #[allow(clippy::too_many_arguments)]
     fn run_visible(
@@ -331,22 +374,26 @@ impl ZBuffer {
         // wide outdoor recording's images see a quarter of a cloud: two passes each before),
         // all of them when that is short
         let last = self.last_seen.load(std::sync::atomic::Ordering::Relaxed);
+        let most = self.max_places();
         let mut places = (total / 4)
             .max(last + last / 4)
             .max(1 << 16)
-            .min(total.max(1 << 16));
+            .min(total.max(1 << 16))
+            .min(most);
         loop {
-            let (count, out) =
+            let (count, seen) =
                 self.dispatch_visible(cam, reach, graze, blocks, zw, zh, &grid, places)?;
-            if count as u64 > places {
+            let Some(seen) = seen else {
+                anyhow::ensure!(
+                    (count as u64) <= most,
+                    "{count} visible points: more than a GPU buffer holds"
+                );
                 places = count as u64;
                 continue;
-            }
+            };
             self.last_seen
                 .store(count as u64, std::sync::atomic::Ordering::Relaxed);
-            // in block order (the threads wrote them in any order): each point's place among them
-            // by its index, which only it has (a bit per index, then the bits before it)
-            return Ok(in_index_order(&out));
+            return Ok(seen);
         }
     }
     /// One pass of [`ZBuffer::visible`] with room for `places` points: their number, and those
@@ -362,19 +409,22 @@ impl ZBuffer {
         zh: usize,
         grid: &wgpu::Buffer,
         places: u64,
-    ) -> Result<(u32, Vec<u32>)> {
+    ) -> Result<(u32, Option<Seen>)> {
         let dev = &self.gpu.device;
         let count = dev.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("visible count"),
             contents: bytemuck::bytes_of(&0u32),
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
         });
-        let out = dev.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("visible out"),
-            size: places * 20,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-            mapped_at_creation: false,
-        });
+        // the thread's buffer for the points (100 MB and more an image outdoors), kept
+        let out = kept_buffer(
+            &VISIBLE_OUT,
+            dev,
+            places * 20,
+            self.max_places() * 20,
+            wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            "visible out",
+        );
         let mut enc = dev.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("visible"),
         });
@@ -435,7 +485,12 @@ impl ZBuffer {
                 lst.as_entire_binding(),
                 grid.as_entire_binding(),
                 count.as_entire_binding(),
-                out.as_entire_binding(),
+                // (as much as this image is given: the kept buffer may be larger)
+                wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                    buffer: &out,
+                    offset: 0,
+                    size: std::num::NonZeroU64::new(places * 20),
+                }),
             ];
             let entries: Vec<wgpu::BindGroupEntry> = res
                 .into_iter()
@@ -466,14 +521,74 @@ impl ZBuffer {
         }
         self.gpu.queue.submit([enc.finish()]);
         let n = self.read(&count, 4)?[0];
-        let written = (n as u64).min(places);
-        let out = if written > 0 {
-            self.read(&out, written * 20)?
+        if n as u64 > places {
+            return Ok((n, None));
+        }
+        // in block order (the threads wrote them in any order), straight from the read-back
+        // buffer: each point's place among them by its index, which only it has
+        let seen = if n > 0 {
+            let back = kept_buffer(
+                &VISIBLE_BACK,
+                dev,
+                n as u64 * 20,
+                self.max_places() * 20,
+                wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                "visible read back",
+            );
+            self.read_into(&out, &back, n as u64 * 20, in_index_order)?
         } else {
             Vec::new()
         };
         drop(kept);
-        Ok((n, out))
+        Ok((n, Some(seen)))
+    }
+
+    /// The points a visible pass can write (20 bytes each, within one buffer and one binding).
+    fn max_places(&self) -> u64 {
+        let l = &self.gpu.limits;
+        (l.max_storage_buffer_binding_size.min(l.max_buffer_size) / 20).max(1)
+    }
+
+    /// `f` of the first `bytes` of `buf` (a multiple of 4) as words, read through `back` (a
+    /// buffer to map, at least that large) without copying them out.
+    fn read_into<T>(
+        &self,
+        buf: &wgpu::Buffer,
+        back: &wgpu::Buffer,
+        bytes: u64,
+        f: impl FnOnce(&[u32]) -> T,
+    ) -> Result<T> {
+        let dev = &self.gpu.device;
+        let mut enc = dev.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("read"),
+        });
+        enc.copy_buffer_to_buffer(buf, 0, back, 0, bytes);
+        let index = self.gpu.queue.submit([enc.finish()]);
+        let slice = back.slice(..bytes);
+        let (tx, rx) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |r| {
+            let _ = tx.send(r);
+        });
+        let r = dev
+            .poll(wgpu::PollType::Wait {
+                submission_index: Some(index),
+                timeout: None,
+            })
+            .context("GPU poll")
+            .and_then(|_| rx.recv().context("GPU map")?.context("GPU map"))
+            .and_then(|_| {
+                let view = slice
+                    .get_mapped_range()
+                    .map_err(|e| anyhow::anyhow!("GPU map: {e:?}"))?;
+                Ok(f(bytemuck::cast_slice::<u8, u32>(&view)))
+            });
+        // (left mapped, the thread's buffer could not be used again)
+        if r.is_ok() {
+            back.unmap();
+        } else {
+            VISIBLE_BACK.with_borrow_mut(|b| *b = None);
+        }
+        r
     }
     /// The first `bytes` of `buf` (a multiple of 4), as words.
     fn read(&self, buf: &wgpu::Buffer, bytes: u64) -> Result<Vec<u32>> {

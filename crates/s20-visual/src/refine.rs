@@ -264,16 +264,14 @@ fn bend_with_derivative(ray: &V3, dx: &V3, dy: &V3, k: &Intrinsic) -> (V3, SMatr
     let da_dtheta = 1. + k[0] + 3. * k[1] * theta * theta;
     for (col, d) in [(2, dx), (3, dy)] {
         let dr = (d - r * r.dot(d)) / n;
-        let (drho, dc, ds) = if rho > 1e-12 {
-            let drho = (r.x * dr.x + r.y * dr.y) / rho;
-            (
-                drho,
-                dr.x / rho - r.x * drho / (rho * rho),
-                dr.y / rho - r.y * drho / (rho * rho),
-            )
-        } else {
-            (0., 0., 0.)
-        };
+        if rho <= 1e-12 {
+            // on the axis: the angle grows as rho (1 + k0), so the bearing moves across by that
+            j.set_column(col, &V3::new(dr.x * (1. + k[0]), dr.y * (1. + k[0]), 0.));
+            continue;
+        }
+        let drho = (r.x * dr.x + r.y * dr.y) / rho;
+        let dc = dr.x / rho - r.x * drho / (rho * rho);
+        let ds = dr.y / rho - r.y * drho / (rho * rho);
         let dtheta = (r.z * drho - rho * dr.z) / (rho * rho + r.z * r.z);
         let da = da_dtheta * dtheta;
         j.set_column(
@@ -732,6 +730,7 @@ pub fn refine_camera_with(
             break;
         }
     }
+    progress(s.iterations, s.iterations);
     c
 }
 
@@ -749,6 +748,28 @@ pub fn pose_row(r: &M3) -> ([f64; 3], [f64; 4]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_bend_derivative_holds_on_the_axis_too() {
+        let (dx, dy) = (V3::new(1e-3, 0., 0.), V3::new(0., 1e-3, 0.));
+        for ray in [V3::new(0., 0., 1.), V3::new(0.3, -0.2, 0.9).normalize()] {
+            for k in [[0.; 4], [0.004, -0.002, 1.5, -2.]] {
+                let (_, j) = bend_with_derivative(&ray, &dx, &dy, &k);
+                for c in 0..4 {
+                    let h = if c < 2 { 1e-6 } else { 1e-4 };
+                    let (mut kp, mut km) = (k, k);
+                    kp[c] += h;
+                    km[c] -= h;
+                    let d = (bend(&ray, &dx, &dy, &kp) - bend(&ray, &dx, &dy, &km)) / (2. * h);
+                    assert!(
+                        (j.column(c) - d).norm() < 1e-6 * d.norm().max(1e-3),
+                        "ray {ray:?}, k {k:?}, column {c}: {:?} against {d:?}",
+                        j.column(c)
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn the_jacobian_by_the_chain_rule_is_the_numeric_one() {
