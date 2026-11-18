@@ -75,6 +75,8 @@ pub struct ZBuffer {
     layout: wgpu::BindGroupLayout,
     visible: wgpu::ComputePipeline,
     visible_layout: wgpu::BindGroupLayout,
+    /// the points the last image saw (the room the next one is given first)
+    last_seen: std::sync::atomic::AtomicU64,
 }
 
 /// A block of points for [`ZBuffer::visible`]: its points (first, count) and its centre, and
@@ -115,30 +117,30 @@ struct VRange {
 /// The points an image sees: (block order, u, v, range, theta), in block order.
 pub type Seen = Vec<(u32, f32, f32, f32, f32)>;
 
-/// Sorts `keys` by their high 32 bits (least significant digit first, 11 bits at a time, only
-/// as many digits as the largest key needs; stable, so the low bits break no ties).
-fn radix_sort_high(keys: &mut Vec<u64>) {
-    let most = keys.iter().map(|&k| k >> 32).max().unwrap_or(0);
-    let bits = 64 - most.leading_zeros();
-    let mut tmp = vec![0u64; keys.len()];
-    let mut shift = 32;
-    while shift < 32 + bits {
-        let mut count = [0usize; 1 << 11];
-        for &k in keys.iter() {
-            count[((k >> shift) & 0x7ff) as usize] += 1;
-        }
-        let mut at = 0;
-        for c in count.iter_mut() {
-            (*c, at) = (at, at + *c);
-        }
-        for &k in keys.iter() {
-            let d = ((k >> shift) & 0x7ff) as usize;
-            tmp[count[d]] = k;
-            count[d] += 1;
-        }
-        std::mem::swap(keys, &mut tmp);
-        shift += 11;
+/// The points the visible pass wrote (index, u, v, range, angle: five words each, in any order)
+/// in the order of their indices, each index once: a bit set per index, each point placed at
+/// the number of the bits before its own (as sorting by the index, without the sort's passes).
+fn in_index_order(out: &[u32]) -> Seen {
+    let rows = out.as_chunks::<5>().0;
+    let most = rows.iter().map(|w| w[0]).max().unwrap_or(0) as usize;
+    let mut bits = vec![0u64; most / 64 + 1];
+    for w in rows {
+        bits[w[0] as usize / 64] |= 1 << (w[0] % 64);
     }
+    let mut before = Vec::with_capacity(bits.len());
+    let mut n = 0u32;
+    for b in &bits {
+        before.push(n);
+        n += b.count_ones();
+    }
+    let f = f32::from_bits;
+    let mut seen = vec![(0u32, 0f32, 0f32, 0f32, 0f32); rows.len()];
+    for w in rows {
+        let (word, bit) = (w[0] as usize / 64, w[0] % 64);
+        let at = before[word] + (bits[word] & ((1u64 << bit) - 1)).count_ones();
+        seen[at as usize] = (w[0], f(w[1]), f(w[2]), f(w[3]), f(w[4]));
+    }
+    seen
 }
 
 impl ZBuffer {
@@ -279,6 +281,7 @@ impl ZBuffer {
             layout,
             visible,
             visible_layout,
+            last_seen: std::sync::atomic::AtomicU64::new(0),
         })
     }
 
@@ -324,9 +327,14 @@ impl ZBuffer {
             contents: bytemuck::cast_slice(grids),
             usage: wgpu::BufferUsages::STORAGE,
         });
-        // a quarter of the points first (an image sees some 13% of the points it may), all of
-        // them when that is short
-        let mut places = (total / 4).max(1 << 16);
+        // room for a quarter of the points, or for a quarter more than the last image saw (a
+        // wide outdoor recording's images see a quarter of a cloud: two passes each before),
+        // all of them when that is short
+        let last = self.last_seen.load(std::sync::atomic::Ordering::Relaxed);
+        let mut places = (total / 4)
+            .max(last + last / 4)
+            .max(1 << 16)
+            .min(total.max(1 << 16));
         loop {
             let (count, out) =
                 self.dispatch_visible(cam, reach, graze, blocks, zw, zh, &grid, places)?;
@@ -334,24 +342,11 @@ impl ZBuffer {
                 places = count as u64;
                 continue;
             }
-            // in block order (the threads wrote them in any order): sorted by the block order
-            // with the place written, a radix sort of 11 bits at a time
-            let mut keys: Vec<u64> = out
-                .as_chunks::<5>()
-                .0
-                .iter()
-                .enumerate()
-                .map(|(k, w)| ((w[0] as u64) << 32) | k as u64)
-                .collect();
-            radix_sort_high(&mut keys);
-            let f = f32::from_bits;
-            return Ok(keys
-                .iter()
-                .map(|&x| {
-                    let w = &out[5 * (x as u32 as usize)..];
-                    (w[0], f(w[1]), f(w[2]), f(w[3]), f(w[4]))
-                })
-                .collect());
+            self.last_seen
+                .store(count as u64, std::sync::atomic::Ordering::Relaxed);
+            // in block order (the threads wrote them in any order): each point's place among them
+            // by its index, which only it has (a bit per index, then the bits before it)
+            return Ok(in_index_order(&out));
         }
     }
     /// One pass of [`ZBuffer::visible`] with room for `places` points: their number, and those
@@ -493,14 +488,18 @@ impl ZBuffer {
             label: Some("read"),
         });
         enc.copy_buffer_to_buffer(buf, 0, &back, 0, bytes);
-        self.gpu.queue.submit([enc.finish()]);
+        let index = self.gpu.queue.submit([enc.finish()]);
         let slice = back.slice(..);
         let (tx, rx) = std::sync::mpsc::channel();
         slice.map_async(wgpu::MapMode::Read, move |r| {
             let _ = tx.send(r);
         });
-        dev.poll(wgpu::PollType::wait_indefinitely())
-            .context("GPU poll")?;
+        // this thread's work only (not the other threads' submitted since)
+        dev.poll(wgpu::PollType::Wait {
+            submission_index: Some(index),
+            timeout: None,
+        })
+        .context("GPU poll")?;
         rx.recv().context("GPU map")?.context("GPU map")?;
         let words = {
             let view = slice
@@ -633,14 +632,18 @@ impl ZBuffer {
             kept.push((uni, lst, bind));
         }
         enc.copy_buffer_to_buffer(&zb, 0, &back, 0, (n * 4) as u64);
-        self.gpu.queue.submit([enc.finish()]);
+        let index = self.gpu.queue.submit([enc.finish()]);
         let slice = back.slice(..);
         let (tx, rx) = std::sync::mpsc::channel();
         slice.map_async(wgpu::MapMode::Read, move |r| {
             let _ = tx.send(r);
         });
-        dev.poll(wgpu::PollType::wait_indefinitely())
-            .context("GPU poll")?;
+        // this thread's work only (not the other threads' submitted since)
+        dev.poll(wgpu::PollType::Wait {
+            submission_index: Some(index),
+            timeout: None,
+        })
+        .context("GPU poll")?;
         rx.recv().context("GPU map")?.context("GPU map")?;
         let out: Vec<f32> = {
             let view = slice
@@ -660,19 +663,34 @@ impl ZBuffer {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn radix_sort_orders_by_the_high_bits() {
+    fn the_points_come_in_the_order_of_their_indices_as_sorted() {
+        // indices once each, in a pseudo-random order, each with its four values
         let mut seed = 7u64;
-        let mut keys: Vec<u64> = (0..100_000u64)
-            .map(|k| {
-                seed = seed
-                    .wrapping_mul(6364136223846793005)
-                    .wrapping_add(1442695040888963407);
-                ((seed >> 37) << 32) | k
+        let mut idx: Vec<u32> = (0..100_000u32).map(|k| k * 3 + (k % 7)).collect();
+        for k in (1..idx.len()).rev() {
+            seed = seed
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            idx.swap(k, (seed >> 33) as usize % (k + 1));
+        }
+        let out: Vec<u32> = idx
+            .iter()
+            .flat_map(|&i| {
+                [
+                    i,
+                    (i as f32).to_bits(),
+                    1f32.to_bits(),
+                    2f32.to_bits(),
+                    3f32.to_bits(),
+                ]
             })
             .collect();
-        let mut want = keys.clone();
-        want.sort_by_key(|k| k >> 32);
-        super::radix_sort_high(&mut keys);
-        assert_eq!(keys, want);
+        let got = super::in_index_order(&out);
+        let mut want = idx.clone();
+        want.sort_unstable();
+        assert_eq!(got.len(), want.len());
+        for (g, w) in got.iter().zip(&want) {
+            assert_eq!((g.0, g.1), (*w, *w as f32));
+        }
     }
 }

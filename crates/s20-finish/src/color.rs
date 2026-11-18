@@ -432,11 +432,18 @@ fn window_minima(z: &[f32], w: usize, h: usize, n: usize) -> Vec<Vec<f32>> {
     out
 }
 
+thread_local! {
+    /// Each cell's place among the cells of the image a thread colours from (u32::MAX: not
+    /// among them), left empty between images.
+    static CELL_PLACE: std::cell::RefCell<Vec<u32>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
 /// Seconds of the views summed over the threads (nanoseconds): the coloured candidates, the
-/// z-buffer, the occlusion test, reading and decoding the image, the colours and scores; and
-/// the images whose view was empty or decoded.
-static SECONDS: [std::sync::atomic::AtomicU64; 7] =
-    [const { std::sync::atomic::AtomicU64::new(0) }; 7];
+/// z-buffer, the occlusion test, reading and decoding the image, the colours and scores
+/// (`STAGE_NAMES`); the images whose view was empty or decoded; then the views' cell means and
+/// the merge (on one thread).
+static SECONDS: [std::sync::atomic::AtomicU64; 9] =
+    [const { std::sync::atomic::AtomicU64::new(0) }; 9];
 const STAGE_NAMES: [&str; 5] = ["candidates", "z-buffer", "occlusion", "decode", "colours"];
 fn lap(k: usize, t: &mut std::time::Instant) {
     SECONDS[k].fetch_add(
@@ -1248,54 +1255,82 @@ fn gather(
         let Some(v) = scene.view(&poses[k], omega[k], a, &coloured)? else {
             return Ok(None);
         };
+        let mut t = std::time::Instant::now();
         // The image's mean colour per cell it sees, and per point the means of the 8
-        // cells (same facing) around it, trilinear: no step at the cell borders.
-        let mut sums: FxHashMap<u32, ([f64; 3], u32)> = FxHashMap::default();
-        for (&s, c) in v.pts.iter().zip(&v.rgb) {
-            let e = sums
-                .entry(cells.of_point[s as usize])
-                .or_insert(([0.; 3], 0));
-            for j in 0..3 {
-                e.0[j] += c[j] as f64;
+        // cells (same facing) around it, trilinear: no step at the cell borders. The cells
+        // found through the thread's index of them (a hash map's lookups cost 4650 images as
+        // long as the occlusion test), each sum in the points' order as before.
+        let nc = cells.key.len();
+        let (pm, gain) = CELL_PLACE.with_borrow_mut(|place| {
+            if place.len() < nc {
+                place.resize(nc, u32::MAX);
             }
-            e.1 += 1;
-        }
-        let means: FxHashMap<u32, [f64; 3]> = sums
-            .iter()
-            .map(|(&c, (s, m))| (c, s.map(|x| x / *m as f64)))
-            .collect();
-        let pm: Vec<[f32; 3]> = v
-            .pts
-            .iter()
-            .map(|&s| {
-                let x = p[part.ids[s as usize] as usize];
-                let g = x.map(|x| x as f64 * cells.inv - 0.5);
-                let b = g.map(|x| x.floor());
-                let fr = [g[0] - b[0], g[1] - b[1], g[2] - b[2]];
-                let (mut acc, mut ws) = ([0f64; 3], 0f64);
-                for (o, &c) in cells.around[s as usize].iter().enumerate() {
-                    let off = [o & 1, (o >> 1) & 1, (o >> 2) & 1];
-                    let Some(m) = means.get(&c) else { continue };
-                    let w = (0..3)
-                        .map(|d| if off[d] == 1 { fr[d] } else { 1. - fr[d] })
-                        .product::<f64>()
-                        + 1e-9;
-                    for j in 0..3 {
-                        acc[j] += w * m[j];
+            let mut found: Vec<u32> = Vec::new();
+            let mut sums: Vec<([f64; 3], u32)> = Vec::new();
+            for (&s, c) in v.pts.iter().zip(&v.rgb) {
+                let cell = cells.of_point[s as usize] as usize;
+                let at = match place[cell] {
+                    u32::MAX => {
+                        place[cell] = sums.len() as u32;
+                        found.push(cell as u32);
+                        sums.push(([0.; 3], 0));
+                        sums.len() - 1
                     }
-                    ws += w;
+                    at => at as usize,
+                };
+                let e = &mut sums[at];
+                for j in 0..3 {
+                    e.0[j] += c[j] as f64;
                 }
-                acc.map(|x| (x / ws.max(1e-12)) as f32)
-            })
-            .collect();
-        // only those the gains take (`gain_entry`): of 4650 images, 1.3 billion entries (42 GB)
-        // before
-        let gain: Vec<(u32, u32, [f32; 3])> = sums
-            .iter()
-            .filter(|(c, _)| cells.owned[**c as usize])
-            .map(|(&c, (s, m))| (c, *m, s.map(|x| (x / *m as f64) as f32)))
-            .filter(|&(_, m, rgb)| gain_entry(m, &rgb))
-            .collect();
+                e.1 += 1;
+            }
+            let means: Vec<[f64; 3]> = sums.iter().map(|(s, m)| s.map(|x| x / *m as f64)).collect();
+            let pm: Vec<[f32; 3]> = v
+                .pts
+                .iter()
+                .map(|&s| {
+                    let x = p[part.ids[s as usize] as usize];
+                    let g = x.map(|x| x as f64 * cells.inv - 0.5);
+                    let b = g.map(|x| x.floor());
+                    let fr = [g[0] - b[0], g[1] - b[1], g[2] - b[2]];
+                    let (mut acc, mut ws) = ([0f64; 3], 0f64);
+                    for (o, &c) in cells.around[s as usize].iter().enumerate() {
+                        let off = [o & 1, (o >> 1) & 1, (o >> 2) & 1];
+                        // (u32::MAX: no cell there)
+                        let Some(&at) = place.get(c as usize) else {
+                            continue;
+                        };
+                        if at == u32::MAX {
+                            continue;
+                        }
+                        let m = &means[at as usize];
+                        let w = (0..3)
+                            .map(|d| if off[d] == 1 { fr[d] } else { 1. - fr[d] })
+                            .product::<f64>()
+                            + 1e-9;
+                        for j in 0..3 {
+                            acc[j] += w * m[j];
+                        }
+                        ws += w;
+                    }
+                    acc.map(|x| (x / ws.max(1e-12)) as f32)
+                })
+                .collect();
+            // only those the gains take (`gain_entry`): of 4650 images, 1.3 billion entries
+            // (42 GB) before
+            let gain: Vec<(u32, u32, [f32; 3])> = found
+                .iter()
+                .zip(&sums)
+                .filter(|(c, _)| cells.owned[**c as usize])
+                .map(|(&c, (s, m))| (c, *m, s.map(|x| (x / *m as f64) as f32)))
+                .filter(|&(_, m, rgb)| gain_entry(m, &rgb))
+                .collect();
+            // the index left empty for the next image
+            for &c in &found {
+                place[c as usize] = u32::MAX;
+            }
+            (pm, gain)
+        });
         let mut starts = vec![0usize; shards + 1];
         for &s in &v.pts {
             starts[s as usize / run + 1] += 1;
@@ -1310,6 +1345,7 @@ fn gather(
             by_shard[fill[q]] = j as u32;
             fill[q] += 1;
         }
+        lap(7, &mut t);
         Ok(Some((v, pm, gain, by_shard, starts)))
     };
     // Merge in image order: replace the worst kept view when this one scores higher.
@@ -1402,7 +1438,11 @@ fn gather(
             pending.insert(j, r);
             while let Some(r) = pending.remove(&at) {
                 match r.and_then(|r| job.check().map(|_| r)) {
-                    Ok(r) => merge(near[at], r),
+                    Ok(r) => {
+                        let mut t = std::time::Instant::now();
+                        merge(near[at], r);
+                        lap(8, &mut t);
+                    }
                     Err(e) => {
                         failed.get_or_insert(e);
                         stop.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -1989,8 +2029,10 @@ pub fn colorize(
         })
         .collect();
     job.log(&format!(
-        "colour seconds: gathering {gathered:.0} (CPU: {}; views empty {}, decoded {}), gains {:.0}, blending {:.0}",
+        "colour seconds: gathering {gathered:.0} (CPU: {}, cell means {:.0}; merge on one thread {:.0}; views empty {}, decoded {}), gains {:.0}, blending {:.0}",
         cpu.join(", "),
+        SECONDS[7].swap(0, std::sync::atomic::Ordering::Relaxed) as f64 * 1e-9,
+        SECONDS[8].swap(0, std::sync::atomic::Ordering::Relaxed) as f64 * 1e-9,
         SECONDS[5].swap(0, std::sync::atomic::Ordering::Relaxed),
         SECONDS[6].swap(0, std::sync::atomic::Ordering::Relaxed),
         gained - gathered,
