@@ -117,7 +117,6 @@ pub struct ColourPart {
     around: wgpu::Buffer,
     owned: wgpu::Buffer,
     cells: u32,
-    inv: f32,
     sets: Mutex<(Vec<Set>, usize)>,
     free: Condvar,
 }
@@ -141,7 +140,8 @@ pub struct Shot<'a> {
     /// the camera's centre (the points' frame) and the turn term (turn weight x omega / 30)
     pub centre: [f32; 3],
     pub turn: f32,
-    /// soft and hard angles off the axis, the slope beyond the soft one
+    /// soft and hard angles off the axis (the hard one the largest f32 not beyond it, so that
+    /// "beyond" is as in double), the slope beyond the soft one
     pub soft: f32,
     pub hard: f32,
     pub slope: f32,
@@ -213,17 +213,23 @@ impl ZBuffer {
     }
 
     /// A part's points and cells for [`ZBuffer::colours`]: each point's slot (in block order,
-    /// u32::MAX where not coloured), each slot's cell and the 8 cells around it, the cells the
-    /// part owns, and the cells' size.
+    /// u32::MAX where not coloured), each slot's cell and its place among the 8 cells around it
+    /// (the grid's fractions, 10 bits each), those cells, the cells the part owns, and the most
+    /// points of a cell (its colour sums must not overflow).
     pub fn colour_part(
         &self,
         slot_of: &[u32],
-        cell_of: &[u32],
+        cell_of: &[[u32; 2]],
         around: &[[u32; 8]],
         owned: &[bool],
-        cell: f64,
+        most_in_cell: usize,
     ) -> Result<ColourPart> {
         anyhow::ensure!(self.no_normals.is_none(), "no normals on the GPU");
+        // a cell's sum of colours x 256 (at most 65535 a point) within 32 bits
+        anyhow::ensure!(
+            (most_in_cell as u64) * 65535 <= u32::MAX as u64,
+            "{most_in_cell} points in a cell: their colour sums would overflow"
+        );
         self.pipes().context("no colour passes")?;
         let most = self.max_places() * 20;
         anyhow::ensure!(
@@ -234,11 +240,10 @@ impl ZBuffer {
             let owned: Vec<u32> = owned.iter().map(|&o| o as u32).collect();
             Ok(ColourPart {
                 slot_of: upload(self, slot_of, "colour slots")?,
-                cell_of: upload(self, cell_of, "colour cells")?,
+                cell_of: upload(self, cell_of.as_flattened(), "colour cells")?,
                 around: upload(self, around.as_flattened(), "colour around")?,
                 owned: upload(self, &owned, "colour owned")?,
                 cells: owned.len() as u32,
-                inv: (1. / cell) as f32,
                 sets: Mutex::new((Vec::new(), 0)),
                 free: Condvar::new(),
             })
@@ -337,7 +342,12 @@ impl ZBuffer {
         if total == 0 {
             return Ok(empty);
         }
-        let most = self.max_places();
+        // the points the results' read-back buffer holds with their gain entries (21 words of 20
+        // for each 20 points) within the GPU's largest buffer
+        let most = self
+            .max_places()
+            .min(self.gpu.limits.max_buffer_size.saturating_sub(16) / 21)
+            .max(1);
         use wgpu::BufferUsages as U;
         // the image, padded to whole words
         let bytes = (shot.image.len() as u64).next_multiple_of(4);
@@ -387,8 +397,8 @@ impl ZBuffer {
             grown(
                 dev,
                 &mut set.back,
-                16 + places * 40,
-                16 + most * 40,
+                16 + (places + room) * 20,
+                16 + (most + most / 20 + 1) * 20,
                 U::MAP_READ | U::COPY_DST,
                 "colour read back",
             );
@@ -416,7 +426,7 @@ impl ZBuffer {
                 let end = self.parts.get(k + 1).map_or(u32::MAX, |p| p.0);
                 let params = Params {
                     t: [shot.centre[0], shot.centre[1], shot.centre[2], shot.turn],
-                    angles: [shot.soft, shot.hard, shot.slope, part.inv],
+                    angles: [shot.soft, shot.hard, shot.slope, 0.],
                     size: [shot.width, shot.height, places as u32, part.cells],
                     first: [*first, end, room as u32, 0],
                 };

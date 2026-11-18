@@ -397,8 +397,15 @@ pub fn read_image(path: &Path) -> Result<Vec<u8>> {
 fn open_bag(src: &Source) -> Result<Arc<fs::File>> {
     static BAGS: OnceLock<Mutex<HashMap<PathBuf, Arc<fs::File>>>> = OnceLock::new();
     let mut bags = BAGS.get_or_init(Default::default).lock().unwrap();
+    // (the handle's file still the one at the path: the same size and time)
+    let same = |f: &fs::File| -> bool {
+        let (Ok(a), Ok(b)) = (f.metadata(), fs::metadata(&src.bag)) else {
+            return false;
+        };
+        a.len() == src.size && b.len() == a.len() && a.modified().ok() == b.modified().ok()
+    };
     if let Some(f) = bags.get(&src.bag)
-        && f.metadata().is_ok_and(|m| m.len() == src.size)
+        && same(f)
     {
         return Ok(f.clone());
     }

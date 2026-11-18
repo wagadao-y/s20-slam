@@ -845,7 +845,12 @@ impl Scene<'_> {
             centre: [0, 1, 2].map(|d| pose.t[d] as f32),
             turn: (a.turn_weight * omega / 30.) as f32,
             soft: a.soft_theta_deg.to_radians() as f32,
-            hard: a.max_theta_deg.to_radians() as f32,
+            hard: {
+                // (an angle beyond it in single precision as in double)
+                let h = a.max_theta_deg.to_radians();
+                let f = h as f32;
+                if f as f64 > h { f.next_down() } else { f }
+            },
             slope: a.theta_slope as f32,
             image: &img,
             width: iw as u32,
@@ -1127,6 +1132,7 @@ impl Kept {
 }
 
 /// A gain entry: cell, image, points, mean colour.
+#[cfg(test)]
 type Entry = (u64, u32, u32, [f32; 3]);
 
 /// Exposure gain per image and channel: log mean colour of image k over cell c ~ L_c - g_k, by
@@ -1137,11 +1143,26 @@ fn gain_entry(points: u32, rgb: &[f32; 3]) -> bool {
     rgb.iter().all(|&c| c > 8. && c < 245.) && points >= 20
 }
 
+#[cfg(test)]
 fn gains(entries: &[Entry], images: usize) -> Vec<[f32; 3]> {
-    // (in parallel, each sum in the entries' order as one after another: a cell's within its
-    // run of entries, an image's over its entries in their order)
-    // the entries taken, of the cells seen twice or more (the entries sorted, so a cell's are one
-    // run), as four columns: cell, image, weight (points) and log colour (40 bytes an entry)
+    solve_gains(columns_of_sorted(entries), images)
+}
+
+/// The gain entries the gains take, of the cells seen twice or more, in the order of the cells'
+/// keys then the images, as four columns: cell (its place in that order), image, weight (points)
+/// and log colour (40 bytes an entry); and where each cell's entries start.
+struct GainColumns {
+    cs: Vec<u32>,
+    ks: Vec<u32>,
+    ws: Vec<u32>,
+    ys: Vec<[f64; 3]>,
+    cell_start: Vec<usize>,
+}
+
+/// [`GainColumns`] of entries sorted by cell key and image.
+#[cfg(test)]
+fn columns_of_sorted(entries: &[Entry]) -> GainColumns {
+    // (a cell's entries are one run)
     let (mut cs, mut ks, mut ws, mut ys) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
     let mut cell_start = vec![0usize];
     let mut run: Vec<&Entry> = Vec::new();
@@ -1165,6 +1186,107 @@ fn gains(entries: &[Entry], images: usize) -> Vec<[f32; 3]> {
         }
         a = b;
     }
+    GainColumns {
+        cs,
+        ks,
+        ws,
+        ys,
+        cell_start,
+    }
+}
+
+/// A part's gain entries: per image, in the images' order, its entries (the part's cell, points,
+/// mean colour); and its cells' keys (the part's cells are in their order).
+struct PartGains {
+    keys: Vec<u64>,
+    images: Vec<ImageGains>,
+}
+
+/// An image's gain entries: the image, then per entry the part's cell, points and mean colour.
+type ImageGains = (u32, Vec<(u32, u32, [f32; 3])>);
+
+/// [`GainColumns`] of the parts' entries: the cells in the order of their keys (a cell is a
+/// part's only), each cell's entries in the images' order, as sorting all the entries by key and
+/// image did, put in place by counting instead (the parts' lists given back as they are read).
+fn columns_of_parts(parts: Vec<PartGains>) -> GainColumns {
+    // each part cell's entries taken, the cells seen twice or more in the keys' order
+    let counts: Vec<Vec<u32>> = parts
+        .iter()
+        .map(|pg| {
+            let mut n = vec![0u32; pg.keys.len()];
+            for (_, list) in &pg.images {
+                for e in list.iter().filter(|e| gain_entry(e.1, &e.2)) {
+                    n[e.0 as usize] += 1;
+                }
+            }
+            n
+        })
+        .collect();
+    let mut order: Vec<(u64, u32, u32)> = parts
+        .iter()
+        .zip(&counts)
+        .enumerate()
+        .flat_map(|(q, (pg, n))| {
+            n.iter()
+                .enumerate()
+                .filter(|&(_, &m)| m >= 2)
+                .map(move |(c, _)| (pg.keys[c], q as u32, c as u32))
+        })
+        .collect();
+    order.par_sort_unstable();
+    let mut global: Vec<Vec<u32>> = counts.iter().map(|n| vec![u32::MAX; n.len()]).collect();
+    let mut cell_start = Vec::with_capacity(order.len() + 1);
+    cell_start.push(0usize);
+    for (g, &(_, q, c)) in order.iter().enumerate() {
+        global[q as usize][c as usize] = g as u32;
+        cell_start.push(cell_start[g] + counts[q as usize][c as usize] as usize);
+    }
+    drop(order);
+    drop(counts);
+    let total = *cell_start.last().unwrap();
+    let (mut cs, mut ks, mut ws, mut ys) = (
+        vec![0u32; total],
+        vec![0u32; total],
+        vec![0u32; total],
+        vec![[0f64; 3]; total],
+    );
+    let mut at = cell_start.clone();
+    for (pg, map) in parts.into_iter().zip(&global) {
+        for (k, list) in pg.images {
+            for e in list.iter().filter(|e| gain_entry(e.1, &e.2)) {
+                let g = map[e.0 as usize];
+                if g == u32::MAX {
+                    continue;
+                }
+                let i = at[g as usize];
+                at[g as usize] += 1;
+                cs[i] = g;
+                ks[i] = k;
+                ws[i] = e.1;
+                ys[i] = e.2.map(|c| (c as f64).ln());
+            }
+        }
+    }
+    GainColumns {
+        cs,
+        ks,
+        ws,
+        ys,
+        cell_start,
+    }
+}
+
+/// Exposure gain per image and channel from [`GainColumns`] (see [`gains`]).
+fn solve_gains(cols: GainColumns, images: usize) -> Vec<[f32; 3]> {
+    // (in parallel, each sum in the entries' order as one after another: a cell's within its
+    // run of entries, an image's over its entries in their order)
+    let GainColumns {
+        cs,
+        ks,
+        ws,
+        ys,
+        cell_start,
+    } = cols;
     let nc = cell_start.len() - 1;
     assert!(
         cs.len() < u32::MAX as usize,
@@ -1290,7 +1412,7 @@ fn gather(
     omega: &[f64],
     a: &ColorParams,
     job: &Job,
-    entries: &mut Vec<Entry>,
+    entries: &mut Vec<ImageGains>,
 ) -> Result<(Kept, Cells)> {
     let p = scene.p;
     let grown = part.out.grow(PART_MARGIN);
@@ -1335,12 +1457,32 @@ fn gather(
                 .iter()
                 .map(|&i| coloured.slot[i as usize])
                 .collect();
+            // each slot's cell and its place among the cells around it, in double here (in
+            // single precision a point at a cell's border took the other side's colour)
+            let inv = 1. / a.cell;
+            let cell_of: Vec<[u32; 2]> = part
+                .ids
+                .iter()
+                .zip(&cells.of_point)
+                .map(|(&i, &c)| {
+                    let f = p[i as usize].map(|x| {
+                        let g = x as f64 * inv - 0.5;
+                        ((g - g.floor()) * 1023.).round() as u32
+                    });
+                    [c, f[0] | f[1] << 10 | f[2] << 20]
+                })
+                .collect();
+            let mut in_cell = vec![0usize; cells.key.len()];
+            for &c in &cells.of_point {
+                in_cell[c as usize] += 1;
+            }
+            let most_in_cell = in_cell.into_iter().max().unwrap_or(0);
             match g.colour_part(
                 &slot_of,
-                &cells.of_point,
+                &cell_of,
                 &cells.around,
                 &cells.owned,
-                a.cell,
+                most_in_cell,
             ) {
                 Ok(c) => Some((g, c)),
                 Err(e) => {
@@ -1470,15 +1612,11 @@ fn gather(
 
     // Merge in image order: replace the worst kept view when this one scores higher.
     let mut merge = |k: usize, r: Option<Seen>| {
-        let Some((v, by_shard, starts)) = r else {
+        let Some((mut v, by_shard, starts)) = r else {
             return;
         };
         if a.gain {
-            entries.extend(
-                v.gain
-                    .iter()
-                    .map(|&(c, m, rgb)| (cells.key[c as usize], k as u32, m, rgb)),
-            );
+            entries.push((k as u32, std::mem::take(&mut v.gain)));
         }
         let Kept {
             s,
@@ -2030,7 +2168,7 @@ pub fn colorize(
     }
     let _cleanup = several.then(|| crate::tiles::TempDir(tmp.to_path_buf()));
     let mut slot = vec![u32::MAX; p.len()];
-    let mut entries: Vec<Entry> = Vec::new();
+    let mut entries: Vec<PartGains> = Vec::new();
     let mut memory: Vec<Kept> = Vec::new();
     let part_of = |out: Rect| {
         let grown = out.grow(PART_MARGIN);
@@ -2045,7 +2183,8 @@ pub fn colorize(
         for (s, &i) in part.ids.iter().enumerate() {
             slot[i as usize] = s as u32;
         }
-        let (kept, _) = gather(
+        let mut images = Vec::new();
+        let (kept, cells) = gather(
             &scene,
             &part,
             &slot,
@@ -2053,8 +2192,12 @@ pub fn colorize(
             &omega,
             a,
             &share(k, 0.01, 0.81),
-            &mut entries,
+            &mut images,
         )?;
+        entries.push(PartGains {
+            keys: cells.key,
+            images,
+        });
         for &i in &part.ids {
             slot[i as usize] = u32::MAX;
         }
@@ -2075,10 +2218,11 @@ pub fn colorize(
     let gathered = start.elapsed().as_secs_f64();
     // 2. the gains
     let t = std::time::Instant::now();
-    entries.par_sort_unstable_by(|x, y| x.0.cmp(&y.0).then(x.1.cmp(&y.1)));
+    let cols = columns_of_parts(entries);
+    let taken = cols.cs.len();
     let sorted = t.elapsed().as_secs_f64();
     let mut g: Vec<[f32; 3]> = if a.gain {
-        gains(&entries, poses.len())
+        solve_gains(cols, poses.len())
     } else {
         vec![[1.; 3]; poses.len()]
     };
@@ -2088,12 +2232,10 @@ pub fn colorize(
         g = local_gains(&g, &times, a.gain_window);
     }
     job.log(&format!(
-        "colour: gains of {} entries (cell and image): sorted {sorted:.1} s, solved {:.1} s, over time {:.1} s",
-        entries.len(),
+        "colour: gains of {taken} entries (cell and image, of cells seen twice or more): put in order {sorted:.1} s, solved {:.1} s, over time {:.1} s",
         solved - sorted,
         t.elapsed().as_secs_f64() - solved
     ));
-    drop(entries);
     if a.gain {
         let mut q: Vec<[f32; 3]> = g.clone();
         let quantile = |q: &mut Vec<[f32; 3]>, j: usize, f: f64| {
@@ -2270,6 +2412,36 @@ mod tests {
         entries.sort_unstable_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
         entries.dedup_by(|a, b| a.0 == b.0 && a.1 == b.1);
         let (a, b) = (gains(&entries, 40), gains_one_by_one(&entries, 40));
+        // the same entries as two parts' lists (cells by the key's parity), image by image: the
+        // same columns as sorted
+        let want = columns_of_sorted(&entries);
+        let parts: Vec<PartGains> = (0..2u64)
+            .map(|q| {
+                let keys: Vec<u64> = {
+                    let mut k: Vec<u64> =
+                        entries.iter().map(|e| e.0).filter(|k| k % 2 == q).collect();
+                    k.dedup();
+                    k
+                };
+                let images = (0..40u32)
+                    .map(|i| {
+                        let list = entries
+                            .iter()
+                            .filter(|e| e.1 == i && e.0 % 2 == q)
+                            .map(|e| (keys.binary_search(&e.0).unwrap() as u32, e.2, e.3))
+                            .collect();
+                        (i, list)
+                    })
+                    .collect();
+                PartGains { keys, images }
+            })
+            .collect();
+        let got = columns_of_parts(parts);
+        assert_eq!(got.cs, want.cs);
+        assert_eq!(got.ks, want.ks);
+        assert_eq!(got.ws, want.ws);
+        assert_eq!(got.ys, want.ys);
+        assert_eq!(got.cell_start, want.cell_start);
         assert!(a.iter().any(|g| (g[0] - 1.).abs() > 1e-3));
         for (p, q) in a.iter().zip(&b) {
             assert_eq!(p.map(f32::to_bits), q.map(f32::to_bits));

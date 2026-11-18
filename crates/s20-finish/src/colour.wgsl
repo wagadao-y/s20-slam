@@ -8,7 +8,7 @@
 
 struct Params {
     t: vec4f,      // the camera's centre, the image's turn term (turn weight x omega / 30)
-    angles: vec4f, // soft angle, hard angle, theta slope, the cells' inverse size
+    angles: vec4f, // soft angle, hard angle (the largest f32 not beyond it), theta slope, -
     size: vec4u,   // image width, height, places, cells
     first: vec4u,  // first point of this points' buffer, the end of its range, room for gain entries, -
 }
@@ -21,8 +21,9 @@ struct Params {
 @group(0) @binding(4) var<storage, read_write> counts: array<atomic<u32>>;
 // per point (block order): its slot, u32 max where it is not coloured
 @group(0) @binding(5) var<storage, read> slot_of: array<u32>;
-// per slot: its cell, then the 8 cells around it (u32 max: none)
-@group(0) @binding(6) var<storage, read> cell_of: array<u32>;
+// per slot: its cell and its place among the 8 cells around it (the fractions of the cells'
+// grid, found on the CPU in double: 10 bits each), then those 8 cells (u32 max: none)
+@group(0) @binding(6) var<storage, read> cell_of: array<vec2u>;
 @group(0) @binding(7) var<storage, read> around: array<u32>;
 // per cell: whether the part owns it (its gain entries)
 @group(0) @binding(8) var<storage, read> owned: array<u32>;
@@ -101,7 +102,7 @@ fn colour(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) lid: 
     res[5u * k + 1u] = bitcast<u32>(s);
     res[5u * k + 2u] = c.x | (c.y << 16u);
     res[5u * k + 3u] = c.z;
-    let cell = cell_of[slot];
+    let cell = cell_of[slot].x;
     atomicAdd(&sums[4u * cell], c.x);
     atomicAdd(&sums[4u * cell + 1u], c.y);
     atomicAdd(&sums[4u * cell + 2u], c.z);
@@ -119,10 +120,8 @@ fn around_mean(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) 
         return;
     }
     let s = slot & 0x7fffffffu;
-    let i = vis[5u * k] - P.first.x;
-    let q = vec3f(pts[3u * i], pts[3u * i + 1u], pts[3u * i + 2u]);
-    let g = q * P.angles.w - 0.5;
-    let fr = g - floor(g);
+    let f = cell_of[s].y;
+    let fr = vec3f(f32(f & 1023u), f32((f >> 10u) & 1023u), f32((f >> 20u) & 1023u)) / 1023.0;
     var acc = vec3f(0.0);
     var ws = 0.0;
     for (var o = 0u; o < 8u; o++) {
