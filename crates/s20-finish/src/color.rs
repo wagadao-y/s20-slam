@@ -802,6 +802,81 @@ impl Scene<'_> {
         c: &Coloured,
         limit: f64,
     ) -> Result<Seen> {
+        let Some((zc, blocks, zw, zh, grids, reach)) = self.gpu_setup(g, pose, a, c, limit)? else {
+            return Ok(Vec::new());
+        };
+        let mut seen = g.visible(&zc, reach, a.graze, &blocks, zw, zh, &grids)?;
+        seen.retain(|s| c.slot[self.blocks.order[s.0 as usize] as usize] != u32::MAX);
+        Ok(seen)
+    }
+
+    /// The coloured points of an image on the GPU (see `gpu_colour`): as [`Scene::view`] and
+    /// the cell means of `gather`, the image decoded here. None: it sees none of them.
+    fn colours_on_gpu(
+        &self,
+        g: &crate::gpu::ZBuffer,
+        part: &crate::gpu_colour::ColourPart,
+        pose: &Pose,
+        omega: f64,
+        a: &ColorParams,
+        c: &Coloured,
+    ) -> Result<Option<crate::gpu_colour::Colours>> {
+        let limit = 100f64.to_radians();
+        let mut t = std::time::Instant::now();
+        let Some((zc, blocks, zw, zh, grids, reach)) = self.gpu_setup(g, pose, a, c, limit)? else {
+            SECONDS[5].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            return Ok(None);
+        };
+        lap(1, &mut t);
+        SECONDS[6].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let img_path = Path::new(&pose.name);
+        let img_path = if img_path.is_absolute() {
+            img_path.to_path_buf()
+        } else {
+            self.images.join(img_path)
+        };
+        let (img, iw) = decode(&s20_io::dataset::read_image(&img_path)?)
+            .with_context(|| format!("decode {}", img_path.display()))?;
+        lap(3, &mut t);
+        let shot = crate::gpu_colour::Shot {
+            cam: &zc,
+            reach,
+            graze: a.graze,
+            centre: [0, 1, 2].map(|d| pose.t[d] as f32),
+            turn: (a.turn_weight * omega / 30.) as f32,
+            soft: a.soft_theta_deg.to_radians() as f32,
+            hard: a.max_theta_deg.to_radians() as f32,
+            slope: a.theta_slope as f32,
+            image: &img,
+            width: iw as u32,
+            height: (img.len() / (3 * iw.max(1))) as u32,
+        };
+        let out = g.colours(part, &shot, &blocks, zw, zh, &grids)?;
+        lap(4, &mut t);
+        Ok((!out.pts.is_empty()).then_some(out))
+    }
+
+    /// The camera, the blocks of the coloured points' box, the z-buffer's grid (its window
+    /// minima of 1..6 cells, then its depth slopes) and the occlusion's reach of an image on the
+    /// GPU; None when no block is near.
+    #[allow(clippy::type_complexity)]
+    fn gpu_setup(
+        &self,
+        g: &crate::gpu::ZBuffer,
+        pose: &Pose,
+        a: &ColorParams,
+        c: &Coloured,
+        limit: f64,
+    ) -> Result<
+        Option<(
+            crate::gpu::ZCamera,
+            Vec<crate::gpu::Block>,
+            usize,
+            usize,
+            Vec<f32>,
+            f32,
+        )>,
+    > {
         let cam = if pose.left { &self.left } else { &self.right };
         let (w, h) = (cam.width as usize, cam.height as usize);
         let half_diag = 0.5 * 3f64.sqrt() * BLOCK;
@@ -841,7 +916,7 @@ impl Scene<'_> {
             }
         }
         if blocks.is_empty() {
-            return Ok(Vec::new());
+            return Ok(None);
         }
         let zc = self.zcamera(pose, a, limit);
         let zb = g.fill(&zc, &near, zw, zh, [0, 0], [zw as i64 - 1, zh as i64 - 1])?;
@@ -855,9 +930,7 @@ impl Scene<'_> {
             grids.extend(std::iter::repeat_n(0f32, zw * zh));
         }
         let reach = (cam.a11 * a.spacing / ZCELL as f64) as f32;
-        let mut seen = g.visible(&zc, reach, a.graze, &blocks, zw, zh, &grids)?;
-        seen.retain(|s| c.slot[self.blocks.order[s.0 as usize] as usize] != u32::MAX);
-        Ok(seen)
+        Ok(Some((zc, blocks, zw, zh, grids, reach)))
     }
 
     /// The single precision camera of the GPU's passes.
@@ -1248,14 +1321,62 @@ fn gather(
     let shards = np.div_ceil(run);
     // per image: its view, the cell means around each point, the cells' means for the gains, and
     // the view's points by shard (where each shard's start)
-    type Seen = (
-        View,
-        Vec<[f32; 3]>,
-        Vec<(u32, u32, [f32; 3])>,
-        Vec<u32>,
-        Vec<usize>,
-    );
+    type Seen = (crate::gpu_colour::Colours, Vec<u32>, Vec<usize>);
+    // the colours on the GPU when it can (each point's slot by block order, the cells), else
+    // on the CPU
+    let on_gpu = scene
+        .gpu
+        .as_ref()
+        .filter(|g| g.no_normals.is_none() && std::env::var_os("S20_NO_GPU_COLOURS").is_none())
+        .and_then(|g| {
+            let slot_of: Vec<u32> = scene
+                .blocks
+                .order
+                .iter()
+                .map(|&i| coloured.slot[i as usize])
+                .collect();
+            match g.colour_part(
+                &slot_of,
+                &cells.of_point,
+                &cells.around,
+                &cells.owned,
+                a.cell,
+            ) {
+                Ok(c) => Some((g, c)),
+                Err(e) => {
+                    job.log(&format!("colour: the colours on the CPU (GPU: {e:#})"));
+                    None
+                }
+            }
+        });
+    // the view's points by shard (where each shard's start)
+    let with_shards = |v: crate::gpu_colour::Colours| -> Seen {
+        let mut starts = vec![0usize; shards + 1];
+        for &s in &v.pts {
+            starts[s as usize / run + 1] += 1;
+        }
+        for q in 0..shards {
+            starts[q + 1] += starts[q];
+        }
+        let mut fill = starts.clone();
+        let mut by_shard = vec![0u32; v.pts.len()];
+        for (j, &s) in v.pts.iter().enumerate() {
+            let q = s as usize / run;
+            by_shard[fill[q]] = j as u32;
+            fill[q] += 1;
+        }
+        (v, by_shard, starts)
+    };
+    let gpu_failed = std::sync::Once::new();
     let work = |k: usize| -> Result<Option<Seen>> {
+        if let Some((g, part)) = &on_gpu {
+            match scene.colours_on_gpu(g, part, &poses[k], omega[k], a, &coloured) {
+                Ok(Some(v)) => return Ok(Some(with_shards(v))),
+                Ok(None) => return Ok(None),
+                Err(e) => gpu_failed
+                    .call_once(|| job.log(&format!("colour: an image on the CPU (GPU: {e:#})"))),
+            }
+        }
         let Some(v) = scene.view(&poses[k], omega[k], a, &coloured)? else {
             return Ok(None);
         };
@@ -1335,32 +1456,28 @@ fn gather(
             }
             (pm, gain)
         });
-        let mut starts = vec![0usize; shards + 1];
-        for &s in &v.pts {
-            starts[s as usize / run + 1] += 1;
-        }
-        for q in 0..shards {
-            starts[q + 1] += starts[q];
-        }
-        let mut fill = starts.clone();
-        let mut by_shard = vec![0u32; v.pts.len()];
-        for (j, &s) in v.pts.iter().enumerate() {
-            let q = s as usize / run;
-            by_shard[fill[q]] = j as u32;
-            fill[q] += 1;
-        }
+        let v = crate::gpu_colour::Colours {
+            c: v.rgb.iter().map(|&c| pack(c)).collect(),
+            m: pm.iter().map(|&c| pack(c)).collect(),
+            pts: v.pts,
+            score: v.score,
+            wide: v.wide,
+            gain,
+        };
         lap(7, &mut t);
-        Ok(Some((v, pm, gain, by_shard, starts)))
+        Ok(Some(with_shards(v)))
     };
+
     // Merge in image order: replace the worst kept view when this one scores higher.
     let mut merge = |k: usize, r: Option<Seen>| {
-        let Some((v, pm, gain, by_shard, starts)) = r else {
+        let Some((v, by_shard, starts)) = r else {
             return;
         };
         if a.gain {
             entries.extend(
-                gain.into_iter()
-                    .map(|(c, m, rgb)| (cells.key[c as usize], k as u32, m, rgb)),
+                v.gain
+                    .iter()
+                    .map(|&(c, m, rgb)| (cells.key[c as usize], k as u32, m, rgb)),
             );
         }
         let Kept {
@@ -1390,7 +1507,7 @@ fn gather(
                     if v.wide[j] {
                         if s > ws[i] {
                             ws[i] = s;
-                            wc[i] = pack(v.rgb[j]);
+                            wc[i] = v.c[j];
                         }
                         continue;
                     }
@@ -1399,8 +1516,8 @@ fn gather(
                     if s > row[worst] {
                         let at = i * kk + worst;
                         ks[at] = s;
-                        kc[at] = pack(v.rgb[j]);
-                        km[at] = pack(pm[j]);
+                        kc[at] = v.c[j];
+                        km[at] = v.m[j];
                         ki[at] = k as u16;
                     }
                 }

@@ -65,10 +65,10 @@ struct ZParams {
 /// The points (and their normals) on the GPU in parts that fit a binding, and the pipelines of
 /// the z-buffer and of the points an image sees.
 pub struct ZBuffer {
-    gpu: &'static Gpu,
+    pub(crate) gpu: &'static Gpu,
     /// (first point, positions, normals); the normals only for [`ZBuffer::visible`], None when
     /// they did not fit (the z-buffers stay on the GPU)
-    parts: Vec<(u32, wgpu::Buffer, Option<wgpu::Buffer>)>,
+    pub(crate) parts: Vec<(u32, wgpu::Buffer, Option<wgpu::Buffer>)>,
     /// why the normals are not there
     pub no_normals: Option<String>,
     pipeline: wgpu::ComputePipeline,
@@ -76,7 +76,9 @@ pub struct ZBuffer {
     visible: wgpu::ComputePipeline,
     visible_layout: wgpu::BindGroupLayout,
     /// the points the last image saw (the room the next one is given first)
-    last_seen: std::sync::atomic::AtomicU64,
+    pub(crate) last_seen: std::sync::atomic::AtomicU64,
+    /// the colour passes (`colour.wgsl`), made on first use (None: they could not be)
+    pub(crate) colour: std::sync::OnceLock<Option<crate::gpu_colour::Pipes>>,
 }
 
 /// A block of points for [`ZBuffer::visible`]: its points (first, count) and its centre, and
@@ -318,6 +320,7 @@ impl ZBuffer {
             visible,
             visible_layout,
             last_seen: std::sync::atomic::AtomicU64::new(0),
+            colour: std::sync::OnceLock::new(),
         })
     }
 
@@ -396,11 +399,13 @@ impl ZBuffer {
             return Ok(seen);
         }
     }
-    /// One pass of [`ZBuffer::visible`] with room for `places` points: their number, and those
-    /// written (all when they fit).
+    /// Records the visible pass of `blocks` (see [`ZBuffer::visible`]) into `enc`: the number of
+    /// points into the first word of `count`, (point, u, v, range, angle) into `out` (room for
+    /// `places`); the resources to keep until it is submitted.
     #[allow(clippy::too_many_arguments)]
-    fn dispatch_visible(
+    pub(crate) fn encode_visible(
         &self,
+        enc: &mut wgpu::CommandEncoder,
         cam: &ZCamera,
         reach: f32,
         graze: bool,
@@ -408,26 +413,11 @@ impl ZBuffer {
         zw: usize,
         zh: usize,
         grid: &wgpu::Buffer,
+        count: &wgpu::Buffer,
+        out: &wgpu::Buffer,
         places: u64,
-    ) -> Result<(u32, Option<Seen>)> {
+    ) -> Result<Vec<(wgpu::Buffer, wgpu::Buffer, wgpu::BindGroup)>> {
         let dev = &self.gpu.device;
-        let count = dev.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("visible count"),
-            contents: bytemuck::bytes_of(&0u32),
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-        });
-        // the thread's buffer for the points (100 MB and more an image outdoors), kept
-        let out = kept_buffer(
-            &VISIBLE_OUT,
-            dev,
-            places * 20,
-            self.max_places() * 20,
-            wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-            "visible out",
-        );
-        let mut enc = dev.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("visible"),
-        });
         let mut kept = Vec::new();
         for (k, (first, pts, nrm)) in self.parts.iter().enumerate() {
             let nrm = nrm.as_ref().context("no normals")?;
@@ -484,10 +474,15 @@ impl ZBuffer {
                 nrm.as_entire_binding(),
                 lst.as_entire_binding(),
                 grid.as_entire_binding(),
-                count.as_entire_binding(),
+                // (its first word)
+                wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                    buffer: count,
+                    offset: 0,
+                    size: std::num::NonZeroU64::new(4),
+                }),
                 // (as much as this image is given: the kept buffer may be larger)
                 wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                    buffer: &out,
+                    buffer: out,
                     offset: 0,
                     size: std::num::NonZeroU64::new(places * 20),
                 }),
@@ -519,6 +514,44 @@ impl ZBuffer {
             }
             kept.push((uni, lst, bind));
         }
+        Ok(kept)
+    }
+
+    /// One pass of [`ZBuffer::visible`] with room for `places` points: their number, and those
+    /// written (all when they fit).
+    #[allow(clippy::too_many_arguments)]
+    fn dispatch_visible(
+        &self,
+        cam: &ZCamera,
+        reach: f32,
+        graze: bool,
+        blocks: &[Block],
+        zw: usize,
+        zh: usize,
+        grid: &wgpu::Buffer,
+        places: u64,
+    ) -> Result<(u32, Option<Seen>)> {
+        let dev = &self.gpu.device;
+        let count = dev.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("visible count"),
+            contents: bytemuck::bytes_of(&0u32),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+        });
+        // the thread's buffer for the points (100 MB and more an image outdoors), kept
+        let out = kept_buffer(
+            &VISIBLE_OUT,
+            dev,
+            places * 20,
+            self.max_places() * 20,
+            wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            "visible out",
+        );
+        let mut enc = dev.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("visible"),
+        });
+        let kept = self.encode_visible(
+            &mut enc, cam, reach, graze, blocks, zw, zh, grid, &count, &out, places,
+        )?;
         self.gpu.queue.submit([enc.finish()]);
         let n = self.read(&count, 4)?[0];
         if n as u64 > places {
@@ -544,7 +577,7 @@ impl ZBuffer {
     }
 
     /// The points a visible pass can write (20 bytes each, within one buffer and one binding).
-    fn max_places(&self) -> u64 {
+    pub(crate) fn max_places(&self) -> u64 {
         let l = &self.gpu.limits;
         (l.max_storage_buffer_binding_size.min(l.max_buffer_size) / 20).max(1)
     }

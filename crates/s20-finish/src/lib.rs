@@ -6,6 +6,7 @@
 pub mod color;
 pub mod freespace;
 pub mod gpu;
+pub mod gpu_colour;
 pub mod gpu_free;
 pub mod gpu_transient;
 pub mod load;
