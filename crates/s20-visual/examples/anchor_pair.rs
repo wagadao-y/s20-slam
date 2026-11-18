@@ -4,7 +4,7 @@
 use anyhow::Result;
 use s20_visual::anchors::{Cloud, zgrid};
 use s20_visual::camera::Fisheye;
-use s20_visual::pairs::{View, features, observe, observe_guided, read_image_poses};
+use s20_visual::pairs::{Cells, View, features, observe, observe_guided, place, read_image_poses};
 use std::path::Path;
 use std::time::Instant;
 
@@ -46,12 +46,19 @@ fn main() -> Result<()> {
     let ga = zgrid(&cloud, &poses.poses[ia], cam(na));
     let gb = zgrid(&cloud, &poses.poses[ib], cam(nb));
     let t3 = Instant::now();
+    let (pa, pb) = (
+        place(&fa, &ga, &poses.poses[ia], cam(na), &cloud, false),
+        place(&fb, &gb, &poses.poses[ib], cam(nb), &cloud, false),
+    );
+    let (ca, cb) = (Cells::new(&fa), Cells::new(&fb));
     let va = View {
         index: ia,
         pose: poses.poses[ia],
         cam: cam(na),
         grid: &ga,
         features: &fa,
+        placed: &pa,
+        cells: &ca,
     };
     let vb = View {
         index: ib,
@@ -59,6 +66,8 @@ fn main() -> Result<()> {
         cam: cam(nb),
         grid: &gb,
         features: &fb,
+        placed: &pb,
+        cells: &cb,
     };
     let focal = (cal.left.a11 + cal.right.a11) / 2.;
     let obs = if std::env::var("GUIDED").is_ok() {

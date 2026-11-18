@@ -6,7 +6,10 @@ use crate::anchors::{Cloud, Pose, V3, ZGrid, associate, zgrid};
 use crate::bundle;
 use crate::camera::Fisheye;
 use crate::epipolar;
-use crate::pairs::{Features, ImagePoses, Obs, View, features, observe_guided, read_image_poses};
+use crate::pairs::{
+    Cells, Features, ImagePoses, Obs, Placed, View, features, observe_guided, place,
+    read_image_poses,
+};
 use crate::refine::{
     Cameras, Correction, Prepared, Settings, apply, mounted, pose_row, prepare, refine_camera,
     residual_with,
@@ -355,11 +358,13 @@ fn free_tracks(
                         pose: poses[a],
                         cam: &cams[side(&names[a])],
                         features: fa,
+                        cells: f.cells[a].as_ref().unwrap(),
                     };
                     let sb = epipolar::Side {
                         pose: poses[b],
                         cam: &cams[side(&names[b])],
                         features: fb,
+                        cells: f.cells[b].as_ref().unwrap(),
                     };
                     let far = |m: &[Option<f64>], i: usize| m[i].map_or(6., |d| d * 1.05 + 0.1);
                     let (ma, mb) = (&f.meets[a], &f.meets[b]);
@@ -568,6 +573,8 @@ pub struct Collected {
 /// ([`crate::epipolar`]), with each feature's depth where its ray meets the cloud (none: missed).
 pub struct FreeInput {
     pub feats: Vec<Option<Features>>,
+    /// the features by cell, of the images with features
+    pub cells: Vec<Option<Cells>>,
     pub meets: Vec<Vec<Option<f64>>>,
     pub pairs: Vec<(usize, usize)>,
     pub cloud: Cloud,
@@ -679,6 +686,26 @@ pub fn collect(input: &Input, job: &Job) -> Result<Collected> {
         crate::memory::note()
     ));
     job.check()?;
+    // each image's features placed on the cloud and put in cells, once (every pair an image is in
+    // asks for them: 2006 images, 10 times as many placements before)
+    let loose = input.tracks.is_some();
+    let (placed, cells): (Vec<Vec<Option<Placed>>>, Vec<Option<Cells>>) = (0..poses.names.len())
+        .into_par_iter()
+        .map(|i| match &feats[i] {
+            Some(f) => (
+                place(
+                    f,
+                    &grids[i],
+                    &poses.poses[i],
+                    &cams[side(&poses.names[i])],
+                    &cloud,
+                    loose,
+                ),
+                Some(Cells::new(f)),
+            ),
+            None => (Vec::new(), None),
+        })
+        .unzip();
     let done = std::sync::atomic::AtomicU64::new(0);
     let observed: Vec<(Obs, Kind)> = pairs
         .par_iter()
@@ -689,6 +716,8 @@ pub fn collect(input: &Input, job: &Job) -> Result<Collected> {
                 cam: &cams[side(&poses.names[a])],
                 grid: &grids[a],
                 features: feats[a].as_ref().unwrap(),
+                placed: &placed[a],
+                cells: cells[a].as_ref().unwrap(),
             };
             let vb = View {
                 index: b,
@@ -696,6 +725,8 @@ pub fn collect(input: &Input, job: &Job) -> Result<Collected> {
                 cam: &cams[side(&poses.names[b])],
                 grid: &grids[b],
                 features: feats[b].as_ref().unwrap(),
+                placed: &placed[b],
+                cells: cells[b].as_ref().unwrap(),
             };
             let o = observe_guided(
                 &va,
@@ -705,7 +736,7 @@ pub fn collect(input: &Input, job: &Job) -> Result<Collected> {
                 input.gate,
                 input.search,
                 input.ratio,
-                input.tracks.is_some(),
+                loose,
             );
             observations_part.report(
                 "observations",
@@ -745,9 +776,18 @@ pub fn collect(input: &Input, job: &Job) -> Result<Collected> {
             None => None,
         };
         let free_feats = fine.as_ref().unwrap_or(&feats);
+        // where the features' rays meet the cloud's planes: from their places, unless finer
+        // features were found for the search
         let meets: Vec<Vec<Option<f64>>> = (0..poses.names.len())
             .into_par_iter()
             .map(|i| match &free_feats[i] {
+                Some(_) if fine.is_none() => placed[i]
+                    .iter()
+                    .map(|p| {
+                        p.filter(|p| p.planar())
+                            .map(|p| (p.point - poses.poses[i].p).norm())
+                    })
+                    .collect(),
                 Some(f) => {
                     let cam = &cams[side(&poses.names[i])];
                     f.uv.iter()
@@ -782,7 +822,15 @@ pub fn collect(input: &Input, job: &Job) -> Result<Collected> {
                 }
             }
         }
-        Some((meets, free_pairs, fine))
+        // the features by cell: those of the guided matching, unless finer features were found
+        let free_cells = match &fine {
+            None => cells,
+            Some(fine) => fine
+                .par_iter()
+                .map(|f| f.as_ref().map(Cells::new))
+                .collect(),
+        };
+        Some((meets, free_pairs, fine, free_cells))
     } else {
         None
     };
@@ -837,8 +885,9 @@ pub fn collect(input: &Input, job: &Job) -> Result<Collected> {
         chain,
         used,
         pairs: pairs.len(),
-        free: free_parts.map(|(meets, pairs, fine)| FreeInput {
+        free: free_parts.map(|(meets, pairs, fine, cells)| FreeInput {
             feats: fine.unwrap_or(feats),
+            cells,
             meets,
             pairs,
             cloud,

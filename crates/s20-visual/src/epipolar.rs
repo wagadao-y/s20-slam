@@ -11,34 +11,22 @@
 
 use crate::anchors::{Pose, V3};
 use crate::camera::Fisheye;
-use crate::pairs::Features;
+use crate::pairs::{Cells, Features};
 use rayon::prelude::*;
 
-/// One image's side of a search: its pose, camera and features.
+/// One image's side of a search: its pose, camera and features, with the features by cell.
 pub struct Side<'a> {
     pub pose: Pose,
     pub cam: &'a Fisheye,
     pub features: &'a Features,
+    pub cells: &'a Cells,
 }
 
-const CELL: f64 = 32.;
+const CELL: f64 = Cells::CELL;
 /// the descriptor distance a lone candidate must be within (that of the guided matching)
 const ALONE: f32 = 250.;
 /// depths sampled along a ray (evenly in inverse depth)
 const SAMPLES: usize = 64;
-
-fn cells(f: &Features) -> (usize, usize, Vec<Vec<usize>>) {
-    let cols = (crate::anchors::WIDTH as f64 / CELL).ceil() as usize;
-    let rows = (crate::anchors::HEIGHT as f64 / CELL).ceil() as usize;
-    let mut cells: Vec<Vec<usize>> = vec![Vec::new(); cols * rows];
-    for (j, uv) in f.uv.iter().enumerate() {
-        let (cx, cy) = ((uv[0] / CELL) as usize, (uv[1] / CELL) as usize);
-        if cx < cols && cy < rows {
-            cells[cy * cols + cx].push(j);
-        }
-    }
-    (cols, rows, cells)
-}
 
 fn distance(a: &[u8; 128], b: &[u8; 128]) -> f32 {
     let mut s = 0i32;
@@ -71,71 +59,76 @@ fn one_way(
     gate: f64,
     ratio: f32,
 ) -> Vec<Option<usize>> {
-    let (cols, rows, grid) = cells(y.features);
+    let (cols, rows) = y.cells.size();
     let limit = 80f64.to_radians();
+    // (the curve and the features near it in buffers of each thread)
     (0..x.features.uv.len())
         .into_par_iter()
-        .map(|i| {
-            let ray = x.pose.r * V3::from(x.features.ray[i]);
-            let (n, f) = (near, far(i).max(near * 1.5));
-            // the ray's points projected into y, from near to far
-            let mut curve: Vec<[f64; 2]> = Vec::with_capacity(SAMPLES);
-            for k in 0..SAMPLES {
-                let inv = 1. / n + (1. / f - 1. / n) * k as f64 / (SAMPLES - 1) as f64;
-                let l = y.pose.r.transpose() * (x.pose.p + ray / inv - y.pose.p);
-                if l.z <= 0. || l.xy().norm().atan2(l.z) > limit {
-                    continue;
+        .map_init(
+            || (Vec::with_capacity(SAMPLES), Vec::new()),
+            |(curve, near_curve): &mut (Vec<[f64; 2]>, Vec<usize>), i| {
+                curve.clear();
+                near_curve.clear();
+                let ray = x.pose.r * V3::from(x.features.ray[i]);
+                let (n, f) = (near, far(i).max(near * 1.5));
+                // the ray's points projected into y, from near to far
+                for k in 0..SAMPLES {
+                    let inv = 1. / n + (1. / f - 1. / n) * k as f64 / (SAMPLES - 1) as f64;
+                    let l = y.pose.r.transpose() * (x.pose.p + ray / inv - y.pose.p);
+                    if l.z <= 0. || l.xy().norm().atan2(l.z) > limit {
+                        continue;
+                    }
+                    curve.push(y.cam.project([l.x, l.y, l.z]));
                 }
-                curve.push(y.cam.project([l.x, l.y, l.z]));
-            }
-            if curve.len() < 2 {
-                return None;
-            }
-            // the features within `gate` of some piece of the curve, each once
-            let mut near_curve: Vec<usize> = Vec::new();
-            for w in curve.windows(2) {
-                let (lo_x, hi_x) = (w[0][0].min(w[1][0]) - gate, w[0][0].max(w[1][0]) + gate);
-                let (lo_y, hi_y) = (w[0][1].min(w[1][1]) - gate, w[0][1].max(w[1][1]) + gate);
-                let (c0, c1) = (
-                    (lo_x / CELL).floor() as isize,
-                    (hi_x / CELL).floor() as isize,
-                );
-                let (r0, r1) = (
-                    (lo_y / CELL).floor() as isize,
-                    (hi_y / CELL).floor() as isize,
-                );
-                for gy in r0.max(0)..=r1.min(rows as isize - 1) {
-                    for gx in c0.max(0)..=c1.min(cols as isize - 1) {
-                        for &j in &grid[gy as usize * cols + gx as usize] {
-                            if to_segment(y.features.uv[j], w[0], w[1]) <= gate {
-                                near_curve.push(j);
+                if curve.len() < 2 {
+                    return None;
+                }
+                // the features within `gate` of some piece of the curve, each once
+                for w in curve.windows(2) {
+                    let (lo_x, hi_x) = (w[0][0].min(w[1][0]) - gate, w[0][0].max(w[1][0]) + gate);
+                    let (lo_y, hi_y) = (w[0][1].min(w[1][1]) - gate, w[0][1].max(w[1][1]) + gate);
+                    let (c0, c1) = (
+                        (lo_x / CELL).floor() as isize,
+                        (hi_x / CELL).floor() as isize,
+                    );
+                    let (r0, r1) = (
+                        (lo_y / CELL).floor() as isize,
+                        (hi_y / CELL).floor() as isize,
+                    );
+                    for gy in r0.max(0)..=r1.min(rows as isize - 1) {
+                        for gx in c0.max(0)..=c1.min(cols as isize - 1) {
+                            for &j in y.cells.at(gx, gy) {
+                                let j = j as usize;
+                                if to_segment(y.features.uv[j], w[0], w[1]) <= gate {
+                                    near_curve.push(j);
+                                }
                             }
                         }
                     }
                 }
-            }
-            near_curve.sort_unstable();
-            near_curve.dedup();
-            let (mut best, mut d1, mut d2) = (usize::MAX, f32::INFINITY, f32::INFINITY);
-            for j in near_curve {
-                let d = distance(&x.features.desc[i], &y.features.desc[j]);
-                if d < d1 {
-                    d2 = d1;
-                    d1 = d;
-                    best = j;
-                } else if d < d2 {
-                    d2 = d;
+                near_curve.sort_unstable();
+                near_curve.dedup();
+                let (mut best, mut d1, mut d2) = (usize::MAX, f32::INFINITY, f32::INFINITY);
+                for &j in near_curve.iter() {
+                    let d = distance(&x.features.desc[i], &y.features.desc[j]);
+                    if d < d1 {
+                        d2 = d1;
+                        d1 = d;
+                        best = j;
+                    } else if d < d2 {
+                        d2 = d;
+                    }
                 }
-            }
-            // a lone candidate must be close by itself (as in the guided matching)
-            let ok = best != usize::MAX
-                && if d2.is_finite() {
-                    d1 < ratio * d2
-                } else {
-                    d1 < ALONE
-                };
-            ok.then_some(best)
-        })
+                // a lone candidate must be close by itself (as in the guided matching)
+                let ok = best != usize::MAX
+                    && if d2.is_finite() {
+                        d1 < ratio * d2
+                    } else {
+                        d1 < ALONE
+                    };
+                ok.then_some(best)
+            },
+        )
         .collect()
 }
 
@@ -231,15 +224,18 @@ mod tests {
         let n = points.len();
         let fa = view(&pa, &|k| k);
         let fb = view(&pb, &|k| (k * 7 + 3) % n);
+        let (ca, cb) = (Cells::new(&fa), Cells::new(&fb));
         let a = Side {
             pose: pa,
             cam: &cam,
             features: &fa,
+            cells: &ca,
         };
         let b = Side {
             pose: pb,
             cam: &cam,
             features: &fb,
+            cells: &cb,
         };
         // the cloud behind them all, as if the laser saw only a wall at 3 m
         let far = |_: usize| 3.;

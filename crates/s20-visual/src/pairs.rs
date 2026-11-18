@@ -106,6 +106,106 @@ pub struct View<'a> {
     pub cam: &'a Fisheye,
     pub grid: &'a ZGrid,
     pub features: &'a Features,
+    /// each feature's place on the cloud ([`place`])
+    pub placed: &'a [Option<Placed>],
+    /// the features by cell of the image ([`Cells`])
+    pub cells: &'a Cells,
+}
+
+/// A feature's place on the cloud: where its ray meets the plane there (`associate`), or, without
+/// a plane and when asked for, the depth of the nearest point (`hint`, the normal zero).
+#[derive(Clone, Copy, Debug)]
+pub struct Placed {
+    pub point: V3,
+    pub normal: V3,
+    pub depth: f64,
+}
+
+impl Placed {
+    pub fn planar(&self) -> bool {
+        self.normal.norm_squared() > 0.5
+    }
+}
+
+/// The places of an image's features (`loose`: also those on no plane, by `hint`): once an image,
+/// as every pair it is in asks for them.
+pub fn place(
+    f: &Features,
+    grid: &ZGrid,
+    pose: &Pose,
+    cam: &Fisheye,
+    cloud: &Cloud,
+    loose: bool,
+) -> Vec<Option<Placed>> {
+    f.uv.iter()
+        .map(|&uv| {
+            associate(uv, grid, pose, cam, cloud)
+                .or_else(|| loose.then(|| hint(uv, grid, pose, cam, cloud)).flatten())
+                .map(|an| Placed {
+                    point: an.point,
+                    normal: an.normal,
+                    depth: an.depth,
+                })
+        })
+        .collect()
+}
+
+/// An image's features by cell of `CELL` pixels (the cells one after the other).
+pub struct Cells {
+    cols: usize,
+    rows: usize,
+    start: Vec<u32>,
+    feature: Vec<u32>,
+}
+
+impl Cells {
+    pub const CELL: f64 = 32.;
+
+    pub fn new(f: &Features) -> Self {
+        let cols = (crate::anchors::WIDTH as f64 / Self::CELL).ceil() as usize;
+        let rows = (crate::anchors::HEIGHT as f64 / Self::CELL).ceil() as usize;
+        let cell = |uv: &[f64; 2]| {
+            let (cx, cy) = ((uv[0] / Self::CELL) as usize, (uv[1] / Self::CELL) as usize);
+            (cx < cols && cy < rows).then_some(cy * cols + cx)
+        };
+        let mut start = vec![0u32; cols * rows + 1];
+        for uv in &f.uv {
+            if let Some(c) = cell(uv) {
+                start[c + 1] += 1;
+            }
+        }
+        for c in 0..cols * rows {
+            start[c + 1] += start[c];
+        }
+        let mut at = start.clone();
+        let mut feature = vec![0u32; start[cols * rows] as usize];
+        for (j, uv) in f.uv.iter().enumerate() {
+            if let Some(c) = cell(uv) {
+                feature[at[c] as usize] = j as u32;
+                at[c] += 1;
+            }
+        }
+        Cells {
+            cols,
+            rows,
+            start,
+            feature,
+        }
+    }
+
+    /// The cells across and down the image.
+    pub fn size(&self) -> (usize, usize) {
+        (self.cols, self.rows)
+    }
+
+    /// The features in cell (`gx`, `gy`), none outside the image.
+    pub fn at(&self, gx: isize, gy: isize) -> &[u32] {
+        if gx < 0 || gy < 0 || gx >= self.cols as isize || gy >= self.rows as isize {
+            return &[];
+        }
+        let c = gy as usize * self.cols + gx as usize;
+        &self.feature[self.start[c] as usize..self.start[c + 1] as usize]
+    }
 }
 
 /// Both directions of the matches between two views; `gate` drops what the given poses miss by
@@ -176,28 +276,15 @@ pub fn observe_guided(
     ratio: f32,
     loose: bool,
 ) -> Vec<Obs> {
-    const CELL: f64 = 32.;
+    const CELL: f64 = Cells::CELL;
     const ALONE: f32 = 250.;
     let one_way = |x: &View, y: &View| -> Vec<Obs> {
-        let cols = (crate::anchors::WIDTH as f64 / CELL).ceil() as usize;
-        let rows = (crate::anchors::HEIGHT as f64 / CELL).ceil() as usize;
-        let mut cells: Vec<Vec<usize>> = vec![Vec::new(); cols * rows];
-        for (j, uv) in y.features.uv.iter().enumerate() {
-            let (cx, cy) = ((uv[0] / CELL) as usize, (uv[1] / CELL) as usize);
-            if cx < cols && cy < rows {
-                cells[cy * cols + cx].push(j);
-            }
-        }
         let reach = (search / CELL).ceil() as isize;
-        let proposals: Vec<(usize, usize, f32, crate::anchors::Anchor)> = (0..x.features.uv.len())
+        let proposals: Vec<(usize, usize, f32, Placed)> = (0..x.features.uv.len())
             .into_par_iter()
             .filter_map(|i| {
-                let uv = x.features.uv[i];
-                let an = associate(uv, x.grid, &x.pose, x.cam, cloud).or_else(|| {
-                    loose
-                        .then(|| hint(uv, x.grid, &x.pose, x.cam, cloud))
-                        .flatten()
-                })?;
+                // (placed on no plane only when asked for)
+                let an = x.placed[i].filter(|p| loose || p.planar())?;
                 let l = y.pose.r.transpose() * (an.point - y.pose.p);
                 if l.xy().norm().atan2(l.z) > 80f64.to_radians() {
                     return None;
@@ -210,10 +297,8 @@ pub fn observe_guided(
                 let (mut best, mut d1, mut d2) = (usize::MAX, f32::INFINITY, f32::INFINITY);
                 for gy in cy - reach..=cy + reach {
                     for gx in cx - reach..=cx + reach {
-                        if gx < 0 || gy < 0 || gx >= cols as isize || gy >= rows as isize {
-                            continue;
-                        }
-                        for &j in &cells[gy as usize * cols + gx as usize] {
+                        for &j in y.cells.at(gx, gy) {
+                            let j = j as usize;
                             let q = y.features.uv[j];
                             if (q[0] - pred[0]).hypot(q[1] - pred[1]) > search {
                                 continue;
