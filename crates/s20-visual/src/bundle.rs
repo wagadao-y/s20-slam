@@ -9,10 +9,11 @@
 use crate::anchors::{M3, Pose, V3};
 use crate::camera::Fisheye;
 use crate::pairs::Obs;
-use crate::refine::{Blocks, Intrinsic, bend, pcg_counted, ray_and_derivatives};
+use crate::refine::{BlockSystem, Intrinsic, bend, pcg_counted, ray_and_derivatives};
 use nalgebra::{Matrix3, Matrix6, Rotation3, SMatrix, SymmetricEigen, Vector2, Vector3, Vector6};
 use rayon::prelude::*;
 use std::collections::HashMap;
+use std::sync::Mutex;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Settings {
@@ -138,23 +139,21 @@ pub fn tracks(
     let mut nodes: Vec<(usize, [f64; 2])> = Vec::new();
     let mut anchor: Vec<Option<(V3, V3)>> = Vec::new();
     let mut parent: Vec<usize> = Vec::new();
-    let mut node = |image: usize, feature: usize, uv: [f64; 2]| -> usize {
-        *id.entry((image, feature)).or_insert_with(|| {
-            nodes.push((image, uv));
-            anchor.push(None);
-            parent.push(parent.len());
-            parent.len() - 1
-        })
-    };
-    let mut edges = Vec::with_capacity(obs.len());
+    // each observation's two features as nodes, then joined at once (the nodes numbered and
+    // joined in the observations' order, without a list of the edges between)
     for o in obs {
+        let mut node = |image: usize, feature: usize, uv: [f64; 2]| -> usize {
+            *id.entry((image, feature)).or_insert_with(|| {
+                nodes.push((image, uv));
+                anchor.push(None);
+                parent.push(parent.len());
+                parent.len() - 1
+            })
+        };
         let (a, b) = (node(o.a, o.fa, o.uv_a), node(o.b, o.fb, o.uv_b));
-        edges.push((a, b, o.world, o.normal));
-    }
-    for &(a, b, world, normal) in &edges {
         // the anchor is that of image a's feature (its ray met the plane)
         if anchor[a].is_none() {
-            anchor[a] = Some((world, normal));
+            anchor[a] = Some((o.world, o.normal));
         }
         let (ra, rb) = (find(&mut parent, a), find(&mut parent, b));
         if ra != rb {
@@ -519,15 +518,174 @@ fn soft_l1(z: f64) -> (f64, f64) {
     (2. * (s - 1.), 1. / s)
 }
 
-/// A frame's block and gradient from one track.
-type FrameBlocks = Vec<(usize, Matrix6<f64>, Vector6<f64>)>;
+/// A frame-point block: how a frame's correction and a track's point meet in the normal equations.
+type W = SMatrix<f64, 6, 3>;
 
-/// A track linearised: the inverse of its point block (damped), the point's gradient and, per frame
-/// that sees it, the frame-point block.
-struct Linear {
-    hinv: Matrix3<f64>,
-    gp: Vector3<f64>,
-    w: Vec<(usize, SMatrix<f64, 6, 3>)>,
+/// Each track's frames, in the order its sightings first see them, one after the other (track `i`'s
+/// from `start[i]` to `start[i + 1]`).
+struct TrackFrames {
+    start: Vec<usize>,
+    frame: Vec<u32>,
+}
+
+impl TrackFrames {
+    fn new(pb: &Problem) -> Self {
+        let mut start = Vec::with_capacity(pb.tracks.len() + 1);
+        let mut frame = Vec::new();
+        start.push(0);
+        for t in &pb.tracks {
+            let first = frame.len();
+            for sg in &t.sightings {
+                let f = pb.frame[sg.image] as u32;
+                if !frame[first..].contains(&f) {
+                    frame.push(f);
+                }
+            }
+            start.push(frame.len());
+        }
+        TrackFrames { start, frame }
+    }
+
+    fn of(&self, i: usize) -> &[u32] {
+        &self.frame[self.start[i]..self.start[i + 1]]
+    }
+}
+
+/// The pairs of frames that some track or the chain joins, each once with the lower frame first
+/// (sorted); per frame, its pairs as the lower frame (a range of them) and as the higher one; and
+/// per track, the pair of each two of its frames (`k < l` in its order, `k` major), the top bit
+/// set where the track's two frames come the other way round.
+struct Pattern {
+    pairs: Vec<(u32, u32)>,
+    above_start: Vec<usize>,
+    below_start: Vec<usize>,
+    below: Vec<(u32, u32)>,
+    track_start: Vec<usize>,
+    track_pair: Vec<u32>,
+}
+
+const FLIPPED: u32 = 1 << 31;
+
+impl Pattern {
+    fn new(tf: &TrackFrames, tracks: usize, frames: usize, chain: &[(usize, usize)]) -> Self {
+        let mut keys: Vec<(u32, u32)> = (0..tracks)
+            .into_par_iter()
+            .flat_map_iter(|i| {
+                let fr = tf.of(i);
+                (0..fr.len()).flat_map(move |k| {
+                    ((k + 1)..fr.len()).map(move |l| (fr[k].min(fr[l]), fr[k].max(fr[l])))
+                })
+            })
+            .collect();
+        keys.extend(
+            chain
+                .iter()
+                .map(|&(f, h)| (f.min(h) as u32, f.max(h) as u32)),
+        );
+        keys.par_sort_unstable();
+        keys.dedup();
+        keys.shrink_to_fit();
+        let pairs = keys;
+        let mut above_start = vec![0usize; frames + 1];
+        let mut below_start = vec![0usize; frames + 1];
+        for &(a, b) in &pairs {
+            above_start[a as usize + 1] += 1;
+            below_start[b as usize + 1] += 1;
+        }
+        for f in 0..frames {
+            above_start[f + 1] += above_start[f];
+            below_start[f + 1] += below_start[f];
+        }
+        let mut below = vec![(0u32, 0u32); pairs.len()];
+        let mut at = below_start.clone();
+        for (p, &(a, b)) in pairs.iter().enumerate() {
+            below[at[b as usize]] = (a, p as u32);
+            at[b as usize] += 1;
+        }
+        let mut track_start = Vec::with_capacity(tracks + 1);
+        track_start.push(0);
+        for i in 0..tracks {
+            let m = tf.of(i).len();
+            track_start.push(track_start[i] + m * m.saturating_sub(1) / 2);
+        }
+        let mut pattern = Pattern {
+            pairs,
+            above_start,
+            below_start,
+            below,
+            track_start,
+            track_pair: Vec::new(),
+        };
+        let mut track_pair = vec![0u32; *pattern.track_start.last().unwrap()];
+        split_by(&mut track_pair, &pattern.track_start)
+            .into_par_iter()
+            .enumerate()
+            .for_each(|(i, out)| {
+                let fr = tf.of(i);
+                let mut n = 0;
+                for k in 0..fr.len() {
+                    for l in (k + 1)..fr.len() {
+                        let flipped = if fr[k] > fr[l] { FLIPPED } else { 0 };
+                        out[n] = pattern.pair(fr[k], fr[l]) | flipped;
+                        n += 1;
+                    }
+                }
+            });
+        pattern.track_pair = track_pair;
+        pattern
+    }
+
+    /// The pair of two different frames.
+    fn pair(&self, f: u32, h: u32) -> u32 {
+        let (a, b) = (f.min(h), f.max(h));
+        let lo = self.above_start[a as usize];
+        let row = &self.pairs[lo..self.above_start[a as usize + 1]];
+        (lo + row.binary_search_by(|q| q.1.cmp(&b)).unwrap()) as u32
+    }
+}
+
+/// `v` split at `start` (offsets, the first 0 and the last `v.len()`), each part writable apart.
+fn split_by<'a, T>(v: &'a mut [T], start: &[usize]) -> Vec<&'a mut [T]> {
+    let mut parts = Vec::with_capacity(start.len().saturating_sub(1));
+    let mut rest = v;
+    for w in start.windows(2) {
+        let (part, tail) = rest.split_at_mut(w[1] - w[0]);
+        parts.push(part);
+        rest = tail;
+    }
+    parts
+}
+
+/// The frames' system once the points are eliminated: the blocks on the diagonal and those of the
+/// pairs of `pattern`.
+struct FrameSystem<'a> {
+    diag: &'a [Matrix6<f64>],
+    off: &'a [Matrix6<f64>],
+    pattern: &'a Pattern,
+}
+
+impl BlockSystem for FrameSystem<'_> {
+    fn diag(&self, i: usize) -> Option<Matrix6<f64>> {
+        self.diag.get(i).copied()
+    }
+
+    /// By frame, in parallel: the pairs where it is the lower frame, then the higher.
+    fn mul(&self, x: &[Vector6<f64>]) -> Vec<Vector6<f64>> {
+        let pt = self.pattern;
+        (0..x.len())
+            .into_par_iter()
+            .map(|i| {
+                let mut y = self.diag[i] * x[i];
+                for p in pt.above_start[i]..pt.above_start[i + 1] {
+                    y += self.off[p] * x[pt.pairs[p].1 as usize];
+                }
+                for &(a, p) in &pt.below[pt.below_start[i]..pt.below_start[i + 1]] {
+                    y += self.off[p as usize].transpose() * x[a as usize];
+                }
+                y
+            })
+            .collect()
+    }
 }
 
 struct Problem<'a> {
@@ -622,7 +780,10 @@ impl Problem<'_> {
         tracks + self.prior_cost(rot, shift)
     }
 
-    /// The point block, the frames' blocks and gradients, and the frame-point blocks of a track.
+    /// A track linearised: per frame of `fr` (its frames), the frame's block and gradient into `h`
+    /// and the frame-point block into `w`; returned, the inverse of the point's block (damped) and
+    /// the point's gradient, or none where the block cannot be inverted.
+    #[allow(clippy::too_many_arguments)]
     fn linearise(
         &self,
         t: &Track,
@@ -631,13 +792,15 @@ impl Problem<'_> {
         rot: &[M3],
         shift: &[V3],
         lambda: f64,
-    ) -> Option<(FrameBlocks, Linear)> {
+        fr: &[u32],
+        h: &mut [(Matrix6<f64>, Vector6<f64>)],
+        w: &mut [W],
+    ) -> Option<(Matrix3<f64>, Vector3<f64>)> {
         let s = self.s;
         let mut hpp = Matrix3::zeros();
         let mut gp = Vector3::zeros();
-        // per frame: its block, gradient and frame-point block
-        #[allow(clippy::type_complexity)]
-        let mut per: Vec<(usize, Matrix6<f64>, Vector6<f64>, SMatrix<f64, 6, 3>)> = Vec::new();
+        h.fill((Matrix6::zeros(), Vector6::zeros()));
+        w.fill(W::zeros());
         for sg in &t.sightings {
             let pose = self.pose(rot, shift, sg.image);
             let (r, v) = sg.residual(&pose, x);
@@ -646,7 +809,7 @@ impl Problem<'_> {
                 continue;
             }
             let e = v / n;
-            let w = soft_l1(r.norm_squared() / (s.pixel * s.pixel)).1 / (s.pixel * s.pixel);
+            let wt = soft_l1(r.norm_squared() / (s.pixel * s.pixel)).1 / (s.pixel * s.pixel);
             let proj = (M3::identity() - e * e.transpose()) / n;
             let rows = SMatrix::<f64, 2, 3>::from_rows(&[
                 (sg.ta * sg.focal).transpose(),
@@ -658,22 +821,13 @@ impl Problem<'_> {
             let mut jc = SMatrix::<f64, 2, 6>::zeros();
             jc.fixed_columns_mut::<3>(0).copy_from(&jw);
             jc.fixed_columns_mut::<3>(3).copy_from(&(-jx));
-            hpp += w * jx.transpose() * jx;
-            gp += w * jx.transpose() * r;
-            let f = self.frame[sg.image];
-            let (h, g, wf) = (
-                w * jc.transpose() * jc,
-                w * jc.transpose() * r,
-                w * jc.transpose() * jx,
-            );
-            match per.iter_mut().find(|q| q.0 == f) {
-                Some(q) => {
-                    q.1 += h;
-                    q.2 += g;
-                    q.3 += wf;
-                }
-                None => per.push((f, h, g, wf)),
-            }
+            hpp += wt * jx.transpose() * jx;
+            gp += wt * jx.transpose() * r;
+            let f = self.frame[sg.image] as u32;
+            let k = fr.iter().position(|&q| q == f).unwrap();
+            h[k].0 += wt * jc.transpose() * jc;
+            h[k].1 += wt * jc.transpose() * r;
+            w[k] += wt * jc.transpose() * jx;
         }
         if t.planar() {
             let rp = t.normal.dot(&(x - t.anchor)) / s.plane_sigma;
@@ -694,10 +848,7 @@ impl Problem<'_> {
         }
         let damped =
             hpp + Matrix3::from_diagonal(&hpp.diagonal()) * lambda + Matrix3::identity() * 1e-12;
-        let hinv = damped.try_inverse()?;
-        let blocks = per.iter().map(|q| (q.0, q.1, q.2)).collect();
-        let w = per.into_iter().map(|q| (q.0, q.3)).collect();
-        Some((blocks, Linear { hinv, gp, w }))
+        Some((damped.try_inverse()?, gp))
     }
 }
 
@@ -757,52 +908,77 @@ pub fn solve(
     let mut lambda = 1e-4;
     let mut iterations = 0;
     let mut accepted = 0;
+    // the tracks' frames and the pairs of frames, again when tracks are dropped; the blocks of
+    // the pairs and the frames, summed into from all threads, then read by the conjugate gradients
+    let mut tf = TrackFrames::new(&pb);
+    let mut pattern = Pattern::new(&tf, pb.tracks.len(), frames, chain);
+    let mut wbuf: Vec<W> = Vec::new();
     while iterations < s.iterations {
         iterations += 1;
         let started = std::time::Instant::now();
+        let n = pb.tracks.len();
         // each track linearised and its point eliminated at once, into the frames' system
-        // (H_ff - W H_pp^-1 W^T and g_f - W H_pp^-1 g_p); only what the back-substitution needs
-        // is kept per track. (A fold over the tracks themselves: one over `.flatten()`ed options
-        // starts a fold, frames long, for every track.)
-        let mut lin: Vec<Option<Linear>> = Vec::new();
-        lin.resize_with(pb.tracks.len(), || None);
-        let (mut blocks, mut g) = pb
-            .tracks
-            .par_iter()
-            .zip(&pb.pinned)
-            .zip(&x)
-            .zip(lin.par_iter_mut())
-            .fold(
-                || (Blocks::default(), vec![Vector6::zeros(); frames]),
-                |(mut b, mut g), (((t, &pin), x), slot)| {
-                    let Some((hf, l)) = pb.linearise(t, pin, x, &rot, &shift, lambda) else {
-                        return (b, g);
-                    };
-                    for (f, h, gf) in &hf {
-                        b.add(*f, *f, *h);
-                        g[*f] += gf;
+        // (H_ff - W H_pp^-1 W^T and g_f - W H_pp^-1 g_p); kept per track only what the
+        // back-substitution needs, in buffers of the whole iteration
+        let off_acc: Vec<Mutex<Matrix6<f64>>> = (0..pattern.pairs.len())
+            .map(|_| Mutex::new(Matrix6::zeros()))
+            .collect();
+        let diag_acc: Vec<Mutex<(Matrix6<f64>, Vector6<f64>)>> = (0..frames)
+            .map(|_| Mutex::new((Matrix6::zeros(), Vector6::zeros())))
+            .collect();
+        wbuf.clear();
+        wbuf.resize(tf.frame.len(), W::zeros());
+        let mut point: Vec<Option<(Matrix3<f64>, Vector3<f64>)>> = vec![None; n];
+        split_by(&mut wbuf, &tf.start)
+            .into_par_iter()
+            .zip(point.par_iter_mut())
+            .enumerate()
+            .for_each_init(Vec::new, |h, (i, (w, point))| {
+                let fr = tf.of(i);
+                h.resize(fr.len(), (Matrix6::zeros(), Vector6::zeros()));
+                let (t, pin) = (&pb.tracks[i], pb.pinned[i]);
+                let Some((hinv, gp)) = pb.linearise(t, pin, &x[i], &rot, &shift, lambda, fr, h, w)
+                else {
+                    w.fill(W::zeros());
+                    return;
+                };
+                *point = Some((hinv, gp));
+                let pairs = &pattern.track_pair[pattern.track_start[i]..];
+                let mut q = 0;
+                for k in 0..fr.len() {
+                    let wh = w[k] * hinv;
+                    {
+                        let mut d = diag_acc[fr[k] as usize].lock().unwrap();
+                        d.0 += h[k].0 - wh * w[k].transpose();
+                        d.1 += h[k].1 - wh * gp;
                     }
-                    for (k, (fa, wa)) in l.w.iter().enumerate() {
-                        let wh = wa * l.hinv;
-                        g[*fa] -= wh * l.gp;
-                        for (fb, wb) in &l.w[k..] {
-                            b.add(*fa, *fb, -(wh * wb.transpose()));
+                    for wl in &w[(k + 1)..] {
+                        let e = pairs[q];
+                        q += 1;
+                        let b = -(wh * wl.transpose());
+                        let mut o = off_acc[(e & !FLIPPED) as usize].lock().unwrap();
+                        if e & FLIPPED == 0 {
+                            *o += b;
+                        } else {
+                            *o += b.transpose();
                         }
                     }
-                    *slot = Some(l);
-                    (b, g)
-                },
-            )
-            .reduce_with(|(a, mut ga), (b, gb)| {
-                for (x, y) in ga.iter_mut().zip(gb) {
-                    *x += y;
                 }
-                (a.merge(b), ga)
-            })
-            .unwrap_or_else(|| (Blocks::default(), vec![Vector6::zeros(); frames]));
+            });
+        let mut diag: Vec<Matrix6<f64>> = Vec::with_capacity(frames);
+        let mut g: Vec<Vector6<f64>> = Vec::with_capacity(frames);
+        for d in diag_acc {
+            let (h, gf) = d.into_inner().unwrap();
+            diag.push(h);
+            g.push(gf);
+        }
+        let mut off: Vec<Matrix6<f64>> = off_acc
+            .into_par_iter()
+            .map(|m| m.into_inner().unwrap())
+            .collect();
         let w: Vec<V3> = rot.iter().map(rotvec).collect();
         for f in 0..frames {
-            blocks.add(f, f, diag6(rot_prior, pos_prior));
+            diag[f] += diag6(rot_prior, pos_prior);
             g[f] += Vector6::new(
                 w[f].x * rot_prior,
                 w[f].y * rot_prior,
@@ -814,9 +990,10 @@ pub fn solve(
         }
         let smooth = diag6(rot_smooth, pos_smooth);
         for &(f, h) in chain {
-            blocks.add(f, f, smooth);
-            blocks.add(h, h, smooth);
-            blocks.add(f, h, -smooth);
+            diag[f] += smooth;
+            diag[h] += smooth;
+            // (diagonal: the same either way round)
+            off[pattern.pair(f as u32, h as u32) as usize] -= smooth;
             let (dw, dt) = (w[f] - w[h], shift[f] - shift[h]);
             let d = Vector6::new(
                 dw.x * rot_smooth,
@@ -829,29 +1006,31 @@ pub fn solve(
             g[f] += d;
             g[h] -= d;
         }
-        for f in 0..frames {
-            let d = blocks.diag[&f].diagonal() * lambda;
-            blocks.add(f, f, Matrix6::from_diagonal(&d));
+        for d in diag.iter_mut() {
+            *d += Matrix6::from_diagonal(&(d.diagonal() * lambda));
         }
         let rhs: Vec<Vector6<f64>> = g.iter().map(|v| -v).collect();
         let assembled = started.elapsed().as_secs_f64();
-        let (step, cg) = pcg_counted(&blocks, &rhs, 2000, 1e-10);
+        let system = FrameSystem {
+            diag: &diag,
+            off: &off,
+            pattern: &pattern,
+        };
+        let (step, cg) = pcg_counted(&system, &rhs, 2000, 1e-10);
         let solved = started.elapsed().as_secs_f64();
-        let off_blocks = blocks.off_len();
-        drop(blocks);
-        // (the tracks' blocks given back by the workers, as they go)
-        let tx: Vec<V3> = lin
+        let off_blocks = off.len();
+        drop(off);
+        let tx: Vec<V3> = (0..n)
             .into_par_iter()
-            .zip(&x)
-            .map(|(l, x)| match l {
-                Some(l) => {
-                    let mut r = l.gp;
-                    for (f, wf) in &l.w {
-                        r += wf.transpose() * step[*f];
+            .map(|i| match &point[i] {
+                Some((hinv, gp)) => {
+                    let mut r = *gp;
+                    for (f, wf) in tf.of(i).iter().zip(&wbuf[tf.start[i]..tf.start[i + 1]]) {
+                        r += wf.transpose() * step[*f as usize];
                     }
-                    x - l.hinv * r
+                    x[i] - hinv * r
                 }
-                None => *x,
+                None => x[i],
             })
             .collect();
         let back = started.elapsed().as_secs_f64();
@@ -894,6 +1073,8 @@ pub fn solve(
             ));
             if accepted == 3 || accepted == 6 {
                 let dropped = pb.prune(&mut x, &rot, &shift);
+                tf = TrackFrames::new(&pb);
+                pattern = Pattern::new(&tf, pb.tracks.len(), frames, chain);
                 cost = pb.cost(&x, &rot, &shift);
                 log(&format!(
                     "tracks: {dropped} sightings over {} px dropped, {} tracks left",

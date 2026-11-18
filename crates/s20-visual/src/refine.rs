@@ -267,10 +267,11 @@ impl Blocks {
         }
         self
     }
+}
 
-    /// The blocks off the diagonal (pairs of images or frames).
-    pub(crate) fn off_len(&self) -> usize {
-        self.off.len()
+impl BlockSystem for Blocks {
+    fn diag(&self, i: usize) -> Option<Matrix6<f64>> {
+        self.diag.get(&i).copied()
     }
 
     fn mul(&self, x: &[Vector6<f64>]) -> Vec<Vector6<f64>> {
@@ -286,6 +287,14 @@ impl Blocks {
     }
 }
 
+/// A symmetric matrix of 6x6 blocks, as the conjugate gradients see it.
+pub(crate) trait BlockSystem {
+    /// The block on the diagonal at `i`, if any.
+    fn diag(&self, i: usize) -> Option<Matrix6<f64>>;
+    /// The product with `x`.
+    fn mul(&self, x: &[Vector6<f64>]) -> Vec<Vector6<f64>>;
+}
+
 fn dot(a: &[Vector6<f64>], b: &[Vector6<f64>]) -> f64 {
     a.iter().zip(b).map(|(x, y)| x.dot(y)).sum()
 }
@@ -296,13 +305,18 @@ pub(crate) struct CgStats {
 }
 
 /// Preconditioned conjugate gradients on the block system.
-pub(crate) fn pcg(a: &Blocks, b: &[Vector6<f64>], iters: usize, tol: f64) -> Vec<Vector6<f64>> {
+pub(crate) fn pcg(
+    a: &impl BlockSystem,
+    b: &[Vector6<f64>],
+    iters: usize,
+    tol: f64,
+) -> Vec<Vector6<f64>> {
     pcg_counted(a, b, iters, tol).0
 }
 
 /// [`pcg`], with the iterations it took.
 pub(crate) fn pcg_counted(
-    a: &Blocks,
+    a: &impl BlockSystem,
     b: &[Vector6<f64>],
     iters: usize,
     tol: f64,
@@ -310,8 +324,7 @@ pub(crate) fn pcg_counted(
     let n = b.len();
     let inv: Vec<Matrix6<f64>> = (0..n)
         .map(|i| {
-            a.diag
-                .get(&i)
+            a.diag(i)
                 .and_then(|m| m.try_inverse())
                 .unwrap_or_else(Matrix6::identity)
         })

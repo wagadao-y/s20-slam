@@ -38,7 +38,10 @@ impl Joint {
             let base = j.poses.len();
             j.poses.extend(c.poses.poses.iter().copied());
             j.offset.push(j.poses.len());
-            for o in &c.obs {
+            // the refinement's observations, those prepared (first); the others serve the
+            // tracks only
+            let n = c.prepared.len();
+            for o in &c.obs[..n] {
                 let mut o = o.clone();
                 o.a += base;
                 o.b += base;
@@ -46,8 +49,8 @@ impl Joint {
                 j.owner.push(r);
             }
             j.prepared.append(&mut c.prepared);
-            j.held.extend_from_slice(&c.held);
-            j.kinds.extend_from_slice(&c.kinds);
+            j.held.extend_from_slice(&c.held[..n]);
+            j.kinds.extend_from_slice(&c.kinds[..n]);
             j.names.push(name);
             j.rec.push(c);
         }

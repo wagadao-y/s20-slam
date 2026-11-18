@@ -548,8 +548,10 @@ pub fn median(mut v: Vec<f64>) -> f64 {
 pub struct Collected {
     pub poses: ImagePoses,
     pub cams: [Fisheye; 2],
+    /// the refinement's observations ([`for_refinement`]) first, then those for the tracks only
     pub obs: Vec<Obs>,
     pub kinds: Vec<Kind>,
+    /// for the refinement's observations only: the first `prepared.len()` of `obs`
     pub prepared: Vec<Prepared>,
     /// observations held out for the check
     pub held: Vec<bool>,
@@ -569,6 +571,50 @@ pub struct FreeInput {
     pub meets: Vec<Vec<Option<f64>>>,
     pub pairs: Vec<(usize, usize)>,
     pub cloud: Cloud,
+}
+
+/// Puts the items `first` holds for before the others, each in their order, and returns how many
+/// they are. In the vector's own allocation: only the fewer of the two are moved out meanwhile.
+fn stable_partition<T>(v: &mut Vec<T>, first: impl Fn(&T) -> bool) -> usize {
+    let n = v.iter().filter(|x| first(x)).count();
+    if n <= v.len() - n {
+        let front: Vec<T> = v.extract_if(.., |x| first(x)).collect();
+        v.splice(0..0, front);
+    } else {
+        let back: Vec<T> = v.extract_if(.., |x| !first(x)).collect();
+        v.extend(back);
+    }
+    n
+}
+
+thread_local! {
+    /// A thread of its own for each worker's images: the SIFT within an image runs there one step
+    /// after another.
+    static ALONE: rayon::ThreadPool = rayon::ThreadPoolBuilder::new()
+        .num_threads(1)
+        .build()
+        .expect("a thread for the features");
+}
+
+/// The features of the images `used` (sorted) of `n`, by `of`, none for the others. One image at
+/// a time per thread: the SIFT within an image is parallel too, and a thread waiting there would
+/// otherwise start on another image (its pyramid about 0.6 GB at 1800 px, doubled), so each runs
+/// on a thread of its own, its steps one after another, while the images keep the threads busy.
+fn features_of(
+    n: usize,
+    used: &[usize],
+    of: impl Fn(usize) -> Result<Features> + Sync,
+) -> Result<Vec<Option<Features>>> {
+    let part: Vec<Features> = used
+        .par_iter()
+        .map(|&i| ALONE.with(|alone| alone.install(|| of(i))))
+        .collect::<Result<_>>()?;
+    let mut feats: Vec<Option<Features>> = Vec::new();
+    feats.resize_with(n, || None);
+    for (&i, f) in used.iter().zip(part) {
+        feats[i] = Some(f);
+    }
+    Ok(feats)
 }
 
 pub fn collect(input: &Input, job: &Job) -> Result<Collected> {
@@ -601,32 +647,26 @@ pub fn collect(input: &Input, job: &Job) -> Result<Collected> {
     let done = std::sync::atomic::AtomicU64::new(0);
     // one bar: the features about 60% of the time, the observations 35%
     let (features_part, observations_part) = (job.part(0.0, 0.6), job.part(0.6, 0.95));
-    let feats: Vec<Option<Features>> = (0..poses.names.len())
-        .into_par_iter()
-        .map(|i| -> Result<Option<Features>> {
-            if used.binary_search(&i).is_err() {
-                return Ok(None);
-            }
-            job.check()?;
-            let name = &poses.names[i];
-            let jpeg = s20_io::dataset::read_image(&input.data.join("images").join(name))
-                .with_context(|| name.clone())?;
-            let f = features(
-                &jpeg,
-                &cams[side(name)],
-                input.max_size,
-                input.features,
-                input.contrast,
-                input.double_first,
-            )?;
-            features_part.report(
-                "features",
-                done.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1,
-                used.len() as u64,
-            );
-            Ok(Some(f))
-        })
-        .collect::<Result<_>>()?;
+    let feats = features_of(poses.names.len(), &used, |i| {
+        job.check()?;
+        let name = &poses.names[i];
+        let jpeg = s20_io::dataset::read_image(&input.data.join("images").join(name))
+            .with_context(|| name.clone())?;
+        let f = features(
+            &jpeg,
+            &cams[side(name)],
+            input.max_size,
+            input.features,
+            input.contrast,
+            input.double_first,
+        )?;
+        features_part.report(
+            "features",
+            done.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1,
+            used.len() as u64,
+        );
+        Ok(f)
+    })?;
     job.log(&format!(
         "features of {} images{}",
         used.len(),
@@ -674,27 +714,20 @@ pub fn collect(input: &Input, job: &Job) -> Result<Collected> {
         let fine: Option<Vec<Option<Features>>> = match input.track_features {
             Some(t) => {
                 let started = std::time::Instant::now();
-                let fine = (0..poses.names.len())
-                    .into_par_iter()
-                    .map(|i| -> Result<Option<Features>> {
-                        if feats[i].is_none() {
-                            return Ok(None);
-                        }
-                        job.check()?;
-                        let name = &poses.names[i];
-                        let jpeg =
-                            s20_io::dataset::read_image(&input.data.join("images").join(name))
-                                .with_context(|| name.clone())?;
-                        Ok(Some(features(
-                            &jpeg,
-                            &cams[side(name)],
-                            t.max_size,
-                            t.count,
-                            t.contrast,
-                            t.double_first,
-                        )?))
-                    })
-                    .collect::<Result<Vec<_>>>()?;
+                let fine = features_of(poses.names.len(), &used, |i| {
+                    job.check()?;
+                    let name = &poses.names[i];
+                    let jpeg = s20_io::dataset::read_image(&input.data.join("images").join(name))
+                        .with_context(|| name.clone())?;
+                    features(
+                        &jpeg,
+                        &cams[side(name)],
+                        t.max_size,
+                        t.count,
+                        t.contrast,
+                        t.double_first,
+                    )
+                })?;
                 let n: usize = fine.iter().flatten().map(|f| f.uv.len()).sum();
                 job.log(&format!(
                     "features for the epipolar search: {n} in {} images ({:.0} s)",
@@ -747,19 +780,23 @@ pub fn collect(input: &Input, job: &Job) -> Result<Collected> {
     } else {
         None
     };
+    // the z-buffers served the matching and the depths
+    drop(grids);
     job.check()?;
     // the refinement's observations first, in their order without the tracks, so that it and its
-    // hold-out are as they were
-    let (mine, rest): (Vec<_>, Vec<_>) = observed
-        .into_iter()
-        .partition(|(o, k)| for_refinement(o, *k));
-    let (obs, kinds): (Vec<Obs>, Vec<Kind>) = mine.into_iter().chain(rest).unzip();
+    // hold-out are as they were (in place: of the two, only the fewer moved out for a while)
+    let mut observed = observed;
+    let mine = stable_partition(&mut observed, |(o, k)| for_refinement(o, *k));
+    let kinds: Vec<Kind> = observed.iter().map(|x| x.1).collect();
+    // (the same allocation, the kinds left out)
+    let obs: Vec<Obs> = observed.into_iter().map(|x| x.0).collect();
     job.log(&format!(
-        "{} observations{}",
+        "{} observations ({mine} for the refinement){}",
         obs.len(),
         crate::memory::note()
     ));
-    let prepared: Vec<Prepared> = obs
+    // prepared for the refinement's observations only: the others serve the tracks
+    let prepared: Vec<Prepared> = obs[..mine]
         .par_iter()
         .map(|o| prepare(o, &cams, side(&poses.names[o.a]), side(&poses.names[o.b])))
         .collect();
@@ -1120,6 +1157,27 @@ pub fn run(input: &Input, job: &Job) -> Result<serde_json::Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_partition_keeps_each_side_in_its_order_whichever_is_fewer() {
+        for v in [
+            vec![1, 2, 3, 4, 5, 6, 7, 8, 9],
+            vec![2, 4, 1, 6, 8, 10, 3],
+            vec![1, 3, 5],
+            vec![],
+        ] {
+            let want: Vec<i32> = v
+                .iter()
+                .filter(|x| *x % 2 == 0)
+                .chain(v.iter().filter(|x| *x % 2 != 0))
+                .copied()
+                .collect();
+            let mut got = v.clone();
+            let n = stable_partition(&mut got, |x| x % 2 == 0);
+            assert_eq!(got, want);
+            assert_eq!(n, v.iter().filter(|x| *x % 2 == 0).count());
+        }
+    }
 
     #[test]
     fn the_side_comes_from_the_file_name_also_in_an_absolute_path() {
