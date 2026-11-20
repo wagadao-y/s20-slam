@@ -640,8 +640,8 @@ impl App {
                 .checkbox(&mut self.s.refine, tl("画像の姿勢合わせ", "Image pose refinement"))
                 .on_hover_text(
                     tl("着色の前に、写真の特徴点を点群に合わせて、画像ごとの位置・向きを少しずつ直します\
-                     （屋外の 19 分の撮影、画像 4650 枚で約 9 分）。機体の校正がなければ、カメラの取り付け・魚眼・主点もその撮影から求めます。\
-                     色のにじみや二重化が減ります", "Before colorization, fits the photos' feature points to the point cloud and nudges each image's position and orientation (about 9 minutes for a 19-minute outdoor recording of 4650 images). Without a device calibration, the camera mounting, fisheye and principal point are also solved from the recording. Reduces color bleeding and doubling"),
+                     （屋外の 19 分の撮影、画像 4650 枚で約 6.5 分）。機体の校正がなければ、カメラの取り付け・魚眼・主点もその撮影から求めます。\
+                     色のにじみや二重化が減ります", "Before colorization, fits the photos' feature points to the point cloud and nudges each image's position and orientation (about 6.5 minutes for a 19-minute outdoor recording of 4650 images). Without a device calibration, the camera mounting, fisheye and principal point are also solved from the recording. Reduces color bleeding and doubling"),
                 )
                 .on_disabled_hover_text(tl("実行中は変更できません", "Can't be changed while processing"))
                 .changed()
