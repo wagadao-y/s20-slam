@@ -245,6 +245,13 @@ impl FreeSpace {
             .and_then(|g| {
                 let mut bl: Vec<u64> = blocks.iter().copied().collect();
                 bl.sort_unstable();
+                // the large blocks holding the blocks (the GPU's walk skips the empty ones)
+                let mut large: Vec<u64> = bl
+                    .iter()
+                    .map(|&b| pack(unpack(b).map(|x| x >> crate::gpu_free::LARGE_BITS)))
+                    .collect();
+                large.sort_unstable();
+                large.dedup();
                 let cent: Option<Vec<[f32; 3]>> = (o.pass_radius > 0.).then(|| {
                     keys.iter()
                         .map(|k| centroids.get(k).map_or([0.; 3], |m| m.map(|x| x as f32)))
@@ -271,6 +278,7 @@ impl FreeSpace {
                     g,
                     &keys,
                     &bl,
+                    &large,
                     cent.as_deref(),
                     &walk,
                     scans.len(),

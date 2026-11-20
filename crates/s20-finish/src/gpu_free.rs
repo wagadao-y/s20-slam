@@ -60,8 +60,13 @@ struct Params {
     vmask: u32,
     bmask: u32,
     voxels: u32,
-    pad: [u32; 2],
+    lmask: u32,
+    pad: u32,
 }
+
+/// Blocks are grouped in large blocks of 2^LARGE_BITS blocks per axis (32 voxels: 64 cm for 2 cm
+/// voxels): a ray skips an empty one at once instead of its empty blocks one by one.
+pub const LARGE_BITS: i64 = 2;
 
 /// The rays of one dispatch at most (well under a second of the GPU at 1 cm voxels).
 const WALK_RAYS: usize = 1 << 18;
@@ -82,7 +87,8 @@ pub struct WalkTimes {
 }
 
 /// The scans whose rays passed through each voxel of `keys` (the measured voxels; `blocks`: the
-/// blocks of 8 voxels per axis holding them; `centroids`: per voxel, for `pass_radius`), over
+/// blocks of 8 voxels per axis holding them; `large`: the blocks of [`LARGE_BITS`] blocks holding
+/// those; `centroids`: per voxel, for `pass_radius`), over
 /// `scans` scans whose rays `rays_of(scan, out)` appends as (sensor, 0), (point, 0).
 /// `progress(scans done)` after each batch.
 #[allow(clippy::too_many_arguments)]
@@ -90,13 +96,18 @@ pub fn passes(
     gpu: &Gpu,
     keys: &[u64],
     blocks: &[u64],
+    large: &[u64],
     centroids: Option<&[[f32; 3]]>,
     w: &Walk,
     scans: usize,
     rays_of: impl Fn(usize, &mut Vec<[f32; 4]>),
     progress: impl FnMut(usize) -> Result<()>,
 ) -> Result<(Vec<u32>, WalkTimes)> {
-    gpu.checked(|| walk_all(gpu, keys, blocks, centroids, w, scans, rays_of, progress))
+    gpu.checked(|| {
+        walk_all(
+            gpu, keys, blocks, large, centroids, w, scans, rays_of, progress,
+        )
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -104,6 +115,7 @@ fn walk_all(
     gpu: &Gpu,
     keys: &[u64],
     blocks: &[u64],
+    large: &[u64],
     centroids: Option<&[[f32; 3]]>,
     w: &Walk,
     scans: usize,
@@ -115,6 +127,7 @@ fn walk_all(
     let dev = &gpu.device;
     let (vt, vmask) = table(keys, 3);
     let (bt, bmask) = table(blocks, 2);
+    let (lt, lmask) = table(large, 2);
     let n = keys.len().max(1);
     let limit = gpu
         .limits
@@ -123,6 +136,7 @@ fn walk_all(
     for bytes in [
         vt.len() as u64 * 4,
         bt.len() as u64 * 4,
+        lt.len() as u64 * 4,
         n as u64 * 12,
         WALK_RAYS as u64 * 32,
     ] {
@@ -142,6 +156,8 @@ fn walk_all(
     drop(vt);
     let bbuf = storage("blocks", bytemuck::cast_slice(&bt));
     drop(bt);
+    let lbuf = storage("large blocks", bytemuck::cast_slice(&lt));
+    drop(lt);
     let cbuf = match centroids {
         Some(c) => storage("centroids", bytemuck::cast_slice(c)),
         None => storage("centroids", &[0u8; 16]),
@@ -192,6 +208,7 @@ fn walk_all(
             entry(4, ro),
             entry(5, rw),
             entry(6, rw),
+            entry(7, ro),
         ],
     });
     let pl = dev.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -222,7 +239,8 @@ fn walk_all(
         vmask,
         bmask,
         voxels: keys.len() as u32,
-        pad: [0; 2],
+        lmask,
+        pad: 0,
     };
     let dispatch = |pass: &mut wgpu::ComputePass, groups: u32| {
         let x = groups.clamp(1, 65535);
@@ -295,6 +313,10 @@ fn walk_all(
                     wgpu::BindGroupEntry {
                         binding: 6,
                         resource: passes.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 7,
+                        resource: lbuf.as_entire_binding(),
                     },
                 ],
             });
@@ -388,12 +410,14 @@ mod tests {
         assert!(g.checked(|| Ok(())).is_ok());
     }
     /// freewalk.wgsl's walk in single precision: the voxels of the occupied blocks its steps look
-    /// up, stepping one by one or skipping the empty blocks as the shader does.
+    /// up, stepping one by one or skipping the empty large blocks and blocks as the shader does
+    /// (`large`: whether a large block may hold occupied blocks).
     fn walked(
         a: [f32; 3],
         b: [f32; 3],
         voxel: f32,
         occupied: &impl Fn([i32; 3]) -> bool,
+        large: &impl Fn([i32; 3]) -> bool,
         skip: bool,
     ) -> Vec<[i32; 3]> {
         let (inv, step, margin) = (1. / voxel, 0.5 * voxel, 0.06f32);
@@ -409,7 +433,16 @@ mod tests {
             let eps = 1e-6 * (a.abs() + b.abs() + bound.abs());
             (bound - a) / u - eps / u.abs()
         };
-        let (mut last, mut empty) = (None, None);
+        let skipped = |k: u32, at: [i32; 3], cells: f32| -> u32 {
+            let size = cells / inv;
+            let lo = at.map(|x| x as f32 * size);
+            let t = (0..3)
+                .map(|i| inside_until(a[i], b[i], u[i], lo[i], lo[i] + size))
+                .fold(f32::INFINITY, f32::min);
+            let j = (t.min(stop) / step).floor() - 1.;
+            if j > k as f32 { j as u32 } else { k }
+        };
+        let (mut last, mut empty, mut empty_large) = (None, None, None);
         let mut out = Vec::new();
         let mut k = 1u32;
         loop {
@@ -425,6 +458,17 @@ mod tests {
                 continue;
             }
             last = Some(c);
+            if skip {
+                let lc = c.map(|x| x >> (3 + LARGE_BITS));
+                if empty_large == Some(lc) {
+                    continue;
+                }
+                if !large(lc) {
+                    empty_large = Some(lc);
+                    k = skipped(k, lc, (8 << LARGE_BITS) as f32);
+                    continue;
+                }
+            }
             let bc = c.map(|x| x >> 3);
             if empty == Some(bc) {
                 continue;
@@ -432,15 +476,7 @@ mod tests {
             if !occupied(bc) {
                 empty = Some(bc);
                 if skip {
-                    let size = 8. / inv;
-                    let lo = bc.map(|x| x as f32 * size);
-                    let t = (0..3)
-                        .map(|i| inside_until(a[i], b[i], u[i], lo[i], lo[i] + size))
-                        .fold(f32::INFINITY, f32::min);
-                    let j = (t.min(stop) / step).floor() - 1.;
-                    if j > k as f32 {
-                        k = j as u32;
-                    }
+                    k = skipped(k, bc, 8.);
                 }
                 continue;
             }
@@ -451,13 +487,16 @@ mod tests {
 
     #[test]
     fn skipping_the_empty_blocks_looks_up_the_same_voxels() {
-        // occupied: a pseudo-random third of the blocks
-        let occupied = |b: [i32; 3]| {
+        let hash = |b: [i32; 3]| {
             let h = (b[0] as u32).wrapping_mul(0x9e37_79b1)
                 ^ (b[1] as u32).wrapping_mul(0x85eb_ca6b)
                 ^ (b[2] as u32).wrapping_mul(0xc2b2_ae35);
-            (h >> 7).is_multiple_of(3)
+            h >> 7
         };
+        // the large blocks that may hold occupied blocks: a pseudo-random half; occupied: a
+        // pseudo-random third of their blocks
+        let large = |l: [i32; 3]| hash(l.map(|x| x ^ 0x55)).is_multiple_of(2);
+        let occupied = |b: [i32; 3]| large(b.map(|x| x >> LARGE_BITS)) && hash(b).is_multiple_of(3);
         let mut seed = 7u64;
         let mut rnd = || {
             seed = seed
@@ -485,8 +524,8 @@ mod tests {
         for (a, b) in rays {
             for voxel in [0.02f32, 0.01] {
                 assert_eq!(
-                    walked(a, b, voxel, &occupied, true),
-                    walked(a, b, voxel, &occupied, false),
+                    walked(a, b, voxel, &occupied, &large, true),
+                    walked(a, b, voxel, &occupied, &large, false),
                     "{a:?} -> {b:?}, voxel {voxel}"
                 );
             }

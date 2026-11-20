@@ -14,8 +14,8 @@ struct Params {
     vmask: u32,        // voxel table slots - 1
     bmask: u32,        // block table slots - 1
     voxels: u32,
+    lmask: u32,        // large block table slots - 1
     pad0: u32,
-    pad1: u32,
 }
 
 @group(0) @binding(0) var<uniform> P: Params;
@@ -28,6 +28,8 @@ struct Params {
 @group(0) @binding(4) var<storage, read> centroids: array<f32>;
 @group(0) @binding(5) var<storage, read_write> bits: array<atomic<u32>>;
 @group(0) @binding(6) var<storage, read_write> passes: array<u32>;
+// open addressing, (key high, key low) per slot: the large blocks (4 blocks per axis) holding blocks
+@group(0) @binding(7) var<storage, read> ltable: array<vec2u>;
 
 const EMPTY: u32 = 0xffffffffu;
 const NONE: u32 = 0xffffffffu;
@@ -63,6 +65,21 @@ fn voxel(k: vec2u) -> u32 {
     return NONE;
 }
 
+fn has_large(k: vec2u) -> bool {
+    var i = slot_hash(k) & P.lmask;
+    loop {
+        let s = ltable[i];
+        if (s.x == k.x && s.y == k.y) {
+            return true;
+        }
+        if (s.x == EMPTY) {
+            return false;
+        }
+        i = (i + 1u) & P.lmask;
+    }
+    return false;
+}
+
 fn has_block(k: vec2u) -> bool {
     var i = slot_hash(k) & P.bmask;
     loop {
@@ -92,6 +109,21 @@ fn inside_until(a: f32, b: f32, u: f32, lo: f32, hi: f32) -> f32 {
     return (bound - a) / u - eps / abs(u);
 }
 
+// the next step of a ray at step `k` in the empty box `at` of `cells` voxels per axis: two
+// before it surely leaves the box
+fn skipped(k: u32, a: vec3f, d: vec3f, u: vec3f, stop: f32, at: vec3i, cells: f32) -> u32 {
+    let size = cells / P.inv;
+    let lo = vec3f(at) * size;
+    let hi = lo + vec3f(size);
+    let b = a + d;
+    let t_in = min(min(inside_until(a.x, b.x, u.x, lo.x, hi.x), inside_until(a.y, b.y, u.y, lo.y, hi.y)), inside_until(a.z, b.z, u.z, lo.z, hi.z));
+    let j = floor(min(t_in, stop) / P.step) - 1.0;
+    if (j > f32(k)) {
+        return u32(j);
+    }
+    return k;
+}
+
 fn index(wid: vec3u, lid: vec3u, nwg: vec3u, size: u32) -> u32 {
     return (wid.y * nwg.x + wid.x) * size + lid.x;
 }
@@ -113,6 +145,8 @@ fn walk(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) lid: ve
     var has_last = false;
     var empty = vec3i(0);
     var has_empty = false;
+    var empty_large = vec3i(0);
+    var has_empty_large = false;
     var k = 1u;
     loop {
         let s = f32(k) * P.step;
@@ -126,6 +160,20 @@ fn walk(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) lid: ve
         }
         last = c;
         has_last = true;
+        // an empty large block, then an empty block: on to two steps before the ray surely leaves
+        // it (the steps skipped are all in it: the same steps as one by one, without their
+        // lookups, which would find no measured voxel there)
+        // (3 + gpu_free.rs LARGE_BITS)
+        let lc = c >> vec3u(5u);
+        if (has_empty_large && all(lc == empty_large)) {
+            continue;
+        }
+        if (!has_large(pack(lc))) {
+            empty_large = lc;
+            has_empty_large = true;
+            k = skipped(k, a, d, u, stop, lc, 32.0);
+            continue;
+        }
         let bc = c >> vec3u(3u);
         if (has_empty && all(bc == empty)) {
             continue;
@@ -133,17 +181,7 @@ fn walk(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) lid: ve
         if (!has_block(pack(bc))) {
             empty = bc;
             has_empty = true;
-            // on to two steps before the ray surely leaves the block: the steps skipped are all
-            // in it (the same steps as one by one, without their lookups)
-            let size = 8.0 / P.inv;
-            let lo = vec3f(bc) * size;
-            let hi = lo + vec3f(size);
-            let b = a + d;
-            let t_in = min(min(inside_until(a.x, b.x, u.x, lo.x, hi.x), inside_until(a.y, b.y, u.y, lo.y, hi.y)), inside_until(a.z, b.z, u.z, lo.z, hi.z));
-            let j = floor(min(t_in, stop) / P.step) - 1.0;
-            if (j > f32(k)) {
-                k = u32(j);
-            }
+            k = skipped(k, a, d, u, stop, bc, 8.0);
             continue;
         }
         let v = voxel(pack(c));
