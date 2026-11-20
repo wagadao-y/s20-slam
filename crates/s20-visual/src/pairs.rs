@@ -108,6 +108,9 @@ pub struct View<'a> {
     pub features: &'a Features,
     /// each feature's place on the cloud ([`place`])
     pub placed: &'a [Option<Placed>],
+    /// whether each feature's place is occluded from this image's camera, found once (every pair
+    /// the image is in asks; [`own_occlusion`])
+    pub occluded: &'a [std::sync::OnceLock<bool>],
     /// the features by cell of the image ([`Cells`])
     pub cells: &'a Cells,
 }
@@ -147,6 +150,13 @@ pub fn place(
                     depth: an.depth,
                 })
         })
+        .collect()
+}
+
+/// Room for [`View::occluded`]: one per feature, found when first asked.
+pub fn own_occlusion(f: &Features) -> Vec<std::sync::OnceLock<bool>> {
+    (0..f.uv.len())
+        .map(|_| std::sync::OnceLock::new())
         .collect()
 }
 
@@ -259,6 +269,19 @@ fn descriptor_distance(a: &[u8; 128], b: &[u8; 128]) -> f32 {
     (s as f32).sqrt()
 }
 
+/// The guided matching's CPU time (ns, over all threads) by stage: the proposals, the selection
+/// with RANSAC, the occlusion test; and the descriptors compared.
+pub static GUIDED_NANOS: [std::sync::atomic::AtomicU64; 3] =
+    [const { std::sync::atomic::AtomicU64::new(0) }; 3];
+pub static GUIDED_COMPARED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+fn guided_lap(stage: usize, t: &mut std::time::Instant) {
+    GUIDED_NANOS[stage].fetch_add(
+        t.elapsed().as_nanos() as u64,
+        std::sync::atomic::Ordering::Relaxed,
+    );
+    *t = std::time::Instant::now();
+}
+
 /// Both directions of observations matched where the poses and the cloud predict them: a feature
 /// anchored on the cloud is compared only with the other image's features within `search` pixels
 /// of its predicted position. The nearest must lie within `gate` pixels and pass the ratio test
@@ -280,6 +303,7 @@ pub fn observe_guided(
     const ALONE: f32 = 250.;
     let one_way = |x: &View, y: &View| -> Vec<Obs> {
         let reach = (search / CELL).ceil() as isize;
+        let mut t = std::time::Instant::now();
         let proposals: Vec<(usize, usize, f32, Placed)> = (0..x.features.uv.len())
             .into_par_iter()
             .filter_map(|i| {
@@ -295,6 +319,7 @@ pub fn observe_guided(
                     (pred[1] / CELL).floor() as isize,
                 );
                 let (mut best, mut d1, mut d2) = (usize::MAX, f32::INFINITY, f32::INFINITY);
+                let mut compared = 0u64;
                 for gy in cy - reach..=cy + reach {
                     for gx in cx - reach..=cx + reach {
                         for &j in y.cells.at(gx, gy) {
@@ -303,6 +328,7 @@ pub fn observe_guided(
                             if (q[0] - pred[0]).hypot(q[1] - pred[1]) > search {
                                 continue;
                             }
+                            compared += 1;
                             let d = descriptor_distance(&x.features.desc[i], &y.features.desc[j]);
                             if d < d1 {
                                 d2 = d1;
@@ -314,6 +340,7 @@ pub fn observe_guided(
                         }
                     }
                 }
+                GUIDED_COMPARED.fetch_add(compared, std::sync::atomic::Ordering::Relaxed);
                 if best == usize::MAX {
                     return None;
                 }
@@ -327,6 +354,7 @@ pub fn observe_guided(
                 ok.then_some((i, best, d1, an))
             })
             .collect();
+        guided_lap(0, &mut t);
         // one proposal per feature of the other image (the closest descriptor) and RANSAC, first
         // for the features on planes alone (as without `loose`), then for the others, on the
         // features of the other image still free
@@ -374,12 +402,16 @@ pub fn observe_guided(
             let taken = kept.iter().map(|&k| proposals[k].1).collect();
             kept.extend(select(off, &taken));
         }
-        kept.par_iter()
+        guided_lap(1, &mut t);
+        let out = kept
+            .par_iter()
             .filter_map(|&k| {
                 let (i, j, _, an) = &proposals[k];
                 // the occluders lie off the anchored plane: none to count without one
+                // (from this image's camera the same for every pair: once)
                 if planar(&k)
-                    && (cloud.occluded(&x.pose.p, &an.point, &an.normal)
+                    && (*x.occluded[*i]
+                        .get_or_init(|| cloud.occluded(&x.pose.p, &an.point, &an.normal))
                         || cloud.occluded(&y.pose.p, &an.point, &an.normal))
                 {
                     return None;
@@ -396,7 +428,9 @@ pub fn observe_guided(
                     depth: an.depth,
                 })
             })
-            .collect()
+            .collect();
+        guided_lap(2, &mut t);
+        out
     };
     let mut out = one_way(a, b);
     out.extend(one_way(b, a));

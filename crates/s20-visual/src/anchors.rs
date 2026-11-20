@@ -180,7 +180,13 @@ impl Cloud {
         let mut found = std::collections::HashSet::new();
         let mut t = near + wide / 2.;
         while t - wide / 2. < length {
-            for i in self.within(&(center + ray * t), reach) {
+            let c = center + ray * t;
+            // (the tree's list as it is, not copied into another)
+            for n in self
+                .tree
+                .within_unsorted::<SquaredEuclidean>(&[c.x, c.y, c.z], reach * reach)
+            {
+                let i = n.item as usize;
                 if inside(i) && found.insert(i) && found.len() >= limit {
                     return found.len();
                 }

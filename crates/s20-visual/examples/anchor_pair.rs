@@ -51,6 +51,10 @@ fn main() -> Result<()> {
         place(&fb, &gb, &poses.poses[ib], cam(nb), &cloud, false),
     );
     let (ca, cb) = (Cells::new(&fa), Cells::new(&fb));
+    let (oa, ob) = (
+        s20_visual::pairs::own_occlusion(&fa),
+        s20_visual::pairs::own_occlusion(&fb),
+    );
     let va = View {
         index: ia,
         pose: poses.poses[ia],
@@ -58,6 +62,7 @@ fn main() -> Result<()> {
         grid: &ga,
         features: &fa,
         placed: &pa,
+        occluded: &oa,
         cells: &ca,
     };
     let vb = View {
@@ -67,6 +72,7 @@ fn main() -> Result<()> {
         grid: &gb,
         features: &fb,
         placed: &pb,
+        occluded: &ob,
         cells: &cb,
     };
     let focal = (cal.left.a11 + cal.right.a11) / 2.;

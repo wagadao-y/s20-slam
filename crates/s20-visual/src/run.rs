@@ -717,7 +717,17 @@ pub fn collect(input: &Input, job: &Job) -> Result<Collected> {
             None => (Vec::new(), None),
         })
         .unzip();
+    let occluded: Vec<Vec<std::sync::OnceLock<bool>>> = feats
+        .iter()
+        .map(|f| {
+            f.as_ref()
+                .map_or_else(Vec::new, crate::pairs::own_occlusion)
+        })
+        .collect();
     let placed_s = placing.elapsed().as_secs_f64();
+    let nanos = |k: usize| {
+        crate::pairs::GUIDED_NANOS[k].load(std::sync::atomic::Ordering::Relaxed) as f64 * 1e-9
+    };
     let matching = std::time::Instant::now();
     let done = std::sync::atomic::AtomicU64::new(0);
     let observed: Vec<(Obs, Kind)> = pairs
@@ -730,6 +740,7 @@ pub fn collect(input: &Input, job: &Job) -> Result<Collected> {
                 grid: &grids[a],
                 features: feats[a].as_ref().unwrap(),
                 placed: &placed[a],
+                occluded: &occluded[a],
                 cells: cells[a].as_ref().unwrap(),
             };
             let vb = View {
@@ -739,6 +750,7 @@ pub fn collect(input: &Input, job: &Job) -> Result<Collected> {
                 grid: &grids[b],
                 features: feats[b].as_ref().unwrap(),
                 placed: &placed[b],
+                occluded: &occluded[b],
                 cells: cells[b].as_ref().unwrap(),
             };
             let o = observe_guided(
@@ -760,9 +772,13 @@ pub fn collect(input: &Input, job: &Job) -> Result<Collected> {
         })
         .collect();
     job.log(&format!(
-        "matching seconds: the features placed on the cloud {placed_s:.1}, the guided matching of {} pairs {:.1}",
+        "matching seconds: the features placed on the cloud {placed_s:.1}, the guided matching of {} pairs {:.1} (CPU over the threads: proposals {:.0}, selection and RANSAC {:.0}, occlusion {:.0}; {:.2} G descriptors compared)",
         pairs.len(),
-        matching.elapsed().as_secs_f64()
+        matching.elapsed().as_secs_f64(),
+        nanos(0),
+        nanos(1),
+        nanos(2),
+        crate::pairs::GUIDED_COMPARED.load(std::sync::atomic::Ordering::Relaxed) as f64 * 1e-9
     ));
     let free_parts = if input.track_points.is_some() {
         // the finer features for the epipolar search, when asked for
