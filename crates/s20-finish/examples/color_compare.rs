@@ -35,8 +35,10 @@ fn main() -> Result<()> {
                 s20_io::las::LasPoint { rgb, ..*x }
             })
             .collect();
-        // (on the first cloud's grid: its points stay where they are)
-        s20_io::las::write(Path::new(map), &heat, info.scale[0], info.offset)?;
+        // (on the first cloud's grid: its points stay where they are; with a scale per axis, the
+        // finest of them, so that none moves by more than half of its own)
+        let scale = info.scale.iter().copied().fold(f64::INFINITY, f64::min);
+        s20_io::las::write(Path::new(map), &heat, scale, info.offset)?;
     }
     let n = d.len();
     let mean = d.iter().map(|&x| x as f64).sum::<f64>() / n.max(1) as f64;

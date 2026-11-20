@@ -1407,12 +1407,20 @@ struct ColorPart {
 }
 
 /// The cells of the gains when they are coarser than the cells: per cell its gain cell (the one
-/// holding its center: of the same facing), and per gain cell its key.
+/// holding its center: of the same facing) and whether the part owns that gain cell (the one
+/// holding the gain cell's center does: a gain cell across the parts' border is one part's, which
+/// sees all of its cells within [`PART_MARGIN`]), and per gain cell its key.
 struct GainCells {
     of_cell: Vec<u32>,
+    owned: Vec<bool>,
     key: Vec<u64>,
 }
-fn gain_cells(cells: &Cells, cell: f64, gain_cell: f64) -> GainCells {
+fn gain_cells(
+    cells: &Cells,
+    cell: f64,
+    gain_cell: f64,
+    owns: impl Fn([f64; 2]) -> bool,
+) -> GainCells {
     let back = |key: u64, at: u32| ((key >> at) & 0xf_ffff) as i64 - (1 << 19);
     let coarse: Vec<u64> = cells
         .key
@@ -1426,11 +1434,20 @@ fn gain_cells(cells: &Cells, cell: f64, gain_cell: f64) -> GainCells {
     let mut key = coarse.clone();
     key.par_sort_unstable();
     key.dedup();
-    let of_cell = coarse
+    let of_cell: Vec<u32> = coarse
         .iter()
         .map(|k| key.binary_search(k).unwrap() as u32)
         .collect();
-    GainCells { of_cell, key }
+    let owned_gain: Vec<bool> = key
+        .iter()
+        .map(|&k| owns([back(k, 43), back(k, 23)].map(|g| (g as f64 + 0.5) * gain_cell)))
+        .collect();
+    let owned = of_cell.iter().map(|&g| owned_gain[g as usize]).collect();
+    GainCells {
+        of_cell,
+        owned,
+        key,
+    }
 }
 
 /// An image's gain entries of the cells merged into the gain cells: each gain cell's points, and
@@ -1479,10 +1496,14 @@ fn gather(
     let hi = [0, 1].map(|d| grown.hi[d] as f64 * BASE);
     let colored = Colored { slot, lo, hi };
     let out = part.out;
-    let cells = cells(p, scene.n, &part.ids, a.cell, |c| {
-        out.contains([0, 1].map(|d| (c[d] / BASE).floor() as i64))
+    let owns = |c: [f64; 2]| out.contains([0, 1].map(|d| (c[d] / BASE).floor() as i64));
+    let mut cells = cells(p, scene.n, &part.ids, a.cell, owns);
+    // the gain entries of the cells whose gain cell the part owns
+    let coarse = (a.gain && a.gain_cell > a.cell).then(|| {
+        let gc = gain_cells(&cells, a.cell, a.gain_cell, owns);
+        cells.owned.clone_from(&gc.owned);
+        gc
     });
-    let coarse = (a.gain && a.gain_cell > a.cell).then(|| gain_cells(&cells, a.cell, a.gain_cell));
     let np = part.ids.len();
     let kk = a.keep;
     let mut kept = Kept::new(np, kk);
@@ -2666,7 +2687,7 @@ mod tests {
             owned: vec![true; key.len()],
             key: key.clone(),
         };
-        let gc = gain_cells(&cells, 0.05, 0.2);
+        let gc = gain_cells(&cells, 0.05, 0.2, |c| c[0] < 0.);
         for (c, &k) in key.iter().enumerate() {
             let x = ((k >> 43) & 0xf_ffff) as i64 - (1 << 19);
             let want = cell_key([x.div_euclid(4), 0, -1], (k & 7) as u8);
@@ -2674,6 +2695,11 @@ mod tests {
         }
         // x -5..=8 over 5 gain cells (-2..=2) per facing
         assert_eq!(gc.key.len(), 10);
+        // a part owning x < 0 owns the gain cells centered there, with all their cells: x -5..=-1
+        for (c, &k) in key.iter().enumerate() {
+            let x = ((k >> 43) & 0xf_ffff) as i64 - (1 << 19);
+            assert_eq!(gc.owned[c], x < 0, "cell x {x}");
+        }
         // an image's entries merged: the points summed, the color their weighted mean
         let at = |x: i64| key.binary_search(&cell_key([x, 2, -1], 0)).unwrap() as u32;
         let merged = merged_gains(
