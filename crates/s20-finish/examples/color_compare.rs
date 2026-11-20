@@ -36,8 +36,8 @@ fn main() -> Result<()> {
             })
             .collect();
         // (on the first cloud's grid: its points stay where they are; with a scale per axis, the
-        // finest of them, so that none moves by more than half of its own)
-        let scale = info.scale.iter().copied().fold(f64::INFINITY, f64::min);
+        // coarsest of them, which holds every coordinate the finer ones did)
+        let scale = info.scale.iter().copied().fold(0., f64::max);
         s20_io::las::write(Path::new(map), &heat, scale, info.offset)?;
     }
     let n = d.len();

@@ -269,11 +269,18 @@ fn descriptor_distance(a: &[u8; 128], b: &[u8; 128]) -> f32 {
     (s as f32).sqrt()
 }
 
-/// The guided matching's CPU time (ns, over all threads) by stage: the proposals, the selection
-/// with RANSAC, the occlusion test; and the descriptors compared.
+/// The guided matching's time (ns) by stage, summed over the pairs' tasks (each with what its
+/// threads waited for meanwhile): the proposals, the selection with RANSAC, the occlusion test;
+/// and the descriptors compared. Reset by [`reset_guided_counters`] before a matching.
 pub static GUIDED_NANOS: [std::sync::atomic::AtomicU64; 3] =
     [const { std::sync::atomic::AtomicU64::new(0) }; 3];
 pub static GUIDED_COMPARED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+pub fn reset_guided_counters() {
+    for n in &GUIDED_NANOS {
+        n.store(0, std::sync::atomic::Ordering::Relaxed);
+    }
+    GUIDED_COMPARED.store(0, std::sync::atomic::Ordering::Relaxed);
+}
 fn guided_lap(stage: usize, t: &mut std::time::Instant) {
     GUIDED_NANOS[stage].fetch_add(
         t.elapsed().as_nanos() as u64,

@@ -424,20 +424,22 @@ mod tests {
         let d = [0, 1, 2].map(|i| b[i] - a[i]);
         let len = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
         let stop = len - margin;
-        let u = d.map(|x| x / len);
-        let inside_until = |a: f32, b: f32, u: f32, lo: f32, hi: f32| -> f32 {
-            if u == 0. {
+        let inside_until = |a: f32, b: f32, d: f32, lo: f32, hi: f32| -> f32 {
+            if d == 0. {
                 return 3.4e38;
             }
-            let bound = if u > 0. { hi } else { lo };
+            if d.abs() < 1e-30 {
+                return 0.;
+            }
+            let bound = if d > 0. { hi } else { lo };
             let eps = 1e-6 * (a.abs() + b.abs() + bound.abs());
-            (bound - a) / u - eps / u.abs()
+            ((bound - a) / d) * len - (eps / d.abs()) * len
         };
         let skipped = |k: u32, at: [i32; 3], cells: f32| -> u32 {
             let size = cells / inv;
             let lo = at.map(|x| x as f32 * size);
             let t = (0..3)
-                .map(|i| inside_until(a[i], b[i], u[i], lo[i], lo[i] + size))
+                .map(|i| inside_until(a[i], b[i], d[i], lo[i], lo[i] + size))
                 .fold(f32::INFINITY, f32::min);
             let j = (t.min(stop) / step).floor() - 1.;
             if j > k as f32 { j as u32 } else { k }
@@ -505,7 +507,11 @@ mod tests {
             (seed >> 11) as f32 / (1u64 << 53) as f32
         };
         // the review's ray: x on a block's border, nearly along it
-        let mut rays = vec![([0.159_999_98f32, 0., 0.01], [0.160_000_01f32, 1., 0.01])];
+        // and one whose slope on x is subnormal (flushed to zero on a GPU) while its x is not
+        let mut rays = vec![
+            ([0.159_999_98f32, 0., 0.01], [0.160_000_01f32, 1., 0.01]),
+            ([0., 0., 0.], [-3e-37, 100., 0.]),
+        ];
         for _ in 0..3000 {
             let a = [0, 1, 2].map(|_| (rnd() - 0.5) * 200.);
             let mut b = [0, 1, 2].map(|i| a[i] + (rnd() - 0.5) * 60.);

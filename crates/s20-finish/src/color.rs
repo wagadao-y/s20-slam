@@ -83,7 +83,8 @@ pub struct ColorParams {
     /// Cells (m, x facing) of the outlier test and the exposure gains.
     pub cell: f64,
     /// Cells (m) of the exposure gains when coarser than `cell`: an image's cells merged into
-    /// them (0 or not above `cell`: the cells themselves). 0.2 m: of 4650 images outdoors 393 ->
+    /// them (0 or not above `cell`: the cells themselves), rounded so that 2 m holds a whole
+    /// number of them (the parts' grid: a gain cell lies in one part). 0.2 m: of 4650 images outdoors 393 ->
     /// 37 million entries, at the highest 26.2 -> 15.0 GB and the coloring 481 -> 370 s, the
     /// colors within 2 steps of the 0.05 m cells' for 99 % of the points (indoors 3).
     pub gain_cell: f64,
@@ -1450,6 +1451,16 @@ fn gain_cells(
     }
 }
 
+/// The gain cells' size, when coarser than the cells: `gain_cell` rounded so that the parts'
+/// grid (their borders lie on multiples of [`SMALL`] x [`BASE`], 2 m) holds a whole number of
+/// them, so that a gain cell lies in one part (with all of its cells; a part with no points has
+/// none of them).
+fn gain_cell_of(a: &ColorParams) -> Option<f64> {
+    let grid = SMALL as f64 * BASE;
+    let g = grid / (grid / a.gain_cell).round().max(1.);
+    (a.gain && g > a.cell).then_some(g)
+}
+
 /// An image's gain entries of the cells merged into the gain cells: each gain cell's points, and
 /// its mean color weighted by them (the cells' entries as the gains take them).
 fn merged_gains(gain: &[(u32, u32, [f32; 3])], gc: &GainCells) -> Vec<(u32, u32, [f32; 3])> {
@@ -1499,8 +1510,8 @@ fn gather(
     let owns = |c: [f64; 2]| out.contains([0, 1].map(|d| (c[d] / BASE).floor() as i64));
     let mut cells = cells(p, scene.n, &part.ids, a.cell, owns);
     // the gain entries of the cells whose gain cell the part owns
-    let coarse = (a.gain && a.gain_cell > a.cell).then(|| {
-        let gc = gain_cells(&cells, a.cell, a.gain_cell, owns);
+    let coarse = gain_cell_of(a).map(|g| {
+        let gc = gain_cells(&cells, a.cell, g, owns);
         cells.owned.clone_from(&gc.owned);
         gc
     });
@@ -2668,6 +2679,28 @@ mod tests {
         let ratio = g[0][0] / g[1][0];
         assert!((ratio - 2.).abs() < 0.2, "gain ratio {ratio}");
         assert!((g[0][0] * g[1][0] - 1.).abs() < 0.2, "gains are centered");
+    }
+
+    #[test]
+    fn gain_cells_divide_the_parts_grid() {
+        let of = |gain_cell: f64| {
+            gain_cell_of(&ColorParams {
+                gain_cell,
+                ..Default::default()
+            })
+        };
+        assert_eq!(of(0.2), Some(0.2));
+        assert_eq!(of(0.3), Some(2. / 7.));
+        assert_eq!(of(0.8), Some(2. / 3.));
+        assert_eq!(of(5.), Some(2.));
+        // not coarser than the 0.05 m cells: none
+        assert_eq!(of(0.04), None);
+        assert_eq!(of(0.), None);
+        let off = ColorParams {
+            gain: false,
+            ..Default::default()
+        };
+        assert_eq!(gain_cell_of(&off), None);
     }
 
     #[test]

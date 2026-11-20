@@ -729,6 +729,7 @@ pub fn collect(input: &Input, job: &Job) -> Result<Collected> {
         crate::pairs::GUIDED_NANOS[k].load(std::sync::atomic::Ordering::Relaxed) as f64 * 1e-9
     };
     let matching = std::time::Instant::now();
+    crate::pairs::reset_guided_counters();
     let done = std::sync::atomic::AtomicU64::new(0);
     let observed: Vec<(Obs, Kind)> = pairs
         .par_iter()
@@ -772,7 +773,7 @@ pub fn collect(input: &Input, job: &Job) -> Result<Collected> {
         })
         .collect();
     job.log(&format!(
-        "matching seconds: the features placed on the cloud {placed_s:.1}, the guided matching of {} pairs {:.1} (CPU over the threads: proposals {:.0}, selection and RANSAC {:.0}, occlusion {:.0}; {:.2} G descriptors compared)",
+        "matching seconds: the features placed on the cloud {placed_s:.1}, the guided matching of {} pairs {:.1} (summed over the pairs' tasks: proposals {:.0}, selection and RANSAC {:.0}, occlusion {:.0}; {:.2} G descriptors compared)",
         pairs.len(),
         matching.elapsed().as_secs_f64(),
         nanos(0),

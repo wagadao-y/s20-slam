@@ -95,28 +95,32 @@ fn has_block(k: vec2u) -> bool {
     return false;
 }
 
-// how far along a ray from `a` (to `b`, along `u`) its steps surely stay in the slab lo..hi of
-// one axis: where it leaves the slab, less the rounding of a step's coordinate (well over that of
-// `a + d * (s / len)` and of the voxel's `floor(x * inv)`, in single precision, fused or not)
-// divided by the ray's slope on the axis: on an axis the ray nearly runs along, a coordinate's
-// rounding moves its crossing far along the ray
-fn inside_until(a: f32, b: f32, u: f32, lo: f32, hi: f32) -> f32 {
-    if (u == 0.0) {
+// how far along a ray from `a` to `b` (`d` = b - a, `len` long) its steps surely stay in the slab
+// lo..hi of one axis: where it leaves the slab, less the rounding of a step's coordinate (well
+// over that of `a + d * (s / len)` and of the voxel's `floor(x * inv)`, in single precision, fused
+// or not) over the ray's slope on the axis: on an axis the ray nearly runs along, a coordinate's
+// rounding moves its crossing far along the ray. By `d` as the steps are (a slope `d / len` can
+// be subnormal and flushed to zero); a `d` near the subnormals: no skip on its account.
+fn inside_until(a: f32, b: f32, d: f32, len: f32, lo: f32, hi: f32) -> f32 {
+    if (d == 0.0) {
         return 3.4e38;
     }
-    let bound = select(lo, hi, u > 0.0);
+    if (abs(d) < 1e-30) {
+        return 0.0;
+    }
+    let bound = select(lo, hi, d > 0.0);
     let eps = 1e-6 * (abs(a) + abs(b) + abs(bound));
-    return (bound - a) / u - eps / abs(u);
+    return ((bound - a) / d) * len - (eps / abs(d)) * len;
 }
 
 // the next step of a ray at step `k` in the empty box `at` of `cells` voxels per axis: two
 // before it surely leaves the box
-fn skipped(k: u32, a: vec3f, d: vec3f, u: vec3f, stop: f32, at: vec3i, cells: f32) -> u32 {
+fn skipped(k: u32, a: vec3f, d: vec3f, len: f32, stop: f32, at: vec3i, cells: f32) -> u32 {
     let size = cells / P.inv;
     let lo = vec3f(at) * size;
     let hi = lo + vec3f(size);
     let b = a + d;
-    let t_in = min(min(inside_until(a.x, b.x, u.x, lo.x, hi.x), inside_until(a.y, b.y, u.y, lo.y, hi.y)), inside_until(a.z, b.z, u.z, lo.z, hi.z));
+    let t_in = min(min(inside_until(a.x, b.x, d.x, len, lo.x, hi.x), inside_until(a.y, b.y, d.y, len, lo.y, hi.y)), inside_until(a.z, b.z, d.z, len, lo.z, hi.z));
     let j = floor(min(t_in, stop) / P.step) - 1.0;
     if (j > f32(k)) {
         return u32(j);
@@ -171,7 +175,7 @@ fn walk(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) lid: ve
         if (!has_large(pack(lc))) {
             empty_large = lc;
             has_empty_large = true;
-            k = skipped(k, a, d, u, stop, lc, 32.0);
+            k = skipped(k, a, d, len, stop, lc, 32.0);
             continue;
         }
         let bc = c >> vec3u(3u);
@@ -181,7 +185,7 @@ fn walk(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) lid: ve
         if (!has_block(pack(bc))) {
             empty = bc;
             has_empty = true;
-            k = skipped(k, a, d, u, stop, bc, 8.0);
+            k = skipped(k, a, d, len, stop, bc, 8.0);
             continue;
         }
         let v = voxel(pack(c));
