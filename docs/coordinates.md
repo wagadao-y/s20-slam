@@ -1,6 +1,6 @@
 # Placing the point cloud in a coordinate system
 
-With GNSS (RTK or PPK) the results are in local coordinates around an origin near the site: X = east, Y = north, Z = up, in meters. The origin's latitude, longitude and ellipsoidal height (WGS84) are in `coordinate_frame.json` in the output folder. Z is the height above the origin's tangent plane, not above sea level.
+With GNSS (RTK or PPK) the results are in local coordinates around an origin where the GNSS solution first met the quality conditions (usually near where the recording started): X = east, Y = north, Z = up, in meters. The origin's latitude, longitude and ellipsoidal height (WGS84) are in `coordinate_frame.json` in the output folder. Z is the height above the origin's tangent plane, not above sea level.
 
 To put the results in UTM, a national grid or another coordinate reference system, transform them with [PDAL](https://pdal.org/). The output folder has a pipeline for it, `pdal_to_crs.json`, with the origin filled in (only when GNSS was used; written by **Trajectory and image pose export**).
 
