@@ -641,7 +641,13 @@ impl GpuSift {
         let bytes = kps.len() as u64 * 128;
         let index = self.dispatch(
             s,
-            &[(DESCRIBE, 0, (kps.len() as u32).div_ceil(64), 1)],
+            // (a workgroup a keypoint; MAX_KEPT within 65535 x 65535)
+            &[(
+                DESCRIBE,
+                0,
+                (kps.len() as u32).min(65535),
+                (kps.len() as u32).div_ceil(65535),
+            )],
             &[(&s.desc, 0, BACK_DESC, bytes)],
         );
         let words: Vec<u32> = {

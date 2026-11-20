@@ -464,13 +464,22 @@ fn orient(@builtin(global_invocation_id) id: vec3<u32>) {
     }
 }
 
-// a kept keypoint's 128 bytes (OpenCV's calcSIFTDescriptor), four to a word
+// a kept keypoint's 128 bytes (OpenCV's calcSIFTDescriptor), four to a word: a workgroup a
+// keypoint, its threads taking the samples in turn and adding to the histogram in fixed point
+// (integers: the same sums in any order), the first thread normalizing it
+var<workgroup> whist: array<atomic<u32>, 360>;
+
 @compute @workgroup_size(64)
-fn describe(@builtin(global_invocation_id) id: vec3<u32>) {
-    if id.x >= P.count {
+fn describe(@builtin(workgroup_id) wid: vec3<u32>, @builtin(num_workgroups) nwg: vec3<u32>, @builtin(local_invocation_index) lid: u32) {
+    let key = wid.y * nwg.x + wid.x;
+    if key >= P.count {
         return;
     }
-    let kp = kept[id.x];
+    for (var k = lid; k < 360u; k += 64u) {
+        atomicStore(&whist[k], 0u);
+    }
+    workgroupBarrier();
+    let kp = kept[key];
     let sz = gsize(kp.octave);
     let scl = kp.size * 0.5 / (P.base * f32(1u << kp.octave));
     var ori = 360.0 - kp.angle;
@@ -490,72 +499,82 @@ fn describe(@builtin(global_invocation_id) id: vec3<u32>) {
     cos_t /= hist_width;
     sin_t /= hist_width;
     let e = exp_scale / (hist_width * hist_width);
-    var hist: array<f32, 360>;
-    for (var k = 0; k < 360; k++) {
-        hist[k] = 0.0;
-    }
-    for (var i = -radius; i <= radius; i++) {
-        for (var j = -radius; j <= radius; j++) {
-            let x_rot = f32(j) * cos_t - f32(i) * sin_t;
-            let y_rot = f32(j) * sin_t + f32(i) * cos_t;
-            let rbin = y_rot + f32(D) / 2.0 - 0.5;
-            let cbin = x_rot + f32(D) / 2.0 - 0.5;
-            let r = py + i;
-            let c = px + j;
-            if !(rbin > -1.0 && rbin < f32(D) && cbin > -1.0 && cbin < f32(D) && r > 0
-                && r < sz.y - 1 && c > 0 && c < sz.x - 1) {
-                continue;
-            }
-            let dx = gpx(kp.octave, kp.layer, c + 1, r) - gpx(kp.octave, kp.layer, c - 1, r);
-            let dy = gpx(kp.octave, kp.layer, c, r - 1) - gpx(kp.octave, kp.layer, c, r + 1);
-            let wgt = exp(f32(i * i) * e) * exp(f32(j * j) * e);
-            let mag = sqrt(dx * dx + dy * dy) * wgt;
-            let obin = (fast_atan2_deg(dy, dx) - ori) * bins_per_deg;
-            let r0 = floor(rbin);
-            let c0 = floor(cbin);
-            var o0 = floor(obin);
-            let rb = rbin - r0;
-            let cb = cbin - c0;
-            let ob = obin - o0;
-            if o0 < 0.0 {
-                o0 += f32(N);
-            }
-            if o0 >= f32(N) {
-                o0 -= f32(N);
-            }
-            let v_r1 = mag * rb;
-            let v_r0 = mag - v_r1;
-            let v_rc11 = v_r1 * cb;
-            let v_rc10 = v_r1 - v_rc11;
-            let v_rc01 = v_r0 * cb;
-            let v_rc00 = v_r0 - v_rc01;
-            let v_rco111 = v_rc11 * ob;
-            let v_rco110 = v_rc11 - v_rco111;
-            let v_rco101 = v_rc10 * ob;
-            let v_rco100 = v_rc10 - v_rco101;
-            let v_rco011 = v_rc01 * ob;
-            let v_rco010 = v_rc01 - v_rco011;
-            let v_rco001 = v_rc00 * ob;
-            let v_rco000 = v_rc00 - v_rco001;
-            let idx = ((i32(r0) + 1) * (D + 2) + (i32(c0) + 1)) * (N + 2) + i32(o0);
-            hist[idx] += v_rco000;
-            hist[idx + 1] += v_rco001;
-            hist[idx + (N + 2)] += v_rco010;
-            hist[idx + (N + 3)] += v_rco011;
-            hist[idx + (D + 2) * (N + 2)] += v_rco100;
-            hist[idx + (D + 2) * (N + 2) + 1] += v_rco101;
-            hist[idx + (D + 3) * (N + 2)] += v_rco110;
-            hist[idx + (D + 3) * (N + 2) + 1] += v_rco111;
+    let side = 2 * radius + 1;
+    let samples = u32(side * side);
+    // the fixed point: a sample adds its magnitude (at most 255 * sqrt 2 on 0..255 images) over
+    // eight bins, so no bin's sum passes 2^32 - 1
+    let fixed = 4.0e9 / (f32(samples) * 362.0);
+    for (var s = lid; s < samples; s += 64u) {
+        let i = i32(s) / side - radius;
+        let j = i32(s) % side - radius;
+        let x_rot = f32(j) * cos_t - f32(i) * sin_t;
+        let y_rot = f32(j) * sin_t + f32(i) * cos_t;
+        let rbin = y_rot + f32(D) / 2.0 - 0.5;
+        let cbin = x_rot + f32(D) / 2.0 - 0.5;
+        let r = py + i;
+        let c = px + j;
+        if !(rbin > -1.0 && rbin < f32(D) && cbin > -1.0 && cbin < f32(D) && r > 0
+            && r < sz.y - 1 && c > 0 && c < sz.x - 1) {
+            continue;
         }
+        let dx = gpx(kp.octave, kp.layer, c + 1, r) - gpx(kp.octave, kp.layer, c - 1, r);
+        let dy = gpx(kp.octave, kp.layer, c, r - 1) - gpx(kp.octave, kp.layer, c, r + 1);
+        let wgt = exp(f32(i * i) * e) * exp(f32(j * j) * e);
+        let mag = sqrt(dx * dx + dy * dy) * wgt;
+        let obin = (fast_atan2_deg(dy, dx) - ori) * bins_per_deg;
+        let r0 = floor(rbin);
+        let c0 = floor(cbin);
+        var o0 = floor(obin);
+        let rb = rbin - r0;
+        let cb = cbin - c0;
+        let ob = obin - o0;
+        if o0 < 0.0 {
+            o0 += f32(N);
+        }
+        if o0 >= f32(N) {
+            o0 -= f32(N);
+        }
+        let v_r1 = mag * rb;
+        let v_r0 = mag - v_r1;
+        let v_rc11 = v_r1 * cb;
+        let v_rc10 = v_r1 - v_rc11;
+        let v_rc01 = v_r0 * cb;
+        let v_rc00 = v_r0 - v_rc01;
+        let v_rco111 = v_rc11 * ob;
+        let v_rco110 = v_rc11 - v_rco111;
+        let v_rco101 = v_rc10 * ob;
+        let v_rco100 = v_rc10 - v_rco101;
+        let v_rco011 = v_rc01 * ob;
+        let v_rco010 = v_rc01 - v_rco011;
+        let v_rco001 = v_rc00 * ob;
+        let v_rco000 = v_rc00 - v_rco001;
+        let idx = u32(((i32(r0) + 1) * (D + 2) + (i32(c0) + 1)) * (N + 2) + i32(o0));
+        let d1 = u32(D + 2) * u32(N + 2);
+        let d2 = u32(D + 3) * u32(N + 2);
+        atomicAdd(&whist[idx], u32(max(v_rco000, 0.0) * fixed + 0.5));
+        atomicAdd(&whist[idx + 1u], u32(max(v_rco001, 0.0) * fixed + 0.5));
+        atomicAdd(&whist[idx + u32(N + 2)], u32(max(v_rco010, 0.0) * fixed + 0.5));
+        atomicAdd(&whist[idx + u32(N + 3)], u32(max(v_rco011, 0.0) * fixed + 0.5));
+        atomicAdd(&whist[idx + d1], u32(max(v_rco100, 0.0) * fixed + 0.5));
+        atomicAdd(&whist[idx + d1 + 1u], u32(max(v_rco101, 0.0) * fixed + 0.5));
+        atomicAdd(&whist[idx + d2], u32(max(v_rco110, 0.0) * fixed + 0.5));
+        atomicAdd(&whist[idx + d2 + 1u], u32(max(v_rco111, 0.0) * fixed + 0.5));
+    }
+    workgroupBarrier();
+    if lid != 0u {
+        return;
     }
     var raw: array<f32, 128>;
     for (var i = 0; i < D; i++) {
         for (var j = 0; j < D; j++) {
-            let idx = ((i + 1) * (D + 2) + (j + 1)) * (N + 2);
-            hist[idx] += hist[idx + N];
-            hist[idx + 1] += hist[idx + N + 1];
+            let idx = u32(((i + 1) * (D + 2) + (j + 1)) * (N + 2));
+            // (the bins past the last orientation wrap onto the first two)
             for (var k = 0; k < N; k++) {
-                raw[(i * D + j) * N + k] = hist[idx + k];
+                var v = f32(atomicLoad(&whist[idx + u32(k)]));
+                if k < 2 {
+                    v += f32(atomicLoad(&whist[idx + u32(N + k)]));
+                }
+                raw[(i * D + j) * N + k] = v / fixed;
             }
         }
     }
@@ -576,6 +595,6 @@ fn describe(@builtin(global_invocation_id) id: vec3<u32>) {
             let v = u32(clamp(floor(raw[k * 4 + b] * f + 0.5), 0.0, 255.0));
             word |= v << (8u * u32(b));
         }
-        desc[id.x * 32u + u32(k)] = word;
+        desc[key * 32u + u32(k)] = word;
     }
 }
