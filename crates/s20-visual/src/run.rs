@@ -699,6 +699,7 @@ pub fn collect(input: &Input, job: &Job) -> Result<Collected> {
     // each image's features placed on the cloud and put in cells, once (every pair an image is in
     // asks for them: 2006 images, 10 times as many placements before)
     let loose = input.tracks.is_some();
+    let placing = std::time::Instant::now();
     let (placed, cells): (Vec<Vec<Option<Placed>>>, Vec<Option<Cells>>) = (0..poses.names.len())
         .into_par_iter()
         .map(|i| match &feats[i] {
@@ -716,6 +717,8 @@ pub fn collect(input: &Input, job: &Job) -> Result<Collected> {
             None => (Vec::new(), None),
         })
         .unzip();
+    let placed_s = placing.elapsed().as_secs_f64();
+    let matching = std::time::Instant::now();
     let done = std::sync::atomic::AtomicU64::new(0);
     let observed: Vec<(Obs, Kind)> = pairs
         .par_iter()
@@ -756,6 +759,11 @@ pub fn collect(input: &Input, job: &Job) -> Result<Collected> {
             o.into_iter().map(move |o| (o, kind))
         })
         .collect();
+    job.log(&format!(
+        "matching seconds: the features placed on the cloud {placed_s:.1}, the guided matching of {} pairs {:.1}",
+        pairs.len(),
+        matching.elapsed().as_secs_f64()
+    ));
     let free_parts = if input.track_points.is_some() {
         // the finer features for the epipolar search, when asked for
         let fine: Option<Vec<Option<Features>>> = match input.track_features {

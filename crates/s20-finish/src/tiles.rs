@@ -475,7 +475,12 @@ pub fn finish_tiled(
         lap(&mut seconds, "transient");
     }
     for (k, s) in &seconds {
-        job.log(&format!("seconds {k}: {s:.1}"));
+        // (`.n.` or `.n` at the end: a count, not seconds)
+        if k.contains(".n.") || k.ends_with(".n") {
+            job.log(&format!("count {k}: {s:.0}"));
+        } else {
+            job.log(&format!("seconds {k}: {s:.1}"));
+        }
     }
     Ok(Tiled {
         observations: total,

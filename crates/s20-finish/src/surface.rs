@@ -960,6 +960,16 @@ pub fn prepare(
         job.log(&format!("free space dumped to {dir}"));
     }
     timed_stage(&mut timings, &mut clock, "free_space", job);
+    fn free_times(
+        timings: &mut BTreeMap<String, f64>,
+        name: &str,
+        f: &Option<crate::freespace::FreeSpace>,
+    ) {
+        for (k, s) in f.iter().flat_map(|f| &f.times) {
+            *timings.entry(format!("{name}.{k}")).or_default() += s;
+        }
+    }
+    free_times(&mut timings, "free_space", &free);
     // A second count on finer voxels: a thin object and the mixed returns around it fall into
     // separate voxels, so the latter are left out while the object stays.
     let fine = (p.free_fine_voxel > 0. && p.free_fine_ratio > 0.).then(|| {
@@ -967,6 +977,7 @@ pub fn prepare(
     });
     let is_free = |o: &Observation| is_free(&free, &fine, o, p);
     timed_stage(&mut timings, &mut clock, "free_space_fine", job);
+    free_times(&mut timings, "free_space_fine", &fine);
     let kept: Vec<Observation>;
     let support = if free.is_some() && p.free_support {
         kept = raw.par_iter().filter(|o| !is_free(o)).copied().collect();

@@ -70,6 +70,17 @@ fn map_err(e: impl std::fmt::Debug) -> anyhow::Error {
     anyhow::anyhow!("GPU map: {e:?}")
 }
 
+/// Where a walk's time went: the tables (on the CPU) and the buffers, the batches, the waits for
+/// the GPU (the walk and the count of each batch), and the read-back.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct WalkTimes {
+    pub tables: f64,
+    pub batches: usize,
+    pub rays: usize,
+    pub waits: f64,
+    pub total: f64,
+}
+
 /// The scans whose rays passed through each voxel of `keys` (the measured voxels; `blocks`: the
 /// blocks of 8 voxels per axis holding them; `centroids`: per voxel, for `pass_radius`), over
 /// `scans` scans whose rays `rays_of(scan, out)` appends as (sensor, 0), (point, 0).
@@ -84,7 +95,7 @@ pub fn passes(
     scans: usize,
     rays_of: impl Fn(usize, &mut Vec<[f32; 4]>),
     progress: impl FnMut(usize) -> Result<()>,
-) -> Result<Vec<u32>> {
+) -> Result<(Vec<u32>, WalkTimes)> {
     gpu.checked(|| walk_all(gpu, keys, blocks, centroids, w, scans, rays_of, progress))
 }
 
@@ -98,7 +109,9 @@ fn walk_all(
     scans: usize,
     rays_of: impl Fn(usize, &mut Vec<[f32; 4]>),
     mut progress: impl FnMut(usize) -> Result<()>,
-) -> Result<Vec<u32>> {
+) -> Result<(Vec<u32>, WalkTimes)> {
+    let start = std::time::Instant::now();
+    let mut times = WalkTimes::default();
     let dev = &gpu.device;
     let (vt, vmask) = table(keys, 3);
     let (bt, bmask) = table(blocks, 2);
@@ -197,6 +210,7 @@ fn walk_all(
         })
     };
     let (walk, count) = (pipeline("walk"), pipeline("count"));
+    times.tables = start.elapsed().as_secs_f64();
     let mut params = Params {
         inv: (1. / w.voxel) as f32,
         step: (0.5 * w.voxel) as f32,
@@ -314,8 +328,12 @@ fn walk_all(
         gpu.queue.submit([enc.finish()]);
         // the next batch while the GPU walks this one
         let next = batch(&mut ahead);
+        let t = std::time::Instant::now();
         dev.poll(wgpu::PollType::wait_indefinitely())
             .context("GPU poll")?;
+        times.waits += t.elapsed().as_secs_f64();
+        times.batches += 1;
+        times.rays += nr;
         progress(done)?;
         done = next;
         std::mem::swap(&mut cur, &mut ahead);
@@ -344,7 +362,8 @@ fn walk_all(
         bytemuck::cast_slice::<u8, u32>(&view)[..keys.len()].to_vec()
     };
     back.unmap();
-    Ok(out)
+    times.total = start.elapsed().as_secs_f64();
+    Ok((out, times))
 }
 
 #[cfg(test)]
@@ -368,6 +387,112 @@ mod tests {
         // and the GPU still works
         assert!(g.checked(|| Ok(())).is_ok());
     }
+    /// freewalk.wgsl's walk in single precision: the voxels of the occupied blocks its steps look
+    /// up, stepping one by one or skipping the empty blocks as the shader does.
+    fn walked(
+        a: [f32; 3],
+        b: [f32; 3],
+        voxel: f32,
+        occupied: &impl Fn([i32; 3]) -> bool,
+        skip: bool,
+    ) -> Vec<[i32; 3]> {
+        let (inv, step, margin) = (1. / voxel, 0.5 * voxel, 0.06f32);
+        let d = [0, 1, 2].map(|i| b[i] - a[i]);
+        let len = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+        let stop = len - margin;
+        let u = d.map(|x| x / len);
+        let inside_until = |a: f32, b: f32, u: f32, lo: f32, hi: f32| -> f32 {
+            if u == 0. {
+                return 3.4e38;
+            }
+            let bound = if u > 0. { hi } else { lo };
+            let eps = 1e-6 * (a.abs() + b.abs() + bound.abs());
+            (bound - a) / u - eps / u.abs()
+        };
+        let (mut last, mut empty) = (None, None);
+        let mut out = Vec::new();
+        let mut k = 1u32;
+        loop {
+            let s = k as f32 * step;
+            // (as the shader: a NaN stops too)
+            #[allow(clippy::neg_cmp_op_on_partial_ord)]
+            if !(s < stop) {
+                break;
+            }
+            k += 1;
+            let c = [0, 1, 2].map(|i| ((a[i] + d[i] * (s / len)) * inv).floor() as i32);
+            if last == Some(c) {
+                continue;
+            }
+            last = Some(c);
+            let bc = c.map(|x| x >> 3);
+            if empty == Some(bc) {
+                continue;
+            }
+            if !occupied(bc) {
+                empty = Some(bc);
+                if skip {
+                    let size = 8. / inv;
+                    let lo = bc.map(|x| x as f32 * size);
+                    let t = (0..3)
+                        .map(|i| inside_until(a[i], b[i], u[i], lo[i], lo[i] + size))
+                        .fold(f32::INFINITY, f32::min);
+                    let j = (t.min(stop) / step).floor() - 1.;
+                    if j > k as f32 {
+                        k = j as u32;
+                    }
+                }
+                continue;
+            }
+            out.push(c);
+        }
+        out
+    }
+
+    #[test]
+    fn skipping_the_empty_blocks_looks_up_the_same_voxels() {
+        // occupied: a pseudo-random third of the blocks
+        let occupied = |b: [i32; 3]| {
+            let h = (b[0] as u32).wrapping_mul(0x9e37_79b1)
+                ^ (b[1] as u32).wrapping_mul(0x85eb_ca6b)
+                ^ (b[2] as u32).wrapping_mul(0xc2b2_ae35);
+            (h >> 7).is_multiple_of(3)
+        };
+        let mut seed = 7u64;
+        let mut rnd = || {
+            seed = seed
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            (seed >> 11) as f32 / (1u64 << 53) as f32
+        };
+        // the review's ray: x on a block's border, nearly along it
+        let mut rays = vec![([0.159_999_98f32, 0., 0.01], [0.160_000_01f32, 1., 0.01])];
+        for _ in 0..3000 {
+            let a = [0, 1, 2].map(|_| (rnd() - 0.5) * 200.);
+            let mut b = [0, 1, 2].map(|i| a[i] + (rnd() - 0.5) * 60.);
+            // a third nearly along an axis's borders: that axis on a block's border at both ends
+            if rnd() < 0.33 {
+                let i = (rnd() * 3.) as usize % 3;
+                let border = (a[i] / 0.16).round() * 0.16;
+                b[i] = border + (rnd() - 0.5) * 1e-5;
+                let mut a = a;
+                a[i] = border + (rnd() - 0.5) * 1e-5;
+                rays.push((a, b));
+                continue;
+            }
+            rays.push((a, b));
+        }
+        for (a, b) in rays {
+            for voxel in [0.02f32, 0.01] {
+                assert_eq!(
+                    walked(a, b, voxel, &occupied, true),
+                    walked(a, b, voxel, &occupied, false),
+                    "{a:?} -> {b:?}, voxel {voxel}"
+                );
+            }
+        }
+    }
+
     #[test]
     fn every_key_is_found_in_its_table() {
         let keys: Vec<u64> = (0..1000u64)

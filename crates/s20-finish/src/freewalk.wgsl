@@ -78,6 +78,20 @@ fn has_block(k: vec2u) -> bool {
     return false;
 }
 
+// how far along a ray from `a` (to `b`, along `u`) its steps surely stay in the slab lo..hi of
+// one axis: where it leaves the slab, less the rounding of a step's coordinate (well over that of
+// `a + d * (s / len)` and of the voxel's `floor(x * inv)`, in single precision, fused or not)
+// divided by the ray's slope on the axis: on an axis the ray nearly runs along, a coordinate's
+// rounding moves its crossing far along the ray
+fn inside_until(a: f32, b: f32, u: f32, lo: f32, hi: f32) -> f32 {
+    if (u == 0.0) {
+        return 3.4e38;
+    }
+    let bound = select(lo, hi, u > 0.0);
+    let eps = 1e-6 * (abs(a) + abs(b) + abs(bound));
+    return (bound - a) / u - eps / abs(u);
+}
+
 fn index(wid: vec3u, lid: vec3u, nwg: vec3u, size: u32) -> u32 {
     return (wid.y * nwg.x + wid.x) * size + lid.x;
 }
@@ -119,6 +133,17 @@ fn walk(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_id) lid: ve
         if (!has_block(pack(bc))) {
             empty = bc;
             has_empty = true;
+            // on to two steps before the ray surely leaves the block: the steps skipped are all
+            // in it (the same steps as one by one, without their lookups)
+            let size = 8.0 / P.inv;
+            let lo = vec3f(bc) * size;
+            let hi = lo + vec3f(size);
+            let b = a + d;
+            let t_in = min(min(inside_until(a.x, b.x, u.x, lo.x, hi.x), inside_until(a.y, b.y, u.y, lo.y, hi.y)), inside_until(a.z, b.z, u.z, lo.z, hi.z));
+            let j = floor(min(t_in, stop) / P.step) - 1.0;
+            if (j > f32(k)) {
+                k = u32(j);
+            }
             continue;
         }
         let v = voxel(pack(c));

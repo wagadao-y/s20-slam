@@ -47,6 +47,9 @@ pub struct FreeSpace {
     counts: HashMap<u64, (u32, u32)>,
     /// Voxels kept by the direction-spread protection: reported as never passed.
     protected: FxHashSet<u64>,
+    /// Where the count's time went (s; `n.`: the GPU's batches, its rays and the voxels, as
+    /// counts), for the log.
+    pub times: Vec<(&'static str, f64)>,
 }
 /// Measured voxels are grouped in blocks of 2^BLOCK_BITS voxels per axis (16 cm for 2 cm
 /// voxels). Most steps of a ray are in the air of a room, in blocks without any measured
@@ -129,6 +132,7 @@ impl FreeSpace {
         let (voxel, margin) = (o.voxel, o.margin);
         job.report("free space", 0, 1);
         let inv = 1. / voxel;
+        let started = std::time::Instant::now();
         let p = |o: &Observation| o.xyz.map(|x| x as f64);
         // Scans in order; the observations of one scan are contiguous.
         let bounds = scan_bounds(raw);
@@ -196,6 +200,7 @@ impl FreeSpace {
         } else {
             HashMap::default()
         };
+        let counted = started.elapsed().as_secs_f64();
         let r2 = o.pass_radius * o.pass_radius;
         let far = o.pass_far;
         // Per scan: its observations here and its rays from elsewhere, one vote per voxel.
@@ -279,7 +284,8 @@ impl FreeSpace {
                     }
                 }
             });
-        if let Some(per_voxel) = on_gpu {
+        if let Some((per_voxel, w)) = on_gpu {
+            let walked = started.elapsed().as_secs_f64();
             let mut total = 0u64;
             for (k, n) in keys.iter().zip(per_voxel) {
                 counts.get_mut(k).unwrap().1 = n;
@@ -291,10 +297,21 @@ impl FreeSpace {
                 voxel * 1000.,
                 total
             ));
+            let times = vec![
+                ("counting", counted),
+                ("walk", w.total),
+                ("walk.tables", w.tables),
+                ("walk.waits", w.waits),
+                ("walk.n.batches", w.batches as f64),
+                ("walk.n.rays", w.rays as f64),
+                ("n.voxels", keys.len() as f64),
+                ("after", started.elapsed().as_secs_f64() - walked),
+            ];
             return Self {
                 voxel,
                 counts,
                 protected,
+                times,
             };
         }
         drop(keys);
@@ -370,6 +387,7 @@ impl FreeSpace {
             voxel,
             counts,
             protected,
+            times: vec![("counting", counted)],
         }
     }
     /// Debug (`S20_FREE_DUMP=<dir>`): for the voxels this count finds free (`pass >= min_pass`
