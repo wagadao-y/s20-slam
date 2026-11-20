@@ -21,7 +21,7 @@ impl App {
             );
             ui.add_space(20.0);
             ui.horizontal(|ui| {
-                // the two buttons centerd
+                // the two buttons centered
                 let width = 2.0 * 220.0 + ui.spacing().item_spacing.x;
                 ui.add_space(((ui.available_width() - width) / 2.0).max(0.0));
                 let big = |text: String| {

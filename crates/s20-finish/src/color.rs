@@ -82,6 +82,11 @@ pub struct ColorParams {
     pub outlier_penalty: f64,
     /// Cells (m, x facing) of the outlier test and the exposure gains.
     pub cell: f64,
+    /// Cells (m) of the exposure gains when coarser than `cell`: an image's cells merged into
+    /// them (0 or not above `cell`: the cells themselves). 0.2 m: of 4650 images outdoors 393 ->
+    /// 37 million entries, at the highest 26.2 -> 15.0 GB and the coloring 481 -> 370 s, the
+    /// colors within 2 steps of the 0.05 m cells' for 99 % of the points (indoors 3).
+    pub gain_cell: f64,
     /// exp((score - best) / temperature) weighting of the blended views.
     pub temperature: f64,
     /// Blend in two bands (0: off): the detail (a view's color off its cell's mean) from the
@@ -128,6 +133,7 @@ impl Default for ColorParams {
             outlier: 80.,
             outlier_penalty: 3.,
             cell: 0.05,
+            gain_cell: 0.2,
             temperature: 2.,
             band_temperature: 8.,
             dark_window: 8.,
@@ -1400,8 +1406,61 @@ struct ColorPart {
     ids: Vec<u32>,
 }
 
+/// The cells of the gains when they are coarser than the cells: per cell its gain cell (the one
+/// holding its center: of the same facing), and per gain cell its key.
+struct GainCells {
+    of_cell: Vec<u32>,
+    key: Vec<u64>,
+}
+fn gain_cells(cells: &Cells, cell: f64, gain_cell: f64) -> GainCells {
+    let back = |key: u64, at: u32| ((key >> at) & 0xf_ffff) as i64 - (1 << 19);
+    let coarse: Vec<u64> = cells
+        .key
+        .iter()
+        .map(|&key| {
+            let k = [back(key, 43), back(key, 23), back(key, 3)];
+            let g = k.map(|x| ((x as f64 + 0.5) * cell / gain_cell).floor() as i64);
+            cell_key(g, (key & 7) as u8)
+        })
+        .collect();
+    let mut key = coarse.clone();
+    key.par_sort_unstable();
+    key.dedup();
+    let of_cell = coarse
+        .iter()
+        .map(|k| key.binary_search(k).unwrap() as u32)
+        .collect();
+    GainCells { of_cell, key }
+}
+
+/// An image's gain entries of the cells merged into the gain cells: each gain cell's points, and
+/// its mean color weighted by them (the cells' entries as the gains take them).
+fn merged_gains(gain: &[(u32, u32, [f32; 3])], gc: &GainCells) -> Vec<(u32, u32, [f32; 3])> {
+    let mut by: Vec<(u32, u32, [f32; 3])> = gain
+        .iter()
+        .map(|&(c, m, rgb)| (gc.of_cell[c as usize], m, rgb))
+        .collect();
+    by.sort_unstable_by_key(|e| e.0);
+    let mut out: Vec<(u32, u32, [f32; 3])> = Vec::new();
+    let mut i = 0;
+    while i < by.len() {
+        let (mut m, mut s) = (0u32, [0f64; 3]);
+        let mut j = i;
+        while j < by.len() && by[j].0 == by[i].0 {
+            m += by[j].1;
+            for (s, &c) in s.iter_mut().zip(&by[j].2) {
+                *s += c as f64 * by[j].1 as f64;
+            }
+            j += 1;
+        }
+        out.push((by[i].0, m, s.map(|x| (x / m as f64) as f32)));
+        i = j;
+    }
+    out
+}
+
 /// The views of the points of `part` (their slots in `slot`), and the gain entries of the cells
-/// the part owns.
+/// the part owns (merged into the gain cells when these are coarser); the gain cells' keys.
 #[allow(clippy::needless_range_loop)] // `j` indexes a view's points, scores and colors together
 #[allow(clippy::too_many_arguments)]
 fn gather(
@@ -1413,7 +1472,7 @@ fn gather(
     a: &ColorParams,
     job: &Job,
     entries: &mut Vec<ImageGains>,
-) -> Result<(Kept, Cells)> {
+) -> Result<(Kept, Vec<u64>)> {
     let p = scene.p;
     let grown = part.out.grow(PART_MARGIN);
     let lo = [0, 1].map(|d| grown.lo[d] as f64 * BASE);
@@ -1423,6 +1482,7 @@ fn gather(
     let cells = cells(p, scene.n, &part.ids, a.cell, |c| {
         out.contains([0, 1].map(|d| (c[d] / BASE).floor() as i64))
     });
+    let coarse = (a.gain && a.gain_cell > a.cell).then(|| gain_cells(&cells, a.cell, a.gain_cell));
     let np = part.ids.len();
     let kk = a.keep;
     let mut kept = Kept::new(np, kk);
@@ -1491,8 +1551,12 @@ fn gather(
                 }
             }
         });
-    // the view's points by shard (where each shard's start)
-    let with_shards = |v: crate::gpu_color::Colors| -> Seen {
+    // the view's points by shard (where each shard's start), its gain entries merged into the
+    // gain cells
+    let with_shards = |mut v: crate::gpu_color::Colors| -> Seen {
+        if let Some(gc) = &coarse {
+            v.gain = merged_gains(&v.gain, gc);
+        }
         let mut starts = vec![0usize; shards + 1];
         for &s in &v.pts {
             starts[s as usize / run + 1] += 1;
@@ -1718,7 +1782,7 @@ fn gather(
     if let Some(e) = failed {
         return Err(e);
     }
-    Ok((kept, cells))
+    Ok((kept, coarse.map_or(cells.key, |gc| gc.key)))
 }
 
 /// Debug-only provenance of direct blending in a world-space sphere, before the fill.
@@ -2184,7 +2248,7 @@ pub fn colorize(
             slot[i as usize] = s as u32;
         }
         let mut images = Vec::new();
-        let (kept, cells) = gather(
+        let (kept, keys) = gather(
             &scene,
             &part,
             &slot,
@@ -2194,10 +2258,7 @@ pub fn colorize(
             &share(k, 0.01, 0.81),
             &mut images,
         )?;
-        entries.push(PartGains {
-            keys: cells.key,
-            images,
-        });
+        entries.push(PartGains { keys, images });
         for &i in &part.ids {
             slot[i as usize] = u32::MAX;
         }
@@ -2585,7 +2646,50 @@ mod tests {
         let g = gains(&e, 2);
         let ratio = g[0][0] / g[1][0];
         assert!((ratio - 2.).abs() < 0.2, "gain ratio {ratio}");
-        assert!((g[0][0] * g[1][0] - 1.).abs() < 0.2, "gains are centerd");
+        assert!((g[0][0] * g[1][0] - 1.).abs() < 0.2, "gains are centered");
+    }
+
+    #[test]
+    fn gain_cells_hold_the_cells_whose_centers_they_hold() {
+        // cells of 0.05 m in gain cells of 0.2 m: x index -5..=8 (both sides of 0) of two facings
+        let mut key = Vec::new();
+        for f in [0u8, 3] {
+            for x in -5i64..=8 {
+                key.push(cell_key([x, 2, -1], f));
+            }
+        }
+        key.sort_unstable();
+        let cells = Cells {
+            inv: 20.,
+            of_point: Vec::new(),
+            around: Vec::new(),
+            owned: vec![true; key.len()],
+            key: key.clone(),
+        };
+        let gc = gain_cells(&cells, 0.05, 0.2);
+        for (c, &k) in key.iter().enumerate() {
+            let x = ((k >> 43) & 0xf_ffff) as i64 - (1 << 19);
+            let want = cell_key([x.div_euclid(4), 0, -1], (k & 7) as u8);
+            assert_eq!(gc.key[gc.of_cell[c] as usize], want, "cell x {x}");
+        }
+        // x -5..=8 over 5 gain cells (-2..=2) per facing
+        assert_eq!(gc.key.len(), 10);
+        // an image's entries merged: the points summed, the color their weighted mean
+        let at = |x: i64| key.binary_search(&cell_key([x, 2, -1], 0)).unwrap() as u32;
+        let merged = merged_gains(
+            &[
+                (at(4), 30, [100.; 3]),
+                (at(-1), 20, [50.; 3]),
+                (at(5), 10, [60.; 3]),
+            ],
+            &gc,
+        );
+        let of = |x: i64| gc.of_cell[at(x) as usize];
+        assert_eq!(merged.len(), 2);
+        let m: FxHashMap<u32, (u32, [f32; 3])> =
+            merged.iter().map(|&(c, n, rgb)| (c, (n, rgb))).collect();
+        assert_eq!(m[&of(4)], (40, [90.; 3]));
+        assert_eq!(m[&of(-1)], (20, [50.; 3]));
     }
 
     #[test]

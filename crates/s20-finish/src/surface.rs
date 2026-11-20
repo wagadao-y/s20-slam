@@ -143,7 +143,7 @@ struct CellGrid {
 /// cells outside the sphere, and large enough that a search touches few buckets.
 const GRID_BUCKET: f64 = 0.04;
 /// Debug: `S20_TRACE=<file>` and `S20_TRACE_BOX=minx,miny,minz,maxx,maxy,maxz` write one JSON line
-/// per plane fit centerd in the box: the PCA over all cells, the fast path, each consensus's
+/// per plane fit centered in the box: the PCA over all cells, the fast path, each consensus's
 /// candidates and scores, and the planes fitted.
 struct Trace {
     file: std::sync::Mutex<std::io::BufWriter<std::fs::File>>,

@@ -679,6 +679,7 @@ fn colorize(a: &mut Args, job: &Job) -> Result<()> {
     p.max_range = a.get("--rmax", p.max_range)?;
     p.gain_window = a.get("--gain_window", p.gain_window)?;
     p.gain = !a.flag("--no_gain");
+    p.gain_cell = a.get("--gain_cell", p.gain_cell)?;
     p.graze = !a.flag("--no_graze");
     p.fill = a.get("--fill", p.fill)?;
     p.views = a.get("--views", p.views)?;
@@ -856,10 +857,10 @@ const USAGE: &str = "usage:
       files and the Potree octree of trajectory.las; ImgPose.txt and the 100 Hz TUM trajectory beside
       traj.txt)
   s20 colorize <in.las|laz> <out.las|laz> --images <folder> --calib calibration.yaml [--imgpose ImgPose.txt]
-      [--trajectory trajectory.txt] [--data folder] [--rmax m] [--gain_window s] [--no_gain] [--no_graze] [--fill m] [--tile_memory f] [--threads n]
+      [--trajectory trajectory.txt] [--data folder] [--rmax m] [--gain_window s] [--gain_cell m] [--no_gain] [--no_graze] [--fill m] [--tile_memory f] [--threads n]
       [--views n] [--keep n] [--max_theta deg] [--soft_theta deg] [--theta_slope s] [--turn s] [--outlier s] [--outlier_median | --outlier_quantile q] [--temperature s] [--cell m] [--band s]
       (the 3 best views blended by range, incidence, angle off the axis and turning speed; exposure levelled
-       against the images within --gain_window s; --trajectory: the export step's, beside ImgPose.txt by default;
+       against the images within --gain_window s, over cells of --gain_cell m (0.2; 0: --cell's); --trajectory: the export step's, beside ImgPose.txt by default;
        points no image sees are dropped; made in squares split while one would take more than --tile_memory
        (0.5) of the memory available, the same result; --tile_memory 0: all at once; the coordinate
        frames are recorded in --data, the folder holding --images by default)

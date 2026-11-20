@@ -23,7 +23,7 @@ The issues known so far, and what is planned.
 ## Stability
 
 - **GPU errors**: the images' features (SIFT), the z-buffers of image pose refinement, and the coloring's visible points and colors go on on the CPU after a GPU error. In the other GPU work, a wgpu validation error or running out of memory could stop processing with an "internal error" (it has not happened with the author's data).
-- **Coloring's memory**: the exposure correction (gains) takes the whole recording at once, so a longer recording uses more memory (26 GB at the most for a 19-minute outdoor recording). Mind the free memory with long recordings or several sessions.
+- **Coloring's memory**: the exposure correction (gains) takes the whole recording at once, so a longer recording uses more memory (15 GB at the most for a 19-minute outdoor recording). Mind the free memory with long recordings or several sessions.
 - **End-to-end regression tests**: there are no automatic tests that run the steps through yet.
 
 ## What it has been tested on
