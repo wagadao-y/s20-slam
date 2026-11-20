@@ -546,11 +546,78 @@ pub fn cloud(
         "wrote {} ({written} points of {total} observations)",
         out.display()
     ));
+    // an export's PDAL pipeline beside it, for this cloud's frame (run without the export, it can
+    // be another)
+    refresh_pdal_pipeline(data, out, Some(frame))?;
     Ok(())
 }
 
 /// The dense trajectory as TUM rows, written by [`export`] beside the trajectory it is made from.
 pub const TUM_FILE: &str = "trajectory_100hz_tum.txt";
+/// The output folder's clouds without their extension (LAZ or LAS): the point cloud step's and
+/// the colored one.
+pub const UNCOLORED_STEM: &str = "pointcloud_uncolorized";
+pub const COLORED_STEM: &str = "pointcloud_colorized";
+/// With an ENU origin, the PDAL pipeline to a coordinate reference system
+/// ([`s20_io::geodesy::PDAL_PIPELINE_FILE`]) in output folder `out`, for the newest of its clouds
+/// recorded in `frame` in `data`'s [`frames`] (one of another frame would be placed wrongly; an
+/// old file of the other format can stay), else for `trajectory.las` if recorded so, keeping the
+/// target of the pipeline there; in another frame, or with nothing of this one, none (one of an
+/// earlier export goes).
+fn write_pdal_pipeline(data: &Path, out: &Path, frame: CoordinateFrame) -> Result<()> {
+    let file = out.join(s20_io::geodesy::PDAL_PIPELINE_FILE);
+    let mut cloud = None;
+    for name in [COLORED_STEM, UNCOLORED_STEM]
+        .iter()
+        .flat_map(|stem| ["laz", "las"].map(|ext| format!("{stem}.{ext}")))
+    {
+        let path = out.join(&name);
+        if !path.exists() || frames::recorded(data, &path)? != Some(frame) {
+            continue;
+        }
+        let modified = std::fs::metadata(&path)?.modified()?;
+        if cloud.as_ref().is_none_or(|(_, t)| modified > *t) {
+            cloud = Some((name, modified));
+        }
+    }
+    // without such a cloud the trajectory, else nothing to transform
+    let trajectory = out.join("trajectory.las");
+    let input = match cloud {
+        Some((name, _)) => Some(name),
+        None if trajectory.exists() && frames::recorded(data, &trajectory)? == Some(frame) => {
+            Some("trajectory.las".to_string())
+        }
+        None => None,
+    };
+    let target = std::fs::read_to_string(&file)
+        .ok()
+        .and_then(|t| s20_io::geodesy::pdal_pipeline_target(&t));
+    match input.and_then(|name| frame.pdal_pipeline(&name, target.as_deref())) {
+        Some(text) => {
+            std::fs::write(&file, text).with_context(|| format!("write {}", file.display()))?
+        }
+        None if file.exists() => {
+            std::fs::remove_file(&file).with_context(|| format!("remove {}", file.display()))?
+        }
+        None => {}
+    }
+    Ok(())
+}
+
+/// After a step replaced cloud `cloud` (recorded in `frame`, none for an unknown one): the PDAL
+/// pipeline an export left beside it, written again for the clouds now (or removed).
+fn refresh_pdal_pipeline(data: &Path, cloud: &Path, frame: Option<CoordinateFrame>) -> Result<()> {
+    let Some(dir) = cloud.parent() else {
+        return Ok(());
+    };
+    let file = dir.join(s20_io::geodesy::PDAL_PIPELINE_FILE);
+    match frame {
+        _ if !file.exists() => Ok(()),
+        Some(frame) => write_pdal_pipeline(data, dir, frame),
+        None => std::fs::remove_file(&file).with_context(|| format!("remove {}", file.display())),
+    }
+}
+
 /// The camera poses coloring reads, written by [`export`] beside the trajectory (the maker's are
 /// in the `images/` folder, when it is asked for).
 pub const IMG_POSE_FILE: &str = "ImgPose.txt";
@@ -584,6 +651,8 @@ pub fn export(data: &Path, traj: &Path, out: &Path, calib: Option<&Path>, job: &
         &[&out.join("trajectory.txt"), &las, &tum],
         Some(frame),
     )?;
+    // after the trajectory's frame is recorded: without a cloud of this frame, it is the input
+    write_pdal_pipeline(data, out, frame)?;
     // where earlier exports wrote them
     for (name, now) in [
         (TUM_FILE, tum.clone()),
@@ -857,6 +926,8 @@ pub fn colorize(
     part.keep()?;
     frames::record(data, &[out], cloud_frame)?;
     job.log(&format!("wrote {} ({n} points)", out.display()));
+    // the export's PDAL pipeline beside it now for the colored cloud (the export runs first)
+    refresh_pdal_pipeline(data, out, cloud_frame)?;
     Ok(())
 }
 
@@ -1659,12 +1730,12 @@ impl RunConfig {
     /// The cloud of the point cloud step, by a fixed name: the work folder can be renamed or moved.
     pub fn uncolored(&self) -> PathBuf {
         self.output()
-            .join(format!("pointcloud_uncolorized.{}", self.cloud_ext()))
+            .join(format!("{UNCOLORED_STEM}.{}", self.cloud_ext()))
     }
     /// The colored cloud, by a fixed name as [`RunConfig::uncolored`].
     pub fn colored(&self) -> PathBuf {
         self.output()
-            .join(format!("pointcloud_colorized.{}", self.cloud_ext()))
+            .join(format!("{COLORED_STEM}.{}", self.cloud_ext()))
     }
 
     /// The sessions a step runs for: each session for [`Step::per_session`], else one (`None`).
@@ -2389,6 +2460,78 @@ impl RunConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pdal_pipeline_takes_the_newest_input_of_its_frame_and_keeps_the_target() {
+        let dir = std::env::temp_dir().join(format!("s20-pdal-{}", std::process::id()));
+        let (data, out) = (dir.join("data"), dir.join("output"));
+        std::fs::create_dir_all(&data).unwrap();
+        std::fs::create_dir_all(&out).unwrap();
+        let file = out.join(s20_io::geodesy::PDAL_PIPELINE_FILE);
+        let read = || std::fs::read_to_string(&file).unwrap();
+        let input = || {
+            let p: serde_json::Value = serde_json::from_str(&read()).unwrap();
+            p[0]["filename"].as_str().unwrap().to_string()
+        };
+        let enu = CoordinateFrame::local_enu([35.0, 139.0, 50.]).unwrap();
+        // a cloud made at `age` seconds before now, recorded in `frame`
+        let cloud = |name: &str, age: u64, frame| {
+            let path = out.join(name);
+            std::fs::write(&path, "").unwrap();
+            let t = std::time::SystemTime::now() - std::time::Duration::from_secs(age);
+            std::fs::File::options()
+                .write(true)
+                .open(&path)
+                .unwrap()
+                .set_modified(t)
+                .unwrap();
+            frames::record(&data, &[&path], Some(frame)).unwrap();
+        };
+        // nothing of this frame to transform: no pipeline
+        cloud(
+            "pointcloud_uncolorized.laz",
+            400,
+            CoordinateFrame::LocalSlam,
+        );
+        write_pdal_pipeline(&data, &out, enu).unwrap();
+        assert!(!file.exists());
+        // the cloud of another frame is not taken; the trajectory of this one is
+        cloud("trajectory.las", 400, enu);
+        write_pdal_pipeline(&data, &out, enu).unwrap();
+        assert_eq!(input(), "trajectory.las");
+        cloud("pointcloud_uncolorized.las", 300, enu);
+        write_pdal_pipeline(&data, &out, enu).unwrap();
+        assert_eq!(input(), "pointcloud_uncolorized.las");
+        // a colored cloud of an earlier run without GNSS: not to be placed by this origin
+        cloud("pointcloud_colorized.laz", 100, CoordinateFrame::LocalSlam);
+        write_pdal_pipeline(&data, &out, enu).unwrap();
+        assert_eq!(input(), "pointcloud_uncolorized.las");
+        // of the frame now, the newest: an old LAZ stays when the format changes to LAS
+        cloud("pointcloud_colorized.laz", 200, enu);
+        cloud("pointcloud_colorized.las", 10, enu);
+        write_pdal_pipeline(&data, &out, enu).unwrap();
+        assert_eq!(input(), "pointcloud_colorized.las");
+        // the target someone set stays when the pipeline is written again
+        std::fs::write(&file, read().replace("EPSG:32654", "EPSG:6678")).unwrap();
+        write_pdal_pipeline(&data, &out, enu).unwrap();
+        assert_eq!(
+            s20_io::geodesy::pdal_pipeline_target(&read()).as_deref(),
+            Some("EPSG:6678")
+        );
+        // a cloud step rerun in another frame without the export: the pipeline goes
+        let rerun = out.join("pointcloud_uncolorized.las");
+        refresh_pdal_pipeline(&data, &rerun, Some(enu)).unwrap();
+        assert_eq!(input(), "pointcloud_colorized.las");
+        refresh_pdal_pipeline(&data, &rerun, Some(CoordinateFrame::LocalSlam)).unwrap();
+        assert!(!file.exists());
+        // a step does not make one the export did not
+        refresh_pdal_pipeline(&data, &rerun, Some(enu)).unwrap();
+        assert!(!file.exists());
+        write_pdal_pipeline(&data, &out, enu).unwrap();
+        refresh_pdal_pipeline(&data, &rerun, None).unwrap();
+        assert!(!file.exists());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn revisits_are_on_for_new_settings_and_off_for_settings_written_before_them() {

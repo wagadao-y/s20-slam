@@ -68,6 +68,93 @@ impl CoordinateFrame {
         fs::write(path, serde_json::to_vec_pretty(self)?)?;
         Ok(())
     }
+
+    /// A PDAL pipeline that puts `cloud` (a file name relative to where PDAL runs) of this frame
+    /// into a coordinate reference system: east/north/up to WGS84 latitude/longitude/ellipsoidal
+    /// height (PROJ's topocentric conversion reversed, as [`CoordinateFrame::position`]), then
+    /// `filters.reprojection` to its `out_srs`, the one value to change: `target` (one kept from an
+    /// earlier pipeline), else [`default_epsg`] of the origin; a point it cannot transform stops
+    /// PDAL (with PROJ_ONLY_BEST_DEFAULT=YES also a transformation whose grid is missing, which
+    /// PROJ else replaces silently by a coarser one, such as geoid heights left out). Written as
+    /// `<stem>_crs.<ext>` without the extra dimensions (the normals: they are not rotated, and
+    /// QGIS 3.44 does not open LAS 1.4 files with extra bytes; `--writers.las.extra_dims=all`
+    /// keeps them). Only for a local ENU frame.
+    pub fn pdal_pipeline(&self, cloud: &str, target: Option<&str>) -> Option<String> {
+        let Self::LocalEnu {
+            origin_llh: [lat, lon, h],
+        } = *self
+        else {
+            return None;
+        };
+        let (stem, ext) = cloud.rsplit_once('.').unwrap_or((cloud, "laz"));
+        // written by hand rather than through serde_json, which would sort each stage's keys
+        // ("type" last): people read and edit this file
+        let quote = |s: &str| serde_json::Value::from(s).to_string();
+        let op = format!(
+            "+proj=pipeline +step +inv +proj=topocentric +ellps=WGS84 +lat_0={lat} +lon_0={lon} \
+             +h_0={h} +step +inv +proj=cart +ellps=WGS84 \
+             +step +proj=unitconvert +xy_in=rad +xy_out=deg"
+        );
+        Some(format!(
+            r#"[
+  {{ "type": "readers.las", "filename": {input} }},
+  {{
+    "type": "filters.projpipeline",
+    "coord_op": "{op}",
+    "out_srs": "EPSG:4979"
+  }},
+  {{ "type": "filters.reprojection", "out_srs": {target}, "error_on_failure": true }},
+  {{
+    "type": "writers.las",
+    "filename": {output},
+    "minor_version": 4,
+    "scale_x": 0.0001, "scale_y": 0.0001, "scale_z": 0.0001,
+    "offset_x": "auto", "offset_y": "auto", "offset_z": "auto"
+  }}
+]
+"#,
+            input = quote(cloud),
+            target = quote(&target.map_or_else(
+                || format!("EPSG:{}", default_epsg(lat, lon)),
+                str::to_string
+            )),
+            output = quote(&format!("{stem}_crs.{ext}")),
+        ))
+    }
+}
+
+/// The file [`CoordinateFrame::pdal_pipeline`] is written to beside the outputs.
+pub const PDAL_PIPELINE_FILE: &str = "pdal_to_crs.json";
+
+/// The `out_srs` of a pipeline [`CoordinateFrame::pdal_pipeline`] wrote, to keep it when the
+/// pipeline is written again (none for text that is not such a pipeline).
+pub fn pdal_pipeline_target(text: &str) -> Option<String> {
+    let stages: serde_json::Value = serde_json::from_str(text).ok()?;
+    stages
+        .as_array()?
+        .iter()
+        .find(|s| s["type"] == "filters.reprojection")?["out_srs"]
+        .as_str()
+        .map(str::to_string)
+}
+
+/// The default target of [`CoordinateFrame::pdal_pipeline`] at a latitude/longitude (degrees):
+/// the EPSG code of the WGS84 UTM zone (326zz north, 327zz south; the zones' exceptions around
+/// Norway and Svalbard not taken), beyond UTM's latitudes (84°N, 80°S) the polar
+/// stereographic UPS (5041 north, 5042 south, easting and northing).
+pub fn default_epsg(lat: f64, lon: f64) -> u32 {
+    if lat > 84. {
+        return 5041;
+    }
+    if lat < -80. {
+        return 5042;
+    }
+    let zone = (((lon + 180.) / 6.).floor() as i64).rem_euclid(60) as u32 + 1;
+    if lat >= 0. {
+        32600 + zone
+    } else {
+        32700 + zone
+    }
 }
 
 pub fn valid_llh(p: [f64; 3]) -> bool {
@@ -200,6 +287,76 @@ mod tests {
         assert!((across[0] - 2.226389816).abs() < 1e-6);
         assert!(CoordinateFrame::local_enu([91., 0., 0.]).is_err());
         assert!(CoordinateFrame::local_enu([0., f64::NAN, 0.]).is_err());
+    }
+
+    #[test]
+    fn default_targets_utm_by_hemisphere_and_dateline_ups_at_the_poles() {
+        assert_eq!(default_epsg(35.0, 139.0), 32654);
+        assert_eq!(default_epsg(-33.9, 151.2), 32756);
+        assert_eq!(default_epsg(51.5, -0.1), 32630);
+        assert_eq!(default_epsg(0., -180.), 32601);
+        assert_eq!(default_epsg(0., 179.99), 32660);
+        assert_eq!(default_epsg(0., 180.), 32601);
+        assert_eq!(default_epsg(84., 10.), 32632);
+        assert_eq!(default_epsg(84.5, 10.), 5041);
+        assert_eq!(default_epsg(-80., 10.), 32732);
+        assert_eq!(default_epsg(-80.5, 10.), 5042);
+    }
+
+    #[test]
+    fn pdal_pipeline_carries_the_origin_exactly_and_names_the_output() {
+        let origin = [35.68123456789012, 139.76712345678901, 40.123456789012345];
+        let frame = CoordinateFrame::local_enu(origin).unwrap();
+        let text = frame
+            .pdal_pipeline("pointcloud_colorized.laz", None)
+            .unwrap();
+        let p: serde_json::Value = serde_json::from_str(&text).unwrap();
+        let stages = p.as_array().unwrap();
+        let types: Vec<_> = stages.iter().map(|s| s["type"].as_str().unwrap()).collect();
+        assert_eq!(
+            types,
+            [
+                "readers.las",
+                "filters.projpipeline",
+                "filters.reprojection",
+                "writers.las"
+            ]
+        );
+        assert_eq!(stages[0]["filename"], "pointcloud_colorized.laz");
+        // the origin as written by coordinate_frame.json: the shortest text giving the same f64
+        let op = stages[1]["coord_op"].as_str().unwrap();
+        let value = |key: &str| -> f64 {
+            let at = op.find(key).unwrap() + key.len();
+            op[at..].split_whitespace().next().unwrap().parse().unwrap()
+        };
+        assert_eq!([value("+lat_0="), value("+lon_0="), value("+h_0=")], origin);
+        assert!(op.starts_with("+proj=pipeline +step +inv +proj=topocentric +ellps=WGS84"));
+        assert_eq!(stages[1]["out_srs"], "EPSG:4979");
+        assert_eq!(stages[2]["out_srs"], "EPSG:32654");
+        assert_eq!(stages[2]["error_on_failure"], true);
+        assert_eq!(stages[3]["filename"], "pointcloud_colorized_crs.laz");
+        // the normals left out by default (QGIS 3.44 opens no LAS 1.4 file with extra bytes)
+        assert!(stages[3].get("extra_dims").is_none());
+        assert_eq!(pdal_pipeline_target(&text).as_deref(), Some("EPSG:32654"));
+        // a target kept from an earlier pipeline, quoted as JSON
+        let kept = frame
+            .pdal_pipeline("cloud.las", Some("EPSG:6678+6695"))
+            .unwrap();
+        assert!(kept.contains("cloud_crs.las"));
+        assert_eq!(
+            pdal_pipeline_target(&kept).as_deref(),
+            Some("EPSG:6678+6695")
+        );
+        let odd = frame.pdal_pipeline("a.laz", Some("say \"x\"")).unwrap();
+        assert_eq!(pdal_pipeline_target(&odd).as_deref(), Some("say \"x\""));
+        assert_eq!(pdal_pipeline_target("not json"), None);
+        assert_eq!(pdal_pipeline_target("[{\"type\": \"readers.las\"}]"), None);
+        assert_eq!(
+            CoordinateFrame::LocalSlam.pdal_pipeline("a.laz", None),
+            None
+        );
+        let legacy = CoordinateFrame::LegacyProjected { origin: [0.; 3] };
+        assert_eq!(legacy.pdal_pipeline("a.laz", None), None);
     }
 
     #[test]

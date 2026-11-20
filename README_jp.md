@@ -57,9 +57,10 @@ exe にはコード署名がないため、初回の起動で「Windows によ�
 | `*_converted/` | 点群と軌跡の Potree 2.0 の 8 分木 |
 | `trajectory.txt`、`trajectory.las` | 軌跡（GPS 時刻つき） |
 | `coordinate_frame.json` | GNSS を使ったとき：ローカル座標の原点 |
+| `pdal_to_crs.json` | GNSS を使ったとき：点群を座標系に乗せる PDAL のパイプライン（「[座標系](docs/coordinates_jp.md)」を参照） |
 | `images/`、`sparse/0/`、`masks/` | オプション：姿勢つきの写真（PointClouds Studio と同じ形式、COLMAP 形式） |
 
-GNSS を使うと、座標は現場付近を原点に、X＝東、Y＝北、Z＝上（単位 m）になります。Z は原点からの高さで、標高ではありません。原点の緯度・経度・楕円体高は `coordinate_frame.json` にあるので、点群と一緒に保管してください。GNSS を使わないときは撮影ごとの座標で、Z は上向きですが、X・Y の向きは決まっていません。
+GNSS を使うと、座標は現場付近を原点に、X＝東、Y＝北、Z＝上（単位 m）になります。Z は原点からの高さで、標高ではありません。原点の緯度・経度・楕円体高は `coordinate_frame.json` にあるので、点群と一緒に保管してください。UTM や平面直角座標系に乗せる方法は「[座標系](docs/coordinates_jp.md)」を参照してください。GNSS を使わないときは撮影ごとの座標で、Z は上向きですが、X・Y の向きは決まっていません。
 
 ### 着色の品質を上げる（機体の校正）
 
@@ -104,6 +105,7 @@ s20 help                                                        # すべての�
 - [コマンドライン](docs/cli_jp.md)
 - [処理の仕組み](docs/processing.md)
 - [PPK](docs/ppk.md)
+- [座標系](docs/coordinates_jp.md)
 - [検証結果](docs/validation_jp.md)
 - [既知の課題](docs/known-issues_jp.md)
 

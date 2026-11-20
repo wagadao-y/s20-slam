@@ -57,9 +57,10 @@ The language is chosen from the menu bar (English / 日本語). Until then it fo
 | `*_converted/` | Potree 2.0 octrees of the point clouds and the trajectory |
 | `trajectory.txt`, `trajectory.las` | The trajectory (with GPS times) |
 | `coordinate_frame.json` | When GNSS was used: the origin of the local coordinates |
+| `pdal_to_crs.json` | When GNSS was used: a PDAL pipeline to put the point cloud in a coordinate system (see [Coordinate systems](docs/coordinates.md)) |
 | `images/`, `sparse/0/`, `masks/` | Optional: the photos with their poses, in PointClouds Studio's layout and as a COLMAP model |
 
-With GNSS the coordinates are local, in meters around an origin near the site: X = east, Y = north, Z = up. Z is the height above the origin, not above sea level. The origin's latitude, longitude and ellipsoidal height are in `coordinate_frame.json`; keep it with the point cloud. Without GNSS each recording has its own coordinates: Z is up, X and Y have no fixed direction.
+With GNSS the coordinates are local, in meters around an origin near the site: X = east, Y = north, Z = up. Z is the height above the origin, not above sea level. The origin's latitude, longitude and ellipsoidal height are in `coordinate_frame.json`; keep it with the point cloud. To put the point cloud in UTM or a national grid, see [Coordinate systems](docs/coordinates.md). Without GNSS each recording has its own coordinates: Z is up, X and Y have no fixed direction.
 
 ### Better colors: the device calibration
 
@@ -104,6 +105,7 @@ s20-slam was made for my own use and has been tested on one S20 only (see [Known
 - [Command line](docs/cli.md)
 - [How it works](docs/processing.md) (in Japanese)
 - [PPK](docs/ppk.md) (in Japanese)
+- [Coordinate systems](docs/coordinates.md)
 - [Validation](docs/validation.md)
 - [Known issues](docs/known-issues.md)
 

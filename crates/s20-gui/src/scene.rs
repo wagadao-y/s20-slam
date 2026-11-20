@@ -1371,6 +1371,11 @@ mod trajectory_tests {
                 .unwrap(),
             frame
         );
+        let pipeline_file = cfg.output().join(s20_io::geodesy::PDAL_PIPELINE_FILE);
+        let pipeline = fs::read_to_string(&pipeline_file).unwrap();
+        // no cloud yet: the trajectory just written
+        assert!(pipeline.contains("\"trajectory.las\""));
+        assert!(pipeline.contains("EPSG:32756"));
         let points = [s20_io::las::LasPoint {
             xyz: [101., 2., 3.],
             ..Default::default()
@@ -1434,6 +1439,7 @@ mod trajectory_tests {
         )
         .unwrap();
         assert!(!cfg.output().join("coordinate_frame.json").exists());
+        assert!(!pipeline_file.exists());
     }
 
     #[test]
