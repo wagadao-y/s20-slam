@@ -611,12 +611,10 @@ impl App {
             if ui
                 .checkbox(&mut self.s.images, tl("画像を出力（COLMAP）", "Export images (COLMAP)"))
                 .on_hover_text(
-                    tl("着色のあとで、カメラの写真と撮影位置・向き（姿勢合わせ後の ImgPose.txt・xyzopk.txt）、\
-                     カメラの情報（Left.opt・Right.opt）を output/images に PointClouds Studio と同じ形で出力します。\
-                     あわせて COLMAP 形式（output/sparse/0・masks・gauge.txt）も出力するので、output フォルダーを\
-                     そのまま 3DGS ツール（Spirula Studio など）のデータセットとして開けます。\
-                     PointClouds Studio のマスク画像は出力しません。オンのときは、画像の姿勢合わせで 3DGS 用の姿勢\
-                     （写真どうしが合う姿勢）も求めるので、画像の姿勢合わせが長くなります", "After colorization, writes the camera photos with their positions and orientations (refined ImgPose.txt, xyzopk.txt) and the camera information (Left.opt, Right.opt) to output/images in PointClouds Studio's format. It also writes the COLMAP format (output/sparse/0, masks, gauge.txt), so the output folder opens as is as a dataset in 3DGS tools (Spirula Studio and others). PointClouds Studio's mask images are not written. When on, image pose refinement also finds the poses for 3DGS (the photos agreeing with one another) and takes longer"),
+                    tl("着色のあとで、写真とその姿勢を PointClouds Studio と同じ形式と COLMAP 形式で output に出力します。\
+                     output フォルダーをそのまま 3DGS ツール（Spirula Studio など）で開けます。\
+                     オンのときは、画像の姿勢合わせで 3DGS 用の姿勢（写真どうしが合う姿勢）も求めるので、\
+                     画像の姿勢合わせが長くなります", "After colorization, writes the photos with their poses to output, in PointClouds Studio's format and the COLMAP format. The output folder opens as is in 3DGS tools (Spirula Studio and others). When on, image pose refinement also finds the poses for 3DGS (the photos agreeing with one another) and takes longer"),
                 )
                 .on_disabled_hover_text(tl("実行中は変更できません", "Can't be changed while processing"))
                 .changed()

@@ -1685,10 +1685,7 @@ const LABELS: &[(&str, &str, [&str; 2], [&str; 2])] = &[
     (
         "color",
         "cell",
-        [
-            "外れの判定と露出補正のセル (m)",
-            "Outlier test and exposure cell (m)",
-        ],
+        ["外れの判定のセル (m)", "Outlier test cell (m)"],
         ["", ""],
     ),
     (
@@ -1696,8 +1693,8 @@ const LABELS: &[(&str, &str, [&str; 2], [&str; 2])] = &[
         "gain_cell",
         ["露出補正のセル (m)", "Exposure correction cell (m)"],
         [
-            "上のセルより大きいと、露出補正だけこの大きさのセルで求めます（メモリと時間が減ります。0.2 m で 0.05 m のときとほぼ同じ色。2 m を割り切る大きさに丸めます）。0 で上のセル",
-            "Above the cell above, the exposure correction alone is found over cells of this size (less memory and time; at 0.2 m nearly the same colors as at 0.05 m; rounded to divide 2 m). 0 uses the cell above",
+            "露出補正はこの大きさのセルで求めます（外れの判定のセルより粗くすると、メモリと時間が減ります。2 m を割り切る大きさに丸めます）。0 で外れの判定のセルと同じ",
+            "The exposure correction is found over cells of this size (coarser than the outlier test cell, it takes less memory and time; rounded to divide 2 m). 0 uses the outlier test cell",
         ],
     ),
     (
