@@ -41,7 +41,7 @@ Indoor and outdoor differ only in four LIO values (downsampling, the map's voxel
 | Trajectory and image pose export | trajectory.txt / las, ImgPose.txt |
 | Image pose refinement | Each image's pose adjusted to the point cloud |
 | Colorization | The point cloud colored from the camera images |
-| Image export | Optional. In PointClouds Studio's layout and as a COLMAP model. When on, image pose refinement also finds the poses for 3DGS (the photos agreeing with one another); turned on later, it runs image pose refinement again |
+| Image export | Optional. In PointClouds Studio's layout and as a COLMAP model. When on, image pose refinement also finds the poses for 3DGS (the photos agreeing with one another); turned on later, it runs image pose refinement again. With "Poses for 3DGS" below it off, the COLMAP output takes the poses colorization uses (fitted to the point cloud), `image_points.txt` is not written, and image pose refinement is shorter: for when the 3DGS tool adjusts the poses during training |
 
 **Run from unfinished or unapplied steps** runs only the steps needed, in order. Each step's ▷ reruns that step alone, or from it to the end (from an earlier unfinished step if there is one; the menu shows what will run).
 

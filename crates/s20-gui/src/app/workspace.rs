@@ -612,14 +612,36 @@ impl App {
                 .checkbox(&mut self.s.images, tl("画像を出力（COLMAP）", "Export images (COLMAP)"))
                 .on_hover_text(
                     tl("着色のあとで、写真とその姿勢を PointClouds Studio と同じ形式と COLMAP 形式で output に出力します。\
-                     output フォルダーをそのまま 3DGS ツール（Spirula Studio など）で開けます。\
-                     オンのときは、画像の姿勢合わせで 3DGS 用の姿勢（写真どうしが合う姿勢）も求めるので、\
-                     画像の姿勢合わせが長くなります", "After colorization, writes the photos with their poses to output, in PointClouds Studio's format and the COLMAP format. The output folder opens as is in 3DGS tools (Spirula Studio and others). When on, image pose refinement also finds the poses for 3DGS (the photos agreeing with one another) and takes longer"),
+                     output フォルダーをそのまま 3DGS ツール（Spirula Studio など）で開けます", "After colorization, writes the photos with their poses to output, in PointClouds Studio's format and the COLMAP format. The output folder opens as is in 3DGS tools (Spirula Studio and others)"),
                 )
                 .on_disabled_hover_text(tl("実行中は変更できません", "Can't be changed while processing"))
                 .changed()
             {
                 self.refresh_steps();
+            }
+            if self.s.images {
+                let changed = ui
+                    .indent("poses_3dgs", |ui| {
+                        ui.add_enabled(
+                            self.s.refine,
+                            egui::Checkbox::new(&mut self.s.poses_3dgs, tl("3DGS 用の姿勢", "Poses for 3DGS")),
+                        )
+                        .on_hover_text(tl(
+                            "画像の姿勢合わせで、写真どうしが一番合う姿勢も求め、COLMAP 形式の出力と image_points.txt に使います。\
+                             画像の姿勢合わせが長くなります。オフのときは、COLMAP 形式にも着色と同じ姿勢（点群に合わせた姿勢）を出力し、\
+                             image_points.txt は出力しません（姿勢の調整を 3DGS ツールの学習に任せるとき）",
+                            "Image pose refinement also finds the poses the photos agree best with one another in, for the COLMAP output and image_points.txt, and takes longer. When off, the COLMAP output takes the poses colorization uses (fitted to the point cloud), and image_points.txt is not written (when the 3DGS tool adjusts the poses during training)",
+                        ))
+                        .on_disabled_hover_text(tl(
+                            "「画像の姿勢合わせ」がオフのときは求めません",
+                            "Not found while \"Image pose refinement\" is off",
+                        ))
+                        .changed()
+                    })
+                    .inner;
+                if changed {
+                    self.refresh_steps();
+                }
             }
             let device = self.config().and_then(|c| c.device_calib);
             ui.horizontal(|ui| {

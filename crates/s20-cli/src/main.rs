@@ -743,6 +743,7 @@ fn run(a: &mut Args, job: &Job) -> Result<()> {
     let no_color = a.flag("--no_color");
     let las = a.flag("--las");
     let images = a.flag("--images");
+    let no_3dgs_poses = a.flag("--no_3dgs_poses");
     let no_refine = a.flag("--no_refine");
     let device = a.get_str("--device_calibration")?;
     let params = a.get_str("--params")?;
@@ -765,6 +766,7 @@ fn run(a: &mut Args, job: &Job) -> Result<()> {
     cfg.laz = !las;
     cfg.images = images;
     cfg.refine = !no_refine;
+    cfg.poses_3dgs = !no_3dgs_poses;
     cfg.device_calib = device.map(PathBuf::from);
     let first = if redo {
         s20_pipeline::Step::Extract
@@ -816,7 +818,7 @@ const USAGE: &str = "usage:
   s20 licenses
   s20 version
   s20 run <raw folder>[,<raw folder>...] <work folder> [--outdoor | --params file.json] [--no_rtk] [--no_color]
-      [--redo] [--ppk] [--las] [--images] [--no_refine] [--device_calibration file.yaml] [--until step]
+      [--redo] [--ppk] [--las] [--images [--no_3dgs_poses]] [--no_refine] [--device_calibration file.yaml] [--until step]
       (extract -> lio -> opt -> cloud -> export -> refine -> colorize; RTK is used when the receiver has fixes;
        refine: every image's pose refined against the cloud for the coloring, and the cameras solved from
        the recording, or with --device_calibration (made by calibrate-cameras) used in place of the maker's;
@@ -824,7 +826,10 @@ const USAGE: &str = "usage:
        point clouds are written as .laz, or .las with --las; --images: after the coloring, the photos with
        their refined poses in output/images as PointClouds Studio's and a COLMAP model beside them (output/sparse/0,
        masks, gauge.txt: the output folder opens as a dataset in Gaussian Splatting tools; output/image_points.txt:
-       the photos' feature tracks triangulated, image points where the cloud has none); multiple raw folders: sessions of one place,
+       the photos' feature tracks triangulated, image points where the cloud has none); with --images, the
+       refinement also finds the poses the photos agree with one another in, for the COLMAP model (longer);
+       --no_3dgs_poses: the COLMAP model with the refined poses (fitted to the cloud) and no image_points.txt;
+       multiple raw folders: sessions of one place,
        kept in <work folder>/sessions/<session name> (at first the raw folder's name); --until: stop after that step)
   s20 extract <raw folder> <data folder>   (indices of the points and images in the bag; IMU, GNSS)
   s20 images <data folder> <output folder>   (the camera JPEGs from the bag, as <side>/<side>_NNNNN.jpg)

@@ -8,7 +8,7 @@ The same processing as the GUI, from the command line. `s20 help` shows every co
 
 ```
 s20 run <raw folder> <work folder> [--outdoor | --params file.json] [--no_rtk] [--ppk] [--no_color]
-        [--las] [--images] [--no_refine] [--device_calibration file.yaml] [--redo] [--until step]
+        [--las] [--images [--no_3dgs_poses]] [--no_refine] [--device_calibration file.yaml] [--redo] [--until step]
 s20 run <raw 1>,<raw 2>,... <work folder> --outdoor   # multiple sessions
 ```
 
@@ -23,6 +23,7 @@ The steps are extract → lio → opt → cloud → export → refine → colori
 | `--no_color` | Do not color |
 | `--las` | Write the point clouds as LAS (LAZ by default) |
 | `--images` | After coloring, write the photos with their refined poses to `output/images` (in PointClouds Studio's layout) and a COLMAP model beside them (image pose refinement then also finds the poses for 3DGS) |
+| `--no_3dgs_poses` | With `--images`, do not find the poses for 3DGS: the COLMAP model takes the poses the coloring uses (fitted to the point cloud), and no `image_points.txt` is written. Image pose refinement is shorter |
 | `--no_refine` | Do not refine the image poses |
 | `--device_calibration` | Use the device calibration (made by `calibrate-device`) instead of the maker's factory calibration file (`calibration.yaml`) |
 | `--redo` | Redo the import and LIO even when they are there |
@@ -75,12 +76,12 @@ Point cloud files are LAS or LAZ by their extension (`.laz` is compressed). Both
 |---|---|
 | `images/left/`, `images/right/` | The recorded JPEGs (not recompressed) |
 | `sparse/0/cameras.txt` | The left and right cameras: `OPENCV_FISHEYE` (Kannala-Brandt) fitted to the S20's fisheye polynomial |
-| `sparse/0/images.txt` | The images' poses |
+| `sparse/0/images.txt` | The images' poses (with `s20 run --images`, the poses for 3DGS, `ImgPose-3dgs.txt`; with `--no_3dgs_poses`, those the coloring uses) |
 | `sparse/0/points3D.txt` | Initial points thinned from the colored point cloud (500,000 by default) |
 | `masks/` | The image corners beyond `--max_angle` (85°) from the optical axis (outside the range the calibration was fitted to) |
 | `gauge.txt` | Z up, meters |
 | `export.json` | The fit's error, the number of points |
-| `image_points.txt` | With `s20 run --images` after the image refinement: the photos' feature tracks triangulated with the poses of `ImgPose-3dgs.txt` (see below) |
+| `image_points.txt` | With `s20 run --images` after the image refinement (not with `--no_3dgs_poses`): the photos' feature tracks triangulated with the poses of `ImgPose-3dgs.txt` (see below) |
 
 Kannala-Brandt does not match the S20's polynomial exactly. The fit's error is about 0.1–0.2 px RMS.
 

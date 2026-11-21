@@ -1278,6 +1278,8 @@ pub struct WorkSettings {
     pub images: bool,
     /// every image's pose is refined against the cloud before the coloring
     pub refine: bool,
+    /// the refinement also finds the poses for Gaussian Splatting (see [`RunConfig::poses_3dgs`])
+    pub poses_3dgs: bool,
 }
 
 impl Default for WorkSettings {
@@ -1290,6 +1292,7 @@ impl Default for WorkSettings {
             laz: true,
             images: false,
             refine: true,
+            poses_3dgs: true,
         }
     }
 }
@@ -1351,6 +1354,11 @@ pub struct RunConfig {
     /// every image's pose is refined against the cloud ([`Step::Refine`]) and the coloring uses
     /// them; without `device_calib` the cameras are solved too, from the recording alone
     pub refine: bool,
+    /// with `images` and `refine`: the refinement also finds the poses the photos agree with one
+    /// another in (its tracks, [`RunConfig::tracked_poses`]) for the COLMAP model and the image
+    /// points; without, the COLMAP model takes the refined poses (fitted to the cloud) and has
+    /// no image points, and the refinement is shorter
+    pub poses_3dgs: bool,
     /// the device's calibration (`s20 calibrate-cameras`), in place of the maker's
     pub device_calib: Option<PathBuf>,
 }
@@ -1404,6 +1412,7 @@ impl RunConfig {
             laz: true,
             images: false,
             refine: true,
+            poses_3dgs: true,
             device_calib: None,
         }
     }
@@ -1673,6 +1682,10 @@ impl RunConfig {
     pub fn refined_poses(&self) -> PathBuf {
         self.runs().join("ImgPose-refined.txt")
     }
+    /// Whether [`Step::Refine`] makes the tracks (see [`RunConfig::poses_3dgs`]).
+    pub fn tracks(&self) -> bool {
+        self.refine && self.images && self.poses_3dgs
+    }
     /// The image poses of [`Step::Refine`]'s tracks: the images agree with one another, for the
     /// COLMAP model (Gaussian Splatting), while [`RunConfig::refined_poses`] fit the cloud.
     pub fn tracked_poses(&self) -> PathBuf {
@@ -1849,23 +1862,25 @@ impl RunConfig {
             Step::Images => {
                 let mut v = serde_json::json!({"refined_poses": self.refine, "colmap": true});
                 // the COLMAP model of the tracks' poses, and their points beside it: older exports
-                // are redone
-                if self.refine {
+                // are redone; of the refined poses without the tracks
+                if self.tracks() {
                     v["colmap_poses"] = "tracks".into();
                     v["image_points"] = true.into();
+                } else if self.refine {
+                    v["colmap_poses"] = "refined".into();
                 }
                 v
             }
             // the tracks' adjustment after the refinement (2: their points, 3: and the points matched
             // along the epipolar lines, 4: over wider pairs too, 5: joined without repeating an image): older refinements are rerun.
-            // Only with the images (the COLMAP model): without, a refinement with them is as good
-            // (see `staleness_of`)
+            // Only with the images (the COLMAP model) and the poses for 3DGS: without, a refinement
+            // with them is as good (see `staleness_of`)
             Step::Refine => {
                 let mut v = match &self.device_calib {
                     Some(d) => serde_json::json!({"device_calibration": file_digest(d)}),
                     None => serde_json::json!({"fit_camera": true}),
                 };
-                if self.images {
+                if self.tracks() {
                     v["tracks"] = 5.into();
                 }
                 v
@@ -1991,9 +2006,10 @@ impl RunConfig {
         }
         let params = self.record(step, k).is_some_and(|r| {
             let mut was = comparable(r.params.clone());
-            // a refinement with the tracks serves one without them (the images not written)
+            // a refinement with the tracks serves one without them (the images not written, or
+            // without the poses for 3DGS)
             if step == Step::Refine
-                && !self.images
+                && !self.tracks()
                 && let Some(o) = was.as_object_mut()
             {
                 o.remove("tracks");
@@ -2322,12 +2338,12 @@ impl RunConfig {
                     camera_prior: s20_visual::run::CameraPrior::MAKER,
                     // the tracks (their poses and points) only for the COLMAP model: the coloring
                     // takes the poses fitted to the cloud
-                    tracks: self.images.then(|| self.tracked_poses()),
-                    track_points: self.images.then(|| self.tracked_points()),
+                    tracks: self.tracks().then(|| self.tracked_poses()),
+                    track_points: self.tracks().then(|| self.tracked_points()),
                     track_features: None,
                     out: self.refined_poses(),
                 };
-                if !self.images {
+                if !self.tracks() {
                     // those of an earlier refinement no longer go with these poses
                     for old in [self.tracked_poses(), self.tracked_points()] {
                         if old.exists() {
@@ -2340,17 +2356,17 @@ impl RunConfig {
                 let frame = frames::recorded(&self.data(), &imgpose)?;
                 let tracked = self.tracked_poses();
                 let mut written = vec![input.out.as_path()];
-                if self.images {
+                if self.tracks() {
                     written.push(&tracked);
                 }
                 frames::record(&self.data(), &written, frame)?;
             }
             Step::Images => {
                 let (imgpose, calib) = self.color_inputs();
-                // the COLMAP model with the poses of the tracks, when refined
+                // the COLMAP model with the poses of the tracks, when refined with them
                 let tracked = self.tracked_poses();
-                let colmap = (self.refine && tracked.exists()).then_some(tracked.as_path());
-                if self.refine && colmap.is_none() {
+                let colmap = (self.tracks() && tracked.exists()).then_some(tracked.as_path());
+                if self.tracks() && colmap.is_none() {
                     job.log(
                         "the tracks' poses are missing (the refinement ran without the images): \
                          the COLMAP model takes the refined poses; run the refinement again for the tracks'",
@@ -2432,7 +2448,7 @@ impl RunConfig {
             // (a refinement without the tracks does not serve the images: again when they are
             // asked for)
             let tracks_missing = step == Step::Refine
-                && self.images
+                && self.tracks()
                 && last >= Step::Images
                 && !self.tracked_poses().exists();
             if step < first && self.done(step) && !tracks_missing {
@@ -3048,7 +3064,17 @@ mod tests {
             laz: false,
             images: true,
             refine: false,
+            poses_3dgs: false,
         };
+        w.save(&work).unwrap();
+        assert_eq!(WorkSettings::load(&work).unwrap().unwrap(), w);
+        // settings saved before the poses for 3DGS were optional: found as before
+        std::fs::write(
+            work.join("settings.json"),
+            r#"{"outdoor": false, "images": true, "refine": true}"#,
+        )
+        .unwrap();
+        assert!(WorkSettings::load(&work).unwrap().unwrap().poses_3dgs);
         w.save(&work).unwrap();
         assert_eq!(WorkSettings::load(&work).unwrap().unwrap(), w);
         std::fs::write(work.join("settings.json"), "{").unwrap();
@@ -3116,7 +3142,29 @@ mod tests {
         assert_eq!(c.staleness(Step::Refine), None);
         c.images = true;
         assert_eq!(c.staleness(Step::Refine), Some(Stale::Params));
+        // with the images but without the poses for 3DGS: no tracks wanted
+        c.poses_3dgs = false;
+        assert!(!c.tracks());
+        assert_eq!(c.staleness(Step::Refine), None);
         std::fs::remove_dir_all(work).unwrap();
+    }
+
+    #[test]
+    fn the_colmap_model_takes_the_refined_poses_without_the_poses_for_3dgs() {
+        let mut c = RunConfig::new(PathBuf::from("raw"), PathBuf::from("work"));
+        c.images = true;
+        let with = c.step_params(Step::Images);
+        assert_eq!(with["colmap_poses"], "tracks");
+        c.poses_3dgs = false;
+        let without = c.step_params(Step::Images);
+        // an export of the tracks' poses is made again with the refined ones
+        assert_eq!(without["colmap_poses"], "refined");
+        assert!(without.get("image_points").is_none());
+        // without the refinement, the option does not matter
+        c.refine = false;
+        let unrefined = c.step_params(Step::Images);
+        c.poses_3dgs = true;
+        assert_eq!(c.step_params(Step::Images), unrefined);
     }
 
     #[test]

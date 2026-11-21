@@ -105,6 +105,8 @@ struct Settings {
     images: bool,
     /// every image's pose is refined against the cloud before the coloring
     refine: bool,
+    /// with the images and the refinement: the poses for Gaussian Splatting found too
+    poses_3dgs: bool,
     point_size: f32,
     /// Potree's adaptive point size (by the spacing of the drawn points): the output cloud, the
     /// scans (off by default: thinned hard and of very uneven density, their discs would be large
@@ -163,6 +165,7 @@ impl Default for Settings {
             laz: true,
             images: false,
             refine: true,
+            poses_3dgs: true,
             point_size: 2.0,
             adaptive: true,
             adaptive_scans: false,
@@ -235,6 +238,7 @@ impl Settings {
             laz: self.laz,
             images: self.images,
             refine: self.refine,
+            poses_3dgs: self.poses_3dgs,
         }
     }
 
@@ -246,6 +250,7 @@ impl Settings {
         self.laz = w.laz;
         self.images = w.images;
         self.refine = w.refine;
+        self.poses_3dgs = w.poses_3dgs;
     }
 
     /// Whether the parameters differ from their preset.
@@ -829,6 +834,7 @@ impl App {
         c.laz = self.s.laz;
         c.images = self.s.images;
         c.refine = self.s.refine;
+        c.poses_3dgs = self.s.poses_3dgs;
         if !c.sessions.is_empty() {
             c.device_calib = self.device.find(&c.calib());
         }

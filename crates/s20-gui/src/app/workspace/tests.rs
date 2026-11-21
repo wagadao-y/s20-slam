@@ -959,10 +959,11 @@ fn processing_settings_are_kept_by_work_folder_and_a_new_one_starts_from_the_las
         laz: true,
         images: true,
         refine: true,
+        poses_3dgs: false,
     });
     app.save_work_settings();
     let saved = WorkSettings::load(&outdoors.0).unwrap().unwrap();
-    assert!(saved.outdoor && saved.ppk && saved.images);
+    assert!(saved.outdoor && saved.ppk && saved.images && !saved.poses_3dgs);
 
     // a work folder without settings takes those used last, and keeps its own once changed
     let (_, indoors) = opened("settings_in");
