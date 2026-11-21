@@ -285,7 +285,8 @@ pub fn sky_radius(center: [f64; 3], pts: &[Point], cameras: &[[f64; 3]]) -> f64 
     let r99 = if d.is_empty() {
         0.
     } else {
-        let k = ((d.len() - 1) as f64 * 0.99) as usize;
+        // at least 99% of the draw within (a small cloud keeps its farthest point)
+        let k = ((d.len() as f64 * 0.99).ceil() as usize).clamp(1, d.len()) - 1;
         *d.select_nth_unstable_by(k, f64::total_cmp).1
     };
     (SKY_RADIUS_FACTOR * r99.max(far)).max(SKY_RADIUS_MIN)
@@ -444,6 +445,10 @@ pub fn export(input: &Input, job: &Job) -> Result<serde_json::Value> {
         let cameras: Vec<[f64; 3]> = poses.poses.iter().map(|p| p.p.into()).collect();
         let radius = sky_radius(center, &pts, &cameras);
         let points = sky_sphere(center, radius, |x| {
+            // canceled: the rest seen by none, and the check below returns
+            if job.check().is_err() {
+                return false;
+            }
             poses.names.iter().zip(&poses.poses).any(|(name, pose)| {
                 let s = side(name);
                 in_image(&fits[s].0, sizes[s].0, sizes[s].1, max_angle, pose, x)
@@ -621,6 +626,10 @@ mod tests {
         assert_eq!(sky_radius([0.; 3], &[], &[]), SKY_RADIUS_MIN);
         // cameras beyond a cloud cut small: outside them
         let r = sky_radius([0.; 3], &pts[1..20], &[[-100., 0., 0.], [100., 0., 0.]]);
+        assert!((r - 200.).abs() < 1e-9, "{r}");
+        // a cloud of fewer than a hundred points: its farthest within
+        let two = [([10., 0., 0.], [0, 0, 0]), ([100., 0., 0.], [0, 0, 0])];
+        let r = sky_radius([0.; 3], &two, &[[0.; 3]]);
         assert!((r - 200.).abs() < 1e-9, "{r}");
     }
 

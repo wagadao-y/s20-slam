@@ -1647,7 +1647,9 @@ impl App {
                 (false, tl("屋内", "Indoor"), tl("部屋・廊下・階段など狭い場所向け：LiDAR の点を細かく使い、近くの点も使います。画像の出力に背景用の点を追加しません", "For tight spaces such as rooms, corridors and stairs: uses the LiDAR points finely, including near ones. The image export adds no background points")),
                 (true, tl("屋外", "Outdoor"), tl("神社・公園・街路など広い場所向け：LiDAR の点を粗めに間引いて、遠くまで速く処理します。画像の出力に背景用の点を追加します", "For wide spaces such as shrines, parks and streets: thins the LiDAR points coarsely and processes far quickly. The image export adds background points")),
             ] {
-                let selected = self.s.outdoor == outdoor && !modified;
+                // "Add background points" changed from the preset leaves it to be chosen again
+                let selected =
+                    self.s.outdoor == outdoor && !modified && self.s.sky_sphere() == outdoor;
                 let r = ui
                     .selectable_label(selected, name)
                     .on_hover_text(tr!("{tip}
@@ -1668,11 +1670,12 @@ impl App {
     }
 
     fn apply_preset(&mut self, outdoor: bool) {
+        // the sky sphere as it was, before the preset changes it
+        let sky = self.s.sky_sphere();
         self.s.outdoor = outdoor;
         self.s.params = Some(ProcessParams::preset(outdoor));
         // the sky sphere as the preset again, and the image export's state with it (the
         // parameters may be the same)
-        let sky = self.s.sky_sphere();
         self.s.sky_sphere = None;
         if self.s.sky_sphere() != sky {
             self.refresh_steps();
