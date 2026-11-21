@@ -60,7 +60,7 @@ The language is chosen from the menu bar (English / 日本語). Until then it fo
 | `pdal_to_crs.json` | When GNSS was used: a PDAL pipeline to put the point cloud in a coordinate system (see [Coordinate systems](docs/coordinates.md)) |
 | `images/`, `sparse/0/`, `masks/` | Optional: the photos with their poses, in PointClouds Studio's layout and as a COLMAP model |
 
-With GNSS the coordinates are local, in meters around an origin near the site: X = east, Y = north, Z = up. Z is the height above the origin, not above sea level. The origin's latitude, longitude and ellipsoidal height are in `coordinate_frame.json`; keep it with the point cloud. To put the point cloud in UTM or a national grid, see [Coordinate systems](docs/coordinates.md). Without GNSS each recording has its own coordinates: Z is up, X and Y have no fixed direction.
+With GNSS the coordinates are local, in meters around an origin where the GNSS solution first met the quality conditions (usually near where the recording started): X = east, Y = north, Z = up. Z is the height above the origin, not above sea level. The origin's latitude, longitude and ellipsoidal height are in `coordinate_frame.json`; keep it with the point cloud. To put the point cloud in UTM or a national grid, see [Coordinate systems](docs/coordinates.md). Without GNSS each recording has its own coordinates: Z is up, X and Y have no fixed direction.
 
 ### Better colors: the device calibration
 
