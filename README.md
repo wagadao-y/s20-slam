@@ -36,7 +36,7 @@ The app keeps its settings, the device calibrations and crash logs in `%APPDATA%
 - Memory: 32 GB or more is recommended. Image pose refinement and the coloring's exposure correction take the whole recording at once, so a longer recording uses more memory (a 19-minute outdoor recording, 4650 images and 27.85 million points: 22 GB at the most in image pose refinement, 15 GB in the coloring). The point cloud does not depend on the recording's length: about 8 GB for a long outdoor recording.
 - Disk: besides the copy of the raw data, room for the results. For example, a 16-minute outdoor recording (11 GB of raw data) takes 3.5 GB up to the coloring, 8 GB with the image export. Nearly all of it is the point clouds and the photos; the intermediate files are under 100 MB.
 
-Processing time, for example: a 19-minute outdoor recording (4650 images) takes about 17 minutes up to the coloring (with an RTX 3060): odometry 0.5 min, trajectory optimization 1 min, point cloud 2.5 min, image pose refinement 6.5 min, coloring 6 min. With the image export, image pose refinement also finds the poses for 3DGS and takes longer (unless "Poses for 3DGS" is off).
+Processing time, for example: a 19-minute outdoor recording (4650 images) takes about 17 minutes up to the coloring (with an RTX 3060): odometry 0.5 min, trajectory optimization 1 min, point cloud 2.5 min, image pose refinement 6.5 min, coloring 6 min. With the image export and "Poses for 3DGS (experimental)" on, image pose refinement also finds the poses for 3DGS and takes longer.
 
 ## Quick start
 

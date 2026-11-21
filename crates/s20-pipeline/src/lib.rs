@@ -1280,7 +1280,8 @@ pub struct WorkSettings {
     pub images: bool,
     /// every image's pose is refined against the cloud before the coloring
     pub refine: bool,
-    /// the refinement also finds the poses for Gaussian Splatting (see [`RunConfig::poses_3dgs`])
+    /// the refinement also finds the poses for Gaussian Splatting (experimental, off by default;
+    /// see [`RunConfig::poses_3dgs`])
     pub poses_3dgs: bool,
     /// the sky sphere in the COLMAP model (see [`RunConfig::sky_sphere`]); None: as the preset
     /// (outdoors on, see [`WorkSettings::sky_sphere`])
@@ -1297,7 +1298,7 @@ impl Default for WorkSettings {
             laz: true,
             images: false,
             refine: true,
-            poses_3dgs: true,
+            poses_3dgs: false,
             sky_sphere: None,
         }
     }
@@ -1368,7 +1369,9 @@ pub struct RunConfig {
     /// with `images` and `refine`: the refinement also finds the poses the photos agree with one
     /// another in (its tracks, [`RunConfig::tracked_poses`]) for the COLMAP model and the image
     /// points; without, the COLMAP model takes the refined poses (fitted to the cloud) and has
-    /// no image points, and the refinement is shorter
+    /// no image points, and the refinement is shorter. Experimental and off by default: 3DGS tools
+    /// that warp each photo during training (Spirula Studio's calibration correction) showed no
+    /// visible difference with the refined poses
     pub poses_3dgs: bool,
     /// with `images`: the COLMAP model's seed points have the sky sphere after the cloud's (points
     /// on a large sphere around the scene, for the sky and the far background where the cloud has
@@ -1427,7 +1430,7 @@ impl RunConfig {
             laz: true,
             images: false,
             refine: true,
-            poses_3dgs: true,
+            poses_3dgs: false,
             sky_sphere: false,
             device_calib: None,
         }
@@ -3085,19 +3088,19 @@ mod tests {
             laz: false,
             images: true,
             refine: false,
-            poses_3dgs: false,
+            poses_3dgs: true,
             sky_sphere: Some(false),
         };
         w.save(&work).unwrap();
         assert_eq!(WorkSettings::load(&work).unwrap().unwrap(), w);
-        // settings saved before the poses for 3DGS were optional: found as before
+        // settings saved before the poses for 3DGS were optional: without them (the default)
         std::fs::write(
             work.join("settings.json"),
             r#"{"outdoor": false, "images": true, "refine": true}"#,
         )
         .unwrap();
         let old = WorkSettings::load(&work).unwrap().unwrap();
-        assert!(old.poses_3dgs);
+        assert!(!old.poses_3dgs);
         // and the sky sphere as the preset
         assert!(old.sky_sphere.is_none() && !old.sky_sphere());
         let outdoors = WorkSettings {
@@ -3159,6 +3162,7 @@ mod tests {
         let work = std::env::temp_dir().join(format!("s20_refine_tracks_{}", std::process::id()));
         let mut c = RunConfig::new(work.join("raw"), work.clone());
         c.refine = true;
+        c.poses_3dgs = true;
         std::fs::create_dir_all(c.runs()).unwrap();
         std::fs::write(c.refined_poses(), "fixture").unwrap();
         // made with the images, so with the tracks
@@ -3183,6 +3187,9 @@ mod tests {
     fn the_colmap_model_takes_the_refined_poses_without_the_poses_for_3dgs() {
         let mut c = RunConfig::new(PathBuf::from("raw"), PathBuf::from("work"));
         c.images = true;
+        // off by default
+        assert!(!c.tracks());
+        c.poses_3dgs = true;
         let with = c.step_params(Step::Images);
         assert_eq!(with["colmap_poses"], "tracks");
         c.poses_3dgs = false;

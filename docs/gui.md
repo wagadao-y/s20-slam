@@ -26,7 +26,7 @@ Saving, undo, input errors, and processing finishing or failing are shown at the
 
 ## Processing settings
 
-The GNSS (none / the device's RTK / PPK) is chosen in **Processing settings** in the left panel. Indoor / outdoor, the output format (LAZ / LAS), the gravity correction, the detailed parameters and so on are in **Other settings…** (or **Process → Processing settings…**). The settings are saved in the work folder's `settings.json`; a new work folder starts from the last settings used.
+The GNSS (none / the device's RTK / PPK) is chosen in **Processing settings** in the left panel. Indoor / outdoor, the output format (LAZ / LAS), the gravity correction, the poses for 3DGS (experimental), the detailed parameters and so on are in **Other settings…** (or **Process → Processing settings…**). The settings are saved in the work folder's `settings.json`; a new work folder starts from the last settings used.
 
 Indoor and outdoor differ only in four LIO values (downsampling, the map's voxel, the minimum range, the LiDAR weight) and the image export's "Add background points" default (on outdoors). The trajectory optimization, PPK, point cloud and coloring use the same settings. Choosing a preset sets the detailed parameters and "Add background points" back to its values.
 
@@ -41,7 +41,7 @@ Indoor and outdoor differ only in four LIO values (downsampling, the map's voxel
 | Trajectory and image pose export | trajectory.txt / las, ImgPose.txt |
 | Image pose refinement | Each image's pose adjusted to the point cloud |
 | Colorization | The point cloud colored from the camera images |
-| Image export | Optional. In PointClouds Studio's layout and as a COLMAP model. When on, image pose refinement also finds the poses for 3DGS (the photos agreeing with one another); turned on later, it runs image pose refinement again. With "Poses for 3DGS" below it off, the COLMAP output takes the poses colorization uses (fitted to the point cloud), `image_points.txt` is not written, and image pose refinement is shorter: for when the 3DGS tool adjusts the poses during training. "Add background points" adds points on a large sphere around the scene (a sky sphere) to the COLMAP output's initial points (the seeds of the sky and the far background; see the [CLI page](cli.md#colmap-output-for-3d-gaussian-splatting)). On by default with the outdoor preset, off indoors |
+| Image export | Optional. In PointClouds Studio's layout and as a COLMAP model. The COLMAP output takes the poses colorization uses (fitted to the point cloud); the 3DGS tool can make up for each photo's small misalignment during training (Spirula Studio's calibration correction and others; accurate suits recordings with much close by). With "Poses for 3DGS (experimental)" in **Other settings…** on, image pose refinement also finds the poses the photos agree best with one another in, for the COLMAP output, and `image_points.txt` is written too (image pose refinement takes longer; turned on later, it runs image pose refinement again). "Add background points" adds points on a large sphere around the scene (a sky sphere) to the COLMAP output's initial points (the seeds of the sky and the far background; see the [CLI page](cli.md#colmap-output-for-3d-gaussian-splatting)). On by default with the outdoor preset, off indoors |
 
 **Run from unfinished or unapplied steps** runs only the steps needed, in order. Each step's ▷ reruns that step alone, or from it to the end (from an earlier unfinished step if there is one; the menu shows what will run).
 

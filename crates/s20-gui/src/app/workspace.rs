@@ -608,55 +608,6 @@ impl App {
             if mode != previous {
                 self.s.set_gnss_mode(mode);
             }
-            if ui
-                .checkbox(&mut self.s.images, tl("画像を出力（COLMAP）", "Export images (COLMAP)"))
-                .on_hover_text(
-                    tl("着色のあとで、写真とその姿勢を PointClouds Studio と同じ形式と COLMAP 形式で output に出力します。\
-                     output フォルダーをそのまま 3DGS ツール（Spirula Studio など）で開けます", "After colorization, writes the photos with their poses to output, in PointClouds Studio's format and the COLMAP format. The output folder opens as is in 3DGS tools (Spirula Studio and others)"),
-                )
-                .on_disabled_hover_text(tl("実行中は変更できません", "Can't be changed while processing"))
-                .changed()
-            {
-                self.refresh_steps();
-            }
-            if self.s.images {
-                let changed = ui
-                    .indent("poses_3dgs", |ui| {
-                        let changed = ui.add_enabled(
-                            self.s.refine,
-                            egui::Checkbox::new(&mut self.s.poses_3dgs, tl("3DGS 用の姿勢", "Poses for 3DGS")),
-                        )
-                        .on_hover_text(tl(
-                            "画像の姿勢合わせで、写真どうしが一番合う姿勢も求め、COLMAP 形式の出力と image_points.txt に使います。\
-                             画像の姿勢合わせが長くなります。オフのときは、COLMAP 形式にも着色と同じ姿勢（点群に合わせた姿勢）を出力し、\
-                             image_points.txt は出力しません（姿勢の調整を 3DGS ツールの学習に任せるとき）",
-                            "Image pose refinement also finds the poses the photos agree best with one another in, for the COLMAP output and image_points.txt, and takes longer. When off, the COLMAP output takes the poses colorization uses (fitted to the point cloud), and image_points.txt is not written (when the 3DGS tool adjusts the poses during training)",
-                        ))
-                        .on_disabled_hover_text(tl(
-                            "「画像の姿勢合わせ」がオフのときは求めません",
-                            "Not found while \"Image pose refinement\" is off",
-                        ))
-                        .changed();
-                        let mut sky = self.s.sky_sphere();
-                        let sky_changed = ui
-                            .checkbox(&mut sky, tl("背景用の点を追加", "Add background points"))
-                            .on_hover_text(tl(
-                                "COLMAP 形式の初期点に、シーンを囲む大きな球の上の点（sky sphere）を追加します。空や遠くの背景など、点群に点がないところの初期値になり、学習で物体と空・背景が分かれやすくなります。\
-                                 屋外のプリセットでは既定でオン、屋内ではオフ",
-                                "Adds points on a large sphere around the scene (a sky sphere) to the COLMAP output's seed points: the seeds of the sky and the far background, where the point cloud has none, so that training separates objects from the sky and the background sooner. \
-                                 On by default with the outdoor preset, off indoors",
-                            ))
-                            .changed();
-                        if sky_changed {
-                            self.s.sky_sphere = Some(sky);
-                        }
-                        changed || sky_changed
-                    })
-                    .inner;
-                if changed {
-                    self.refresh_steps();
-                }
-            }
             let device = self.config().and_then(|c| c.device_calib);
             ui.horizontal(|ui| {
                 ui.label(if device.is_some() { tl("機体の校正: あり", "Device calibration: yes") } else { tl("機体の校正: なし", "Device calibration: none") })
@@ -681,6 +632,40 @@ impl App {
                 .changed()
             {
                 self.refresh_steps();
+            }
+            if ui
+                .checkbox(&mut self.s.images, tl("画像を出力（COLMAP）", "Export images (COLMAP)"))
+                .on_hover_text(
+                    tl("着色のあとで、写真とその姿勢を PointClouds Studio と同じ形式と COLMAP 形式で output に出力します。\
+                     output フォルダーをそのまま 3DGS ツール（Spirula Studio など）で開けます", "After colorization, writes the photos with their poses to output, in PointClouds Studio's format and the COLMAP format. The output folder opens as is in 3DGS tools (Spirula Studio and others)"),
+                )
+                .on_disabled_hover_text(tl("実行中は変更できません", "Can't be changed while processing"))
+                .changed()
+            {
+                self.refresh_steps();
+            }
+            if self.s.images {
+                let changed = ui
+                    .indent("image_export", |ui| {
+                        let mut sky = self.s.sky_sphere();
+                        let sky_changed = ui
+                            .checkbox(&mut sky, tl("背景用の点を追加", "Add background points"))
+                            .on_hover_text(tl(
+                                "COLMAP 形式の初期点に、シーンを囲む大きな球の上の点（sky sphere）を追加します。空や遠くの背景など、点群に点がないところの初期値になり、学習で物体と空・背景が分かれやすくなります。\
+                                 屋外のプリセットでは既定でオン、屋内ではオフ",
+                                "Adds points on a large sphere around the scene (a sky sphere) to the COLMAP output's seed points: the seeds of the sky and the far background, where the point cloud has none, so that training separates objects from the sky and the background sooner. \
+                                 On by default with the outdoor preset, off indoors",
+                            ))
+                            .changed();
+                        if sky_changed {
+                            self.s.sky_sphere = Some(sky);
+                        }
+                        sky_changed
+                    })
+                    .inner;
+                if changed {
+                    self.refresh_steps();
+                }
             }
         });
         if self.s.ppk
@@ -1243,6 +1228,28 @@ impl App {
                 {
                     self.refresh_steps();
                     self.load_scene(&ctx);
+                }
+                if ui
+                    .add_enabled(
+                        self.s.images && self.s.refine,
+                        egui::Checkbox::new(
+                            &mut self.s.poses_3dgs,
+                            tl("3DGS 用の姿勢（実験的）", "Poses for 3DGS (experimental)"),
+                        ),
+                    )
+                    .on_hover_text(tl(
+                        "画像を出力するとき、画像の姿勢合わせで写真どうしが一番合う姿勢も求め、COLMAP 形式の出力と image_points.txt に使います。\
+                         画像の姿勢合わせが長くなります。オフ（既定）のときは、COLMAP 形式にも着色と同じ姿勢（点群に合わせた姿勢）を出力し、\
+                         image_points.txt は出力しません。写真ごとのずれは 3DGS ツールの学習で補えます（Spirula Studio のキャリブレーション補正など）",
+                        "When exporting images, image pose refinement also finds the poses the photos agree best with one another in, for the COLMAP output and image_points.txt, and takes longer. When off (the default), the COLMAP output takes the poses colorization uses (fitted to the point cloud), and image_points.txt is not written. The 3DGS tool can make up for each photo's small misalignment during training (Spirula Studio's calibration correction and others)",
+                    ))
+                    .on_disabled_hover_text(tl(
+                        "「画像を出力」と「画像の姿勢合わせ」がオンのときに使います",
+                        "Used while \"Export images\" and \"Image pose refinement\" are on",
+                    ))
+                    .changed()
+                {
+                    self.refresh_steps();
                 }
             });
         ui.weak(tl(

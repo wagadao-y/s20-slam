@@ -167,7 +167,7 @@ impl Default for Settings {
             laz: true,
             images: false,
             refine: true,
-            poses_3dgs: true,
+            poses_3dgs: false,
             sky_sphere: None,
             point_size: 2.0,
             adaptive: true,

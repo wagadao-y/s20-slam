@@ -744,7 +744,7 @@ fn run(a: &mut Args, job: &Job) -> Result<()> {
     let no_color = a.flag("--no_color");
     let las = a.flag("--las");
     let images = a.flag("--images");
-    let no_3dgs_poses = a.flag("--no_3dgs_poses");
+    let poses_3dgs = a.flag("--3dgs_poses");
     let sky_sphere = a.flag("--sky_sphere");
     let no_sky_sphere = a.flag("--no_sky_sphere");
     let no_refine = a.flag("--no_refine");
@@ -757,6 +757,12 @@ fn run(a: &mut Args, job: &Job) -> Result<()> {
     anyhow::ensure!(
         !(sky_sphere && no_sky_sphere),
         "--sky_sphere and --no_sky_sphere together"
+    );
+    // the poses for 3DGS come from the image refinement, for the image export
+    anyhow::ensure!(!poses_3dgs || images, "--3dgs_poses needs --images");
+    anyhow::ensure!(
+        !(poses_3dgs && no_refine),
+        "--3dgs_poses and --no_refine together (the poses for 3DGS come from the image refinement)"
     );
     let raws: Vec<PathBuf> = raw.split(',').map(PathBuf::from).collect();
     let mut cfg = s20_pipeline::RunConfig::with_sessions(raws, work);
@@ -773,7 +779,7 @@ fn run(a: &mut Args, job: &Job) -> Result<()> {
     cfg.laz = !las;
     cfg.images = images;
     cfg.refine = !no_refine;
-    cfg.poses_3dgs = !no_3dgs_poses;
+    cfg.poses_3dgs = poses_3dgs;
     // outdoors on, unless chosen
     cfg.sky_sphere = sky_sphere || (outdoor && !no_sky_sphere);
     cfg.device_calib = device.map(PathBuf::from);
@@ -827,17 +833,18 @@ const USAGE: &str = "usage:
   s20 licenses
   s20 version
   s20 run <raw folder>[,<raw folder>...] <work folder> [--outdoor | --params file.json] [--no_rtk] [--no_color]
-      [--redo] [--ppk] [--las] [--images [--no_3dgs_poses] [--sky_sphere | --no_sky_sphere]] [--no_refine] [--device_calibration file.yaml] [--until step]
+      [--redo] [--ppk] [--las] [--images [--3dgs_poses] [--sky_sphere | --no_sky_sphere]] [--no_refine] [--device_calibration file.yaml] [--until step]
       (extract -> lio -> opt -> cloud -> export -> refine -> colorize; RTK is used when the receiver has fixes;
        refine: every image's pose refined against the cloud for the coloring, and the cameras solved from
        the recording, or with --device_calibration (made by calibrate-cameras) used in place of the maker's;
        extraction and odometry are reused when present unless --redo; --params: parameters saved from the GUI;
        point clouds are written as .laz, or .las with --las; --images: after the coloring, the photos with
        their refined poses in output/images as PointClouds Studio's and a COLMAP model beside them (output/sparse/0,
-       masks, gauge.txt: the output folder opens as a dataset in Gaussian Splatting tools; output/image_points.txt:
-       the photos' feature tracks triangulated, image points where the cloud has none); with --images, the
-       refinement also finds the poses the photos agree with one another in, for the COLMAP model (longer);
-       --no_3dgs_poses: the COLMAP model with the refined poses (fitted to the cloud) and no image_points.txt;
+       masks, gauge.txt: the output folder opens as a dataset in Gaussian Splatting tools), the COLMAP model
+       with the refined poses (fitted to the cloud);
+       --3dgs_poses (experimental): the refinement also finds the poses the photos agree with one another in,
+       for the COLMAP model (longer), and output/image_points.txt: the photos' feature tracks triangulated,
+       image points where the cloud has none;
        --sky_sphere (on with --outdoor, off with --no_sky_sphere): the COLMAP model's seed points with the
        sky sphere's after them, points on a large sphere around the scene for the sky and the far background;
        multiple raw folders: sessions of one place,

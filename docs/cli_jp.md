@@ -8,7 +8,7 @@ GUI と同じ処理をコマンドラインで実行します。すべてのコ�
 
 ```
 s20 run <生データフォルダー> <作業フォルダー> [--outdoor | --params file.json] [--no_rtk] [--ppk] [--no_color]
-        [--las] [--images [--no_3dgs_poses] [--sky_sphere | --no_sky_sphere]] [--no_refine] [--device_calibration file.yaml] [--redo] [--until 工程]
+        [--las] [--images [--3dgs_poses] [--sky_sphere | --no_sky_sphere]] [--no_refine] [--device_calibration file.yaml] [--redo] [--until 工程]
 s20 run <生データ1>,<生データ2>,... <作業フォルダー> --outdoor   # 複数セッション
 ```
 
@@ -22,8 +22,8 @@ s20 run <生データ1>,<生データ2>,... <作業フォルダー> --outdoor   
 | `--ppk` | PPK を計算して使う（[PPK](ppk.md)） |
 | `--no_color` | 着色しない |
 | `--las` | 点群を LAS で出力する（既定は LAZ） |
-| `--images` | 着色のあと、姿勢合わせ後の写真を `output/images`（PointClouds Studio と同じ形式）に、COLMAP のモデルを横に出力する（このとき、画像の姿勢合わせで 3DGS 用の姿勢も求める） |
-| `--no_3dgs_poses` | `--images` で、3DGS 用の姿勢を求めない。COLMAP のモデルは着色と同じ姿勢（点群に合わせた姿勢）で、`image_points.txt` は出力しない。画像の姿勢合わせが短くなる |
+| `--images` | 着色のあと、姿勢合わせ後の写真を `output/images`（PointClouds Studio と同じ形式）に、COLMAP のモデルを横に出力する。COLMAP のモデルの姿勢は着色と同じ姿勢（点群に合わせた姿勢） |
+| `--3dgs_poses` | 実験的。`--images` で、画像の姿勢合わせで 3DGS 用の姿勢（写真どうしが一番合う姿勢）も求め、COLMAP のモデルに使い、`image_points.txt` も出力する。画像の姿勢合わせが長くなる。`--no_refine` とは併用できない |
 | `--sky_sphere`、`--no_sky_sphere` | `--images` で、COLMAP のモデルの初期点に sky sphere（下を参照）を足す／足さない。既定は `--outdoor` のときに足す |
 | `--no_refine` | 画像の姿勢合わせをしない |
 | `--device_calibration` | 機体の校正（`calibrate-device` で作ったもの）を、メーカーの校正ファイル（出荷時の `calibration.yaml`）の代わりに使う |
@@ -77,12 +77,12 @@ s20 version                                                     # バージョ�
 |---|---|
 | `images/left/`、`images/right/` | 記録された JPEG（再圧縮しません） |
 | `sparse/0/cameras.txt` | 左右のカメラ。S20 の魚眼多項式に当てはめた `OPENCV_FISHEYE`（Kannala-Brandt） |
-| `sparse/0/images.txt` | 画像の姿勢（`s20 run --images` では 3DGS 用の姿勢 `ImgPose-3dgs.txt`、`--no_3dgs_poses` では着色と同じ姿勢） |
+| `sparse/0/images.txt` | 画像の姿勢（着色と同じ姿勢。`s20 run --images --3dgs_poses` では 3DGS 用の姿勢 `ImgPose-3dgs.txt`） |
 | `sparse/0/points3D.txt` | 着色済み点群を間引いた初期点（既定 50 万点）。sky sphere を足すときは、その後ろに続く（`export-colmap` は `--sky_sphere` で足す） |
 | `masks/` | 光軸から `--max_angle`（85°）より外の画面の隅（校正を当てはめていない範囲） |
 | `gauge.txt` | Z 軸が上、単位はメートル |
 | `export.json` | 当てはめの誤差、点の数 |
-| `image_points.txt` | `s20 run --images` で画像の姿勢合わせを行ったとき（`--no_3dgs_poses` を除く）：写真の特徴点のトラックを、`ImgPose-3dgs.txt` の姿勢で三角測量した点（下を参照） |
+| `image_points.txt` | `s20 run --images --3dgs_poses` で画像の姿勢合わせを行ったとき：写真の特徴点のトラックを、`ImgPose-3dgs.txt` の姿勢で三角測量した点（下を参照） |
 
 Kannala-Brandt は S20 の多項式と完全には一致しません。当てはめの誤差は RMS で 0.1〜0.2 px 程度です。
 

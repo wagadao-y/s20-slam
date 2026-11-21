@@ -959,12 +959,12 @@ fn processing_settings_are_kept_by_work_folder_and_a_new_one_starts_from_the_las
         laz: true,
         images: true,
         refine: true,
-        poses_3dgs: false,
+        poses_3dgs: true,
         sky_sphere: None,
     });
     app.save_work_settings();
     let saved = WorkSettings::load(&outdoors.0).unwrap().unwrap();
-    assert!(saved.outdoor && saved.ppk && saved.images && !saved.poses_3dgs);
+    assert!(saved.outdoor && saved.ppk && saved.images && saved.poses_3dgs);
     // the sky sphere as the outdoor preset
     assert!(saved.sky_sphere.is_none() && saved.sky_sphere());
 
