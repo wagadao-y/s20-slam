@@ -689,7 +689,7 @@ pub fn export(data: &Path, traj: &Path, out: &Path, calib: Option<&Path>, job: &
 /// model beside it (`sparse/0`, `masks/`, `gauge.txt`; its images those of `images/`), so that the
 /// output folder opens as a dataset in Gaussian Splatting tools. `imgpose` and `calib`: the image
 /// poses and the calibration of the coloring (refined), `colored` the colored cloud (the COLMAP
-/// model's seed points). `colmap`: other poses for the COLMAP model (the tracks' of the refinement,
+/// model's seed points; with `sky_sphere`, the sky sphere's after them). `colmap`: other poses for the COLMAP model (the tracks' of the refinement,
 /// written beside the photos as `ImgPose-3dgs.txt`).
 #[allow(clippy::too_many_arguments)]
 pub fn images(
@@ -700,6 +700,7 @@ pub fn images(
     calib: &Path,
     colored: &Path,
     out: &Path,
+    sky_sphere: bool,
     job: &Job,
 ) -> Result<()> {
     let cal = s20_io::calib::load(calib)?;
@@ -782,6 +783,7 @@ pub fn images(
         out: out.to_path_buf(),
         points: 500_000,
         max_angle: 85.,
+        sky_sphere,
     };
     s20_visual::colmap::export(&input, &job.part(0.7, 1.0))?;
     Ok(())
@@ -1280,6 +1282,9 @@ pub struct WorkSettings {
     pub refine: bool,
     /// the refinement also finds the poses for Gaussian Splatting (see [`RunConfig::poses_3dgs`])
     pub poses_3dgs: bool,
+    /// the sky sphere in the COLMAP model (see [`RunConfig::sky_sphere`]); None: as the preset
+    /// (outdoors on, see [`WorkSettings::sky_sphere`])
+    pub sky_sphere: Option<bool>,
 }
 
 impl Default for WorkSettings {
@@ -1293,11 +1298,17 @@ impl Default for WorkSettings {
             images: false,
             refine: true,
             poses_3dgs: true,
+            sky_sphere: None,
         }
     }
 }
 
 impl WorkSettings {
+    /// Whether the COLMAP model has the sky sphere: as chosen, else outdoors.
+    pub fn sky_sphere(&self) -> bool {
+        self.sky_sphere.unwrap_or(self.outdoor)
+    }
+
     fn file(work: &Path) -> PathBuf {
         work.join("settings.json")
     }
@@ -1359,6 +1370,10 @@ pub struct RunConfig {
     /// points; without, the COLMAP model takes the refined poses (fitted to the cloud) and has
     /// no image points, and the refinement is shorter
     pub poses_3dgs: bool,
+    /// with `images`: the COLMAP model's seed points have the sky sphere after the cloud's (points
+    /// on a large sphere around the scene, for the sky and the far background where the cloud has
+    /// none; see [`s20_visual::colmap::sky_sphere`])
+    pub sky_sphere: bool,
     /// the device's calibration (`s20 calibrate-cameras`), in place of the maker's
     pub device_calib: Option<PathBuf>,
 }
@@ -1413,6 +1428,7 @@ impl RunConfig {
             images: false,
             refine: true,
             poses_3dgs: true,
+            sky_sphere: false,
             device_calib: None,
         }
     }
@@ -1868,6 +1884,10 @@ impl RunConfig {
                     v["image_points"] = true.into();
                 } else if self.refine {
                     v["colmap_poses"] = "refined".into();
+                }
+                // without it, as exported before it could be had
+                if self.sky_sphere {
+                    v["sky_sphere"] = 1.into();
                 }
                 v
             }
@@ -2380,6 +2400,7 @@ impl RunConfig {
                     &calib,
                     &self.colored(),
                     &self.output(),
+                    self.sky_sphere,
                     &job.named(step.key()),
                 )?;
                 // the tracks' points beside the COLMAP model (image points where the cloud has
@@ -3065,6 +3086,7 @@ mod tests {
             images: true,
             refine: false,
             poses_3dgs: false,
+            sky_sphere: Some(false),
         };
         w.save(&work).unwrap();
         assert_eq!(WorkSettings::load(&work).unwrap().unwrap(), w);
@@ -3074,7 +3096,15 @@ mod tests {
             r#"{"outdoor": false, "images": true, "refine": true}"#,
         )
         .unwrap();
-        assert!(WorkSettings::load(&work).unwrap().unwrap().poses_3dgs);
+        let old = WorkSettings::load(&work).unwrap().unwrap();
+        assert!(old.poses_3dgs);
+        // and the sky sphere as the preset
+        assert!(old.sky_sphere.is_none() && !old.sky_sphere());
+        let outdoors = WorkSettings {
+            outdoor: true,
+            ..old
+        };
+        assert!(outdoors.sky_sphere());
         w.save(&work).unwrap();
         assert_eq!(WorkSettings::load(&work).unwrap().unwrap(), w);
         std::fs::write(work.join("settings.json"), "{").unwrap();
@@ -3165,6 +3195,22 @@ mod tests {
         let unrefined = c.step_params(Step::Images);
         c.poses_3dgs = true;
         assert_eq!(c.step_params(Step::Images), unrefined);
+    }
+
+    #[test]
+    fn the_sky_sphere_redoes_the_export_alone() {
+        let mut c = RunConfig::new(PathBuf::from("raw"), PathBuf::from("work"));
+        c.images = true;
+        let without = c.step_params(Step::Images);
+        assert!(without.get("sky_sphere").is_none());
+        c.sky_sphere = true;
+        assert_eq!(c.step_params(Step::Images)["sky_sphere"], 1);
+        for step in [Step::Refine, Step::Colorize] {
+            let on = c.step_params(step);
+            c.sky_sphere = false;
+            assert_eq!(c.step_params(step), on, "{step:?}");
+            c.sky_sphere = true;
+        }
     }
 
     #[test]

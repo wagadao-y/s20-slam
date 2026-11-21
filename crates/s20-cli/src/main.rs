@@ -252,6 +252,7 @@ fn main() -> Result<()> {
                 calib: req(&mut a, "--calib", "<the device's calibration.yaml>")?,
                 points: a.get("--points", 500_000)?,
                 max_angle: a.get("--max_angle", 85.)?,
+                sky_sphere: a.flag("--sky_sphere"),
                 cloud: PathBuf::from(a.positional_req("colored .las/.laz")?),
                 out: PathBuf::from(a.positional_req("output folder")?),
             };
@@ -744,6 +745,8 @@ fn run(a: &mut Args, job: &Job) -> Result<()> {
     let las = a.flag("--las");
     let images = a.flag("--images");
     let no_3dgs_poses = a.flag("--no_3dgs_poses");
+    let sky_sphere = a.flag("--sky_sphere");
+    let no_sky_sphere = a.flag("--no_sky_sphere");
     let no_refine = a.flag("--no_refine");
     let device = a.get_str("--device_calibration")?;
     let params = a.get_str("--params")?;
@@ -751,6 +754,10 @@ fn run(a: &mut Args, job: &Job) -> Result<()> {
     let raw = a.positional_req("raw folder (comma separated: one per session)")?;
     let work = PathBuf::from(a.positional_req("work folder")?);
     a.finish()?;
+    anyhow::ensure!(
+        !(sky_sphere && no_sky_sphere),
+        "--sky_sphere and --no_sky_sphere together"
+    );
     let raws: Vec<PathBuf> = raw.split(',').map(PathBuf::from).collect();
     let mut cfg = s20_pipeline::RunConfig::with_sessions(raws, work);
     cfg.params = match params {
@@ -767,6 +774,8 @@ fn run(a: &mut Args, job: &Job) -> Result<()> {
     cfg.images = images;
     cfg.refine = !no_refine;
     cfg.poses_3dgs = !no_3dgs_poses;
+    // outdoors on, unless chosen
+    cfg.sky_sphere = sky_sphere || (outdoor && !no_sky_sphere);
     cfg.device_calib = device.map(PathBuf::from);
     let first = if redo {
         s20_pipeline::Step::Extract
@@ -818,7 +827,7 @@ const USAGE: &str = "usage:
   s20 licenses
   s20 version
   s20 run <raw folder>[,<raw folder>...] <work folder> [--outdoor | --params file.json] [--no_rtk] [--no_color]
-      [--redo] [--ppk] [--las] [--images [--no_3dgs_poses]] [--no_refine] [--device_calibration file.yaml] [--until step]
+      [--redo] [--ppk] [--las] [--images [--no_3dgs_poses] [--sky_sphere | --no_sky_sphere]] [--no_refine] [--device_calibration file.yaml] [--until step]
       (extract -> lio -> opt -> cloud -> export -> refine -> colorize; RTK is used when the receiver has fixes;
        refine: every image's pose refined against the cloud for the coloring, and the cameras solved from
        the recording, or with --device_calibration (made by calibrate-cameras) used in place of the maker's;
@@ -829,6 +838,8 @@ const USAGE: &str = "usage:
        the photos' feature tracks triangulated, image points where the cloud has none); with --images, the
        refinement also finds the poses the photos agree with one another in, for the COLMAP model (longer);
        --no_3dgs_poses: the COLMAP model with the refined poses (fitted to the cloud) and no image_points.txt;
+       --sky_sphere (on with --outdoor, off with --no_sky_sphere): the COLMAP model's seed points with the
+       sky sphere's after them, points on a large sphere around the scene for the sky and the far background;
        multiple raw folders: sessions of one place,
        kept in <work folder>/sessions/<session name> (at first the raw folder's name); --until: stop after that step)
   s20 extract <raw folder> <data folder>   (indices of the points and images in the bag; IMU, GNSS)
@@ -899,10 +910,11 @@ const USAGE: &str = "usage:
        principal points are solved with every image's pose; <out>/calibration.yaml and report.json; --check
        also checks each recording with the cameras solved from the others)
   s20 export-colmap <colored .las|laz> <out folder> --data <session data folder> --imgpose ImgPose.txt
-      --calib calibration.yaml [--points n] [--max_angle deg] [--threads n]
+      --calib calibration.yaml [--points n] [--max_angle deg] [--sky_sphere] [--threads n]
       (a COLMAP model for 3D Gaussian Splatting: images/ as recorded, sparse/0 with each camera as
        OPENCV_FISHEYE fitted to the S20 fisheye, the image poses and the cloud thinned to --points (500,000)
-       seed points; masks/ outside --max_angle (85) degrees, where the calibration was not fitted;
+       seed points, with --sky_sphere the sky sphere's after them (on a sphere around the scene, gray, where
+       an image sees them); masks/ outside --max_angle (85) degrees, where the calibration was not fitted;
        gauge.txt (metric, z up) and export.json with the fit's error)
   s20 convert <in.las|laz> <out.las|laz>   (LAS <-> LAZ by extension; s20's layout: RGB, classification, normals)
   s20 potree <in.las|laz> [--no_rgb] [--gps_time]   (the Potree 2.0 octree, BROTLI, into <in>_converted as

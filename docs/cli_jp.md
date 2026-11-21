@@ -8,7 +8,7 @@ GUI と同じ処理をコマンドラインで実行します。すべてのコ�
 
 ```
 s20 run <生データフォルダー> <作業フォルダー> [--outdoor | --params file.json] [--no_rtk] [--ppk] [--no_color]
-        [--las] [--images [--no_3dgs_poses]] [--no_refine] [--device_calibration file.yaml] [--redo] [--until 工程]
+        [--las] [--images [--no_3dgs_poses] [--sky_sphere | --no_sky_sphere]] [--no_refine] [--device_calibration file.yaml] [--redo] [--until 工程]
 s20 run <生データ1>,<生データ2>,... <作業フォルダー> --outdoor   # 複数セッション
 ```
 
@@ -24,6 +24,7 @@ s20 run <生データ1>,<生データ2>,... <作業フォルダー> --outdoor   
 | `--las` | 点群を LAS で出力する（既定は LAZ） |
 | `--images` | 着色のあと、姿勢合わせ後の写真を `output/images`（PointClouds Studio と同じ形式）に、COLMAP のモデルを横に出力する（このとき、画像の姿勢合わせで 3DGS 用の姿勢も求める） |
 | `--no_3dgs_poses` | `--images` で、3DGS 用の姿勢を求めない。COLMAP のモデルは着色と同じ姿勢（点群に合わせた姿勢）で、`image_points.txt` は出力しない。画像の姿勢合わせが短くなる |
+| `--sky_sphere`、`--no_sky_sphere` | `--images` で、COLMAP のモデルの初期点に sky sphere（下を参照）を足す／足さない。既定は `--outdoor` のときに足す |
 | `--no_refine` | 画像の姿勢合わせをしない |
 | `--device_calibration` | 機体の校正（`calibrate-device` で作ったもの）を、メーカーの校正ファイル（出荷時の `calibration.yaml`）の代わりに使う |
 | `--redo` | 抽出と LIO があってもやり直す |
@@ -77,12 +78,14 @@ s20 version                                                     # バージョ�
 | `images/left/`、`images/right/` | 記録された JPEG（再圧縮しません） |
 | `sparse/0/cameras.txt` | 左右のカメラ。S20 の魚眼多項式に当てはめた `OPENCV_FISHEYE`（Kannala-Brandt） |
 | `sparse/0/images.txt` | 画像の姿勢（`s20 run --images` では 3DGS 用の姿勢 `ImgPose-3dgs.txt`、`--no_3dgs_poses` では着色と同じ姿勢） |
-| `sparse/0/points3D.txt` | 着色済み点群を間引いた初期点（既定 50 万点） |
+| `sparse/0/points3D.txt` | 着色済み点群を間引いた初期点（既定 50 万点）。sky sphere を足すときは、その後ろに続く（`export-colmap` は `--sky_sphere` で足す） |
 | `masks/` | 光軸から `--max_angle`（85°）より外の画面の隅（校正を当てはめていない範囲） |
 | `gauge.txt` | Z 軸が上、単位はメートル |
 | `export.json` | 当てはめの誤差、点の数 |
 | `image_points.txt` | `s20 run --images` で画像の姿勢合わせを行ったとき（`--no_3dgs_poses` を除く）：写真の特徴点のトラックを、`ImgPose-3dgs.txt` の姿勢で三角測量した点（下を参照） |
 
 Kannala-Brandt は S20 の多項式と完全には一致しません。当てはめの誤差は RMS で 0.1〜0.2 px 程度です。
+
+sky sphere は、シーンを囲む大きな球の上に置いた点です。空や遠くの背景には点群の点がなく、3DGS の学習で手前の Gaussian が空を表そうとして、浮遊物（floater）になりやすいので、その初期値にします。球の中心はカメラ位置の平均、半径は点群の 99% が収まる距離の 2 倍（50 m 以上）で、水平より 10° 下までに約 1° おきに並べ、どの画像にも写らない点は除きます。色は灰色で、空の色は学習で決まります。屋内では役に立たないので、既定では屋外（`--outdoor`）のときだけ足します。
 
 `image_points.txt` は、LiDAR が点を取れない所（機体のすぐ近くや、低い所の側面など）を写真の点で補うためのものです。`points3D.txt`（LiDAR の点）とは別のファイルで、1 行が 1 点です：位置（x y z）、写っている写真の枚数、最初と最後の写真の時間差（秒）、写真の光線どうしの最大の角度（度）、再投影誤差の中央値と最大（画素相当）、最も近い写真までの距離（m）、最寄りの点群の点までの距離（m）、点の出どころ（0：画像の姿勢合わせに使った対応、点群を手がかりに探したもの。1：点群を使わずにエピポーラ線に沿って探した対応）。点群は機体のすぐ近くの面などを取れないので、点群に予測を頼る 0 には、そうした面の点がほとんどありません。1 はそこも探します。点群からの距離が大きい点が、点群にない面の点です。角度の小さい点（基線の短い点）は光線の向きにばらつき、時間差の短い点は一度通っただけで写ったもの（人など）を含みます。写真 2 枚だけの点は誤対応を見分けられないので、使う側で写真の枚数・角度・誤差を見て選んでください。

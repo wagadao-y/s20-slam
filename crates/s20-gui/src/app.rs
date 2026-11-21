@@ -107,6 +107,8 @@ struct Settings {
     refine: bool,
     /// with the images and the refinement: the poses for Gaussian Splatting found too
     poses_3dgs: bool,
+    /// with the images: the sky sphere in the COLMAP model; None: as the preset (outdoors on)
+    sky_sphere: Option<bool>,
     point_size: f32,
     /// Potree's adaptive point size (by the spacing of the drawn points): the output cloud, the
     /// scans (off by default: thinned hard and of very uneven density, their discs would be large
@@ -166,6 +168,7 @@ impl Default for Settings {
             images: false,
             refine: true,
             poses_3dgs: true,
+            sky_sphere: None,
             point_size: 2.0,
             adaptive: true,
             adaptive_scans: false,
@@ -239,6 +242,7 @@ impl Settings {
             images: self.images,
             refine: self.refine,
             poses_3dgs: self.poses_3dgs,
+            sky_sphere: self.sky_sphere,
         }
     }
 
@@ -251,6 +255,12 @@ impl Settings {
         self.images = w.images;
         self.refine = w.refine;
         self.poses_3dgs = w.poses_3dgs;
+        self.sky_sphere = w.sky_sphere;
+    }
+
+    /// Whether the COLMAP model has the sky sphere: as chosen, else outdoors.
+    fn sky_sphere(&self) -> bool {
+        self.sky_sphere.unwrap_or(self.outdoor)
     }
 
     /// Whether the parameters differ from their preset.
@@ -835,6 +845,7 @@ impl App {
         c.images = self.s.images;
         c.refine = self.s.refine;
         c.poses_3dgs = self.s.poses_3dgs;
+        c.sky_sphere = self.s.sky_sphere();
         if !c.sessions.is_empty() {
             c.device_calib = self.device.find(&c.calib());
         }
@@ -1633,14 +1644,14 @@ impl App {
         ui.horizontal(|ui| {
             ui.label(tl("プリセット", "Preset"));
             for (outdoor, name, tip) in [
-                (false, tl("屋内", "Indoor"), tl("部屋・廊下・階段など狭い場所向け：LiDAR の点を細かく使い、近くの点も使います", "For tight spaces such as rooms, corridors and stairs: uses the LiDAR points finely, including near ones")),
-                (true, tl("屋外", "Outdoor"), tl("神社・公園・街路など広い場所向け：LiDAR の点を粗めに間引いて、遠くまで速く処理します", "For wide spaces such as shrines, parks and streets: thins the LiDAR points coarsely and processes far quickly")),
+                (false, tl("屋内", "Indoor"), tl("部屋・廊下・階段など狭い場所向け：LiDAR の点を細かく使い、近くの点も使います。画像の出力に背景用の点を追加しません", "For tight spaces such as rooms, corridors and stairs: uses the LiDAR points finely, including near ones. The image export adds no background points")),
+                (true, tl("屋外", "Outdoor"), tl("神社・公園・街路など広い場所向け：LiDAR の点を粗めに間引いて、遠くまで速く処理します。画像の出力に背景用の点を追加します", "For wide spaces such as shrines, parks and streets: thins the LiDAR points coarsely and processes far quickly. The image export adds background points")),
             ] {
                 let selected = self.s.outdoor == outdoor && !modified;
                 let r = ui
                     .selectable_label(selected, name)
                     .on_hover_text(tr!("{tip}
-詳細パラメータをこのプリセットの値にします", "{tip}\nSets the detailed parameters to this preset's values"));
+詳細パラメータと「背景用の点を追加」をこのプリセットの値にします", "{tip}\nSets the detailed parameters and \"Add background points\" to this preset's values"));
                 if r.clicked() && !selected {
                     if modified {
                         self.confirm_preset = Some(outdoor);
@@ -1659,6 +1670,13 @@ impl App {
     fn apply_preset(&mut self, outdoor: bool) {
         self.s.outdoor = outdoor;
         self.s.params = Some(ProcessParams::preset(outdoor));
+        // the sky sphere as the preset again, and the image export's state with it (the
+        // parameters may be the same)
+        let sky = self.s.sky_sphere();
+        self.s.sky_sphere = None;
+        if self.s.sky_sphere() != sky {
+            self.refresh_steps();
+        }
     }
 
     fn confirm_preset_modal(&mut self, ctx: &egui::Context) {

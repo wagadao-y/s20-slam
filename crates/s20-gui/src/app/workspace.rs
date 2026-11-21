@@ -622,7 +622,7 @@ impl App {
             if self.s.images {
                 let changed = ui
                     .indent("poses_3dgs", |ui| {
-                        ui.add_enabled(
+                        let changed = ui.add_enabled(
                             self.s.refine,
                             egui::Checkbox::new(&mut self.s.poses_3dgs, tl("3DGS 用の姿勢", "Poses for 3DGS")),
                         )
@@ -636,7 +636,21 @@ impl App {
                             "「画像の姿勢合わせ」がオフのときは求めません",
                             "Not found while \"Image pose refinement\" is off",
                         ))
-                        .changed()
+                        .changed();
+                        let mut sky = self.s.sky_sphere();
+                        let sky_changed = ui
+                            .checkbox(&mut sky, tl("背景用の点を追加", "Add background points"))
+                            .on_hover_text(tl(
+                                "COLMAP 形式の初期点に、シーンを囲む大きな球の上の点（sky sphere）を追加します。空や遠くの背景など、点群に点がないところの初期値になり、学習で物体と空・背景が分かれやすくなります。\
+                                 屋外のプリセットでは既定でオン、屋内ではオフ",
+                                "Adds points on a large sphere around the scene (a sky sphere) to the COLMAP output's seed points: the seeds of the sky and the far background, where the point cloud has none, so that training separates objects from the sky and the background sooner. \
+                                 On by default with the outdoor preset, off indoors",
+                            ))
+                            .changed();
+                        if sky_changed {
+                            self.s.sky_sphere = Some(sky);
+                        }
+                        changed || sky_changed
                     })
                     .inner;
                 if changed {

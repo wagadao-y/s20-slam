@@ -1,6 +1,8 @@
 //! A recording as a COLMAP model for 3D Gaussian Splatting: the images as they are, each camera as
 //! COLMAP's `OPENCV_FISHEYE` (Kannala-Brandt) fitted to the S20 polynomial, the image poses, and
-//! the colored cloud thinned to one point per voxel as the seed points.
+//! the colored cloud thinned to one point per voxel as the seed points; outdoors, the sky sphere
+//! after them (points on a large sphere around the scene: the seeds of the sky and the far
+//! background, where the cloud has none).
 //!
 //! Kannala-Brandt has odd powers of theta only and no skew, so the fit leaves a fraction of a
 //! pixel (the report gives it). Pixels past `max_angle` lie outside the calibration's fit and are
@@ -244,6 +246,78 @@ pub fn thin(pts: &[Point], target: usize) -> (Vec<Point>, f64) {
     (out, hi)
 }
 
+/// Points of the sky sphere, about (some 1 degree apart).
+pub const SKY_POINTS: usize = 20_000;
+/// The sky sphere reaches this far below the horizon (degrees), for ground lower than the cameras.
+pub const SKY_BELOW_HORIZON: f64 = 10.;
+/// The sky sphere's radius: this many times the distance within which 99% of the cloud lies, or
+/// the farthest camera's distance (outside them all), and [`SKY_RADIUS_MIN`] meters at least.
+pub const SKY_RADIUS_FACTOR: f64 = 2.;
+pub const SKY_RADIUS_MIN: f64 = 50.;
+/// The sky sphere's color (gray: the 3DGS tool learns the sky's).
+pub const SKY_COLOR: [u8; 3] = [128, 128, 128];
+
+/// `n` directions spread evenly (Fibonacci) over the unit sphere above `z_min` (-1..1).
+pub fn fibonacci_cap(n: usize, z_min: f64) -> Vec<[f64; 3]> {
+    let golden = std::f64::consts::PI * (3. - 5f64.sqrt());
+    (0..n)
+        .map(|i| {
+            // z uniform over the cap: the same area per point
+            let z = 1. - (i as f64 + 0.5) / n as f64 * (1. - z_min);
+            let r = (1. - z * z).max(0.).sqrt();
+            let a = golden * i as f64;
+            [r * a.cos(), r * a.sin(), z]
+        })
+        .collect()
+}
+
+/// The sky sphere's radius around `center`: [`SKY_RADIUS_FACTOR`] times the distance within which
+/// 99% of the cloud `pts` lies (of a draw of a million at most) or the farthest of `cameras`
+/// (a cloud cut smaller than the recording), [`SKY_RADIUS_MIN`] at least.
+pub fn sky_radius(center: [f64; 3], pts: &[Point], cameras: &[[f64; 3]]) -> f64 {
+    let dist = |p: &[f64; 3]| {
+        let v: [f64; 3] = std::array::from_fn(|k| p[k] - center[k]);
+        (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt()
+    };
+    let far = cameras.iter().map(dist).fold(0., f64::max);
+    let every = pts.len().div_ceil(1_000_000).max(1);
+    let mut d: Vec<f64> = pts.iter().step_by(every).map(|(p, _)| dist(p)).collect();
+    let r99 = if d.is_empty() {
+        0.
+    } else {
+        let k = ((d.len() - 1) as f64 * 0.99) as usize;
+        *d.select_nth_unstable_by(k, f64::total_cmp).1
+    };
+    (SKY_RADIUS_FACTOR * r99.max(far)).max(SKY_RADIUS_MIN)
+}
+
+/// The sky sphere: points on the sphere around `center` of `radius` (down to
+/// [`SKY_BELOW_HORIZON`]) that at least one image `seen`.
+pub fn sky_sphere(
+    center: [f64; 3],
+    radius: f64,
+    seen: impl Fn(&[f64; 3]) -> bool + Sync,
+) -> Vec<[f64; 3]> {
+    let z_min = -SKY_BELOW_HORIZON.to_radians().sin();
+    fibonacci_cap(SKY_POINTS, z_min)
+        .into_par_iter()
+        .map(|d| std::array::from_fn(|k| center[k] + radius * d[k]))
+        .filter(|p| seen(p))
+        .collect()
+}
+
+/// Whether world point `x` falls in the image (`width` x `height`) of camera `kb` at `pose`,
+/// within `max_angle` (radians) of its axis. The image spans -0.5..width - 0.5 (pixel centers on
+/// integers, as [`Kb::project`]'s).
+fn in_image(kb: &Kb, width: u32, height: u32, max_angle: f64, pose: &Pose, x: &[f64; 3]) -> bool {
+    let c = pose.r.transpose() * (nalgebra::Vector3::from(*x) - pose.p);
+    if c.x.hypot(c.y).atan2(c.z) > max_angle {
+        return false;
+    }
+    let uv = kb.project([c.x, c.y, c.z]);
+    uv[0] >= -0.5 && uv[1] >= -0.5 && uv[0] < width as f64 - 0.5 && uv[1] < height as f64 - 0.5
+}
+
 pub struct Input {
     pub data: PathBuf,
     pub imgpose: PathBuf,
@@ -254,6 +328,8 @@ pub struct Input {
     pub points: usize,
     /// degrees; pixels past it are masked
     pub max_angle: f64,
+    /// the sky sphere's points after the cloud's
+    pub sky_sphere: bool,
 }
 
 pub fn export(input: &Input, job: &Job) -> Result<serde_json::Value> {
@@ -361,9 +437,39 @@ pub fn export(input: &Input, job: &Job) -> Result<serde_json::Value> {
         job.check()?;
     }
     let (thinned, voxel) = thin(&pts, input.points);
-    let mut text = String::with_capacity(thinned.len() * 64);
-    text.push_str("# POINT3D_ID X Y Z R G B ERROR TRACK[] (LiDAR, no tracks)\n");
-    for (i, (p, c)) in thinned.iter().enumerate() {
+    let sky = if input.sky_sphere {
+        let n = poses.poses.len().max(1) as f64;
+        let center: [f64; 3] =
+            std::array::from_fn(|k| poses.poses.iter().map(|p| p.p[k]).sum::<f64>() / n);
+        let cameras: Vec<[f64; 3]> = poses.poses.iter().map(|p| p.p.into()).collect();
+        let radius = sky_radius(center, &pts, &cameras);
+        let points = sky_sphere(center, radius, |x| {
+            poses.names.iter().zip(&poses.poses).any(|(name, pose)| {
+                let s = side(name);
+                in_image(&fits[s].0, sizes[s].0, sizes[s].1, max_angle, pose, x)
+            })
+        });
+        job.log(&format!(
+            "sky sphere: {} points, radius {radius:.0} m",
+            points.len()
+        ));
+        job.check()?;
+        Some((center, radius, points))
+    } else {
+        None
+    };
+    let sky_points = sky.as_ref().map_or(&[][..], |s| &s.2[..]);
+    let mut text = String::with_capacity((thinned.len() + sky_points.len()) * 64);
+    text.push_str(if sky.is_some() {
+        "# POINT3D_ID X Y Z R G B ERROR TRACK[] (LiDAR, then the sky sphere; no tracks)\n"
+    } else {
+        "# POINT3D_ID X Y Z R G B ERROR TRACK[] (LiDAR, no tracks)\n"
+    });
+    let all = thinned
+        .iter()
+        .map(|(p, c)| (p, c))
+        .chain(sky_points.iter().map(|p| (p, &SKY_COLOR)));
+    for (i, (p, c)) in all.enumerate() {
         writeln!(
             text,
             "{} {:.4} {:.4} {:.4} {} {} {} 0",
@@ -393,6 +499,7 @@ pub fn export(input: &Input, job: &Job) -> Result<serde_json::Value> {
         "voxel_m": voxel,
         "cloud_points": total,
         "max_angle_deg": input.max_angle,
+        "sky_sphere": sky.as_ref().map(|(c, r, p)| serde_json::json!({"center": c, "radius_m": r, "points": p.len()})),
         "cameras": fits.iter().map(|(kb, e)| serde_json::json!({"fx": kb.fx, "fy": kb.fy, "cx": kb.cx + 0.5, "cy": kb.cy + 0.5, "k": kb.k, "fit": e})).collect::<Vec<_>>(),
         "calibration": input.calib, "imgpose": input.imgpose, "cloud": input.cloud,
     });
@@ -406,7 +513,7 @@ pub fn export(input: &Input, job: &Job) -> Result<serde_json::Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::anchors::V3;
+    use crate::anchors::{M3, V3};
 
     fn s20() -> Fisheye {
         Fisheye {
@@ -465,6 +572,108 @@ mod tests {
         let ours: V3 = r.transpose() * (world - pose.p);
         assert!((colmap - ours).norm() < 1e-8, "{colmap} {ours}");
         assert!(line.ends_with(" 2 right/right_00001.jpg"));
+    }
+
+    #[test]
+    fn the_sky_sphere_spreads_its_points_evenly_down_to_below_the_horizon() {
+        let z_min = -SKY_BELOW_HORIZON.to_radians().sin();
+        let d = fibonacci_cap(2000, z_min);
+        assert_eq!(d.len(), 2000);
+        assert!(d.iter().all(|v| {
+            let n = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+            (n - 1.).abs() < 1e-12 && v[2] >= z_min
+        }));
+        // the nearest neighbor of each at about the same distance
+        let dist = |a: &[f64; 3], b: &[f64; 3]| {
+            ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt()
+        };
+        let near: Vec<f64> = (0..d.len())
+            .map(|i| {
+                (0..d.len())
+                    .filter(|&j| j != i)
+                    .map(|j| dist(&d[i], &d[j]))
+                    .fold(f64::MAX, f64::min)
+            })
+            .collect();
+        let mean = near.iter().sum::<f64>() / near.len() as f64;
+        assert!(
+            near.iter().all(|&v| v > 0.5 * mean && v < 1.5 * mean),
+            "{mean}"
+        );
+        // above the horizon as many as its share of the cap's area
+        let up = d.iter().filter(|v| v[2] > 0.).count() as f64 / d.len() as f64;
+        assert!((up - 1. / (1. - z_min)).abs() < 0.01, "{up}");
+    }
+
+    #[test]
+    fn the_sky_sphere_lies_beyond_the_cloud() {
+        // a cloud within 30 m of the center, one point of a thousand at 500 m
+        let pts: Vec<Point> = (0..100_000)
+            .map(|i| {
+                let r = if i % 1000 == 0 { 500. } else { (i % 31) as f64 };
+                ([10. + r, 0., 0.], [0, 0, 0])
+            })
+            .collect();
+        let r = sky_radius([10., 0., 0.], &pts, &[[10., 0., 0.]]);
+        assert!((r - 60.).abs() < 1e-9, "{r}");
+        // a small cloud: the least radius
+        assert_eq!(sky_radius([10., 0., 0.], &pts[1..20], &[]), SKY_RADIUS_MIN);
+        assert_eq!(sky_radius([0.; 3], &[], &[]), SKY_RADIUS_MIN);
+        // cameras beyond a cloud cut small: outside them
+        let r = sky_radius([0.; 3], &pts[1..20], &[[-100., 0., 0.], [100., 0., 0.]]);
+        assert!((r - 200.).abs() < 1e-9, "{r}");
+    }
+
+    #[test]
+    fn the_sky_sphere_keeps_the_points_an_image_sees() {
+        let kb = Kb {
+            fx: 1000.,
+            fy: 1000.,
+            cx: 2000.,
+            cy: 2000.,
+            k: [0.; 4],
+        };
+        // looking up (the camera's z along the world's)
+        let pose = Pose {
+            r: M3::identity(),
+            p: V3::new(5., 5., 1.),
+        };
+        let angle = 60f64.to_radians();
+        let pts = sky_sphere([5., 5., 1.], 100., |x| {
+            in_image(&kb, 4000, 4000, angle, &pose, x)
+        });
+        assert!(pts.iter().all(|p| {
+            let v = V3::new(p[0] - 5., p[1] - 5., p[2] - 1.);
+            (v.norm() - 100.).abs() < 1e-9 && v.z / v.norm() >= angle.cos() - 1e-9
+        }));
+        // the cap within 60 degrees of the zenith: (1 - cos 60) / (1 + sin 10) of the points
+        let share = pts.len() as f64 / SKY_POINTS as f64;
+        let cap = (1. - angle.cos()) / (1. + SKY_BELOW_HORIZON.to_radians().sin());
+        assert!((share - cap).abs() < 0.01, "{share} {cap}");
+        // the image's edge half a pixel past the last pixel center
+        let edge = |u: f64| {
+            let th = (u - 2000.) / 1000.;
+            [5. + 100. * th.sin(), 5., 1. + 100. * th.cos()]
+        };
+        assert!(in_image(&kb, 2700, 4000, angle, &pose, &edge(2699.4)));
+        assert!(!in_image(&kb, 2700, 4000, angle, &pose, &edge(2699.6)));
+        // within the angle but past the image's edge
+        assert!(!in_image(
+            &kb,
+            1500,
+            1500,
+            angle,
+            &pose,
+            &[5. + 100., 5., 1. + 100.]
+        ));
+        assert!(in_image(
+            &kb,
+            4000,
+            4000,
+            angle,
+            &pose,
+            &[5. + 100., 5., 1. + 100.]
+        ));
     }
 
     #[test]

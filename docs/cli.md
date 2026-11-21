@@ -8,7 +8,7 @@ The same processing as the GUI, from the command line. `s20 help` shows every co
 
 ```
 s20 run <raw folder> <work folder> [--outdoor | --params file.json] [--no_rtk] [--ppk] [--no_color]
-        [--las] [--images [--no_3dgs_poses]] [--no_refine] [--device_calibration file.yaml] [--redo] [--until step]
+        [--las] [--images [--no_3dgs_poses] [--sky_sphere | --no_sky_sphere]] [--no_refine] [--device_calibration file.yaml] [--redo] [--until step]
 s20 run <raw 1>,<raw 2>,... <work folder> --outdoor   # multiple sessions
 ```
 
@@ -24,6 +24,7 @@ The steps are extract → lio → opt → cloud → export → refine → colori
 | `--las` | Write the point clouds as LAS (LAZ by default) |
 | `--images` | After coloring, write the photos with their refined poses to `output/images` (in PointClouds Studio's layout) and a COLMAP model beside them (image pose refinement then also finds the poses for 3DGS) |
 | `--no_3dgs_poses` | With `--images`, do not find the poses for 3DGS: the COLMAP model takes the poses the coloring uses (fitted to the point cloud), and no `image_points.txt` is written. Image pose refinement is shorter |
+| `--sky_sphere`, `--no_sky_sphere` | With `--images`, add / do not add the sky sphere (see below) to the COLMAP model's initial points. By default added with `--outdoor` |
 | `--no_refine` | Do not refine the image poses |
 | `--device_calibration` | Use the device calibration (made by `calibrate-device`) instead of the maker's factory calibration file (`calibration.yaml`) |
 | `--redo` | Redo the import and LIO even when they are there |
@@ -77,12 +78,14 @@ Point cloud files are LAS or LAZ by their extension (`.laz` is compressed). Both
 | `images/left/`, `images/right/` | The recorded JPEGs (not recompressed) |
 | `sparse/0/cameras.txt` | The left and right cameras: `OPENCV_FISHEYE` (Kannala-Brandt) fitted to the S20's fisheye polynomial |
 | `sparse/0/images.txt` | The images' poses (with `s20 run --images`, the poses for 3DGS, `ImgPose-3dgs.txt`; with `--no_3dgs_poses`, those the coloring uses) |
-| `sparse/0/points3D.txt` | Initial points thinned from the colored point cloud (500,000 by default) |
+| `sparse/0/points3D.txt` | Initial points thinned from the colored point cloud (500,000 by default), followed by the sky sphere's when it is added (`export-colmap` adds it with `--sky_sphere`) |
 | `masks/` | The image corners beyond `--max_angle` (85°) from the optical axis (outside the range the calibration was fitted to) |
 | `gauge.txt` | Z up, meters |
 | `export.json` | The fit's error, the number of points |
 | `image_points.txt` | With `s20 run --images` after the image refinement (not with `--no_3dgs_poses`): the photos' feature tracks triangulated with the poses of `ImgPose-3dgs.txt` (see below) |
 
 Kannala-Brandt does not match the S20's polynomial exactly. The fit's error is about 0.1–0.2 px RMS.
+
+The sky sphere is points placed on a large sphere around the scene. The point cloud has no points in the sky and the far background, so in 3DGS training the Gaussians in front tend to stretch out to show the sky and become floaters; the sky sphere gives them their initial points instead. Its center is the mean of the camera positions and its radius twice the distance within which 99% of the point cloud lies (50 m at least); its points are about 1° apart down to 10° below the horizon, and those no image sees are left out. They are gray: training finds the sky's colors. It is of no use indoors, so by default it is added only outdoors (`--outdoor`).
 
 `image_points.txt` is for filling, with points from the photos, where the LiDAR measured nothing (right next to the device, the low sides of furniture and the like). It is a file of its own beside `points3D.txt` (the LiDAR points), one point per line: the position (x y z), how many photos see it, the time between its first and last photo (s), the widest angle between its photos' rays (degrees), the reprojection error's median and largest (pixel-equivalents), the nearest photo's distance (m), the distance to the nearest point of the point cloud (m), and where the point comes from (0: the matches the image refinement used, searched with the point cloud's help; 1: matches searched along the epipolar lines, without the point cloud). The point cloud misses surfaces such as those right next to the device, so set 0, whose search relies on the point cloud's prediction, has hardly any points there; set 1 searches there too. Points far from the point cloud lie on surfaces it misses. Points with a small angle (short baselines) spread along their rays, and those with a short time span include what was seen only while passing once (people and such). Points seen by only two photos cannot be told from wrong matches, so choose by the number of photos, the angle and the error when using them.
