@@ -42,7 +42,8 @@ impl Default for CheckParams {
     }
 }
 
-/// Consecutive fixes further apart than this (s) are not compared.
+/// Consecutive fixes further apart than this (s), or than 1.5 times the fixes' usual interval
+/// when longer (PPK at 1 Hz), are not compared.
 const CONTINUOUS: f64 = 0.5;
 /// Steps within this time of an unhealthy LIO knot are attributed to the LIO (s).
 const LIO_WINDOW: f64 = 0.5;
@@ -75,12 +76,22 @@ pub fn screen(t: &[f64], o: &[V3], lio_bad: &[f64], p: &CheckParams) -> (Vec<boo
         let i = lio_bad.partition_point(|&x| x < ta - LIO_WINDOW);
         i < lio_bad.len() && lio_bad[i] <= tb + LIO_WINDOW
     };
+    // the fixes' usual interval (the median), for what is continuous
+    let mut dts: Vec<f64> = t
+        .windows(2)
+        .map(|w| w[1] - w[0])
+        .filter(|d| *d > 0.)
+        .collect();
+    dts.sort_by(f64::total_cmp);
+    let continuous = dts
+        .get(dts.len() / 2)
+        .map_or(CONTINUOUS, |&m| CONTINUOUS.max(1.5 * m));
     // segments [start, end) and the edges between them
     let mut segs = Vec::new();
     let mut edges = Vec::new();
     let mut i0 = 0;
     for i in 1..n {
-        if t[i] - t[i - 1] > CONTINUOUS {
+        if t[i] - t[i - 1] > continuous {
             segs.push((i0, i));
             edges.push(Edge::Soft);
             i0 = i;
@@ -218,6 +229,16 @@ mod tests {
         add(&t, &mut o, 20.0, 30.0, V3::new(0.2, 0.0, 0.0));
         let (keep, _) = screen(&t, &o, &[], &CheckParams::default());
         assert_eq!(rejected_in(&t, &keep, 20.0, 30.0), (100, 0));
+    }
+
+    #[test]
+    fn excursion_in_fixes_at_1_hz_is_rejected() {
+        // PPK at 1 Hz: the fixes a second apart are continuous
+        let t: Vec<f64> = (0..120).map(|i| i as f64).collect();
+        let mut o: Vec<V3> = t.iter().map(|&x| V3::new(0.01 * x, 0., 0.)).collect();
+        add(&t, &mut o, 20.0, 30.0, V3::new(0.2, 0.0, 0.0));
+        let (keep, _) = screen(&t, &o, &[], &CheckParams::default());
+        assert_eq!(rejected_in(&t, &keep, 20.0, 30.0), (10, 0));
     }
 
     #[test]
