@@ -153,10 +153,22 @@ pub fn extract(raw: &Path, out: &Path, job: &crate::job::Job) -> Result<ExtractS
         bag.messages.len()
     ));
     fs::create_dir_all(out)?;
+    // (an earlier extraction's mark gone first: stopped or failed, the folder does not pass for
+    // extracted with the indices half new)
+    match fs::remove_file(out.join(Source::FILE)) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.into()),
+        _ => {}
+    }
     job.check()?;
 
     // --- lidar
     let lid = bag.topic_messages("/livox/lidar");
+    // (an index without scans would pass for an extracted recording)
+    anyhow::ensure!(
+        !lid.is_empty(),
+        "{}: no /livox/lidar messages",
+        bag_path.display()
+    );
     let mut scans = Vec::with_capacity(lid.len() * 4);
     let mut total = 0usize;
     for m in &lid {
@@ -172,6 +184,7 @@ pub fn extract(raw: &Path, out: &Path, job: &crate::job::Job) -> Result<ExtractS
     }
     npy::write_f64(&out.join("lidar_index.npy"), &scans, 4)?;
     log(&format!("lidar: {} scans, {} points", lid.len(), total));
+    job.check()?;
 
     // --- imu
     let im = bag.topic_messages("/livox/imu");
@@ -189,6 +202,7 @@ pub fn extract(raw: &Path, out: &Path, job: &crate::job::Job) -> Result<ExtractS
     }
     npy::write_f64(&out.join("gnss.npy"), &gnss, 14)?;
     log(&format!("imu: {}  gnss: {}", im.len(), gm.len()));
+    job.check()?;
     match extract_temperature(raw, &bag, out)? {
         Some(n) => log(&format!("temperature: {n} rows")),
         None => log("temperature: no info bag"),
@@ -233,6 +247,8 @@ pub fn extract(raw: &Path, out: &Path, job: &crate::job::Job) -> Result<ExtractS
     }
     fs::write(out.join("images.txt"), index)?;
     log(&format!("images: {}", ims.len()));
+    // (canceled: no source.txt, so the folder does not pass for extracted)
+    job.check()?;
 
     // written last: its presence means the indices above are complete
     let size = fs::metadata(&bag_path)?.len();
