@@ -1469,7 +1469,11 @@ impl RunConfig {
         let base = folder_name(&raw);
         let mut name = base.clone();
         let mut n = 2;
-        while self.sessions.iter().any(|s| s.name == name)
+        // (compared as a rename does: on Windows `Room` and `room` are the same folder)
+        while self
+            .sessions
+            .iter()
+            .any(|s| s.name.to_lowercase() == name.to_lowercase())
             || !Self::holds(&self.work.join("sessions").join(&name).join("data"), &raw)
         {
             name = format!("{base}_{n}");
@@ -3042,6 +3046,13 @@ mod tests {
         let empty = RunConfig::of_sessions(Vec::new(), work.clone());
         assert_eq!(empty.new_session(other.clone()).name, "room_2");
         assert_eq!(empty.new_session(raw.clone()).name, "room");
+        // a name differing in case only is another (the same folder on Windows)
+        let upper = base.join("y").join("Room");
+        std::fs::create_dir_all(&upper).unwrap();
+        let mut both = RunConfig::of_sessions(Vec::new(), work.join("new"));
+        let s = both.new_session(raw.clone());
+        both.sessions.push(s);
+        assert_eq!(both.new_session(upper).name, "Room_2");
         std::fs::remove_dir_all(&base).unwrap();
     }
 

@@ -475,6 +475,12 @@ pub fn run(
     hold: &[(f64, f64)],
     job: &s20_io::job::Job,
 ) -> Result<Output> {
+    // (the voxels are divided by: 0 leaves no point, or overflows the cell keys)
+    for (n, x) in [("down", prm.down), ("map_vox", prm.map_vox)] {
+        if !(x.is_finite() && x > 0.) {
+            bail!("lio: {n} must be positive ({x})");
+        }
+    }
     let log = |s: &str| job.log(s);
     let imu = Imu {
         t: imu_rows.iter().map(|r| r[0] - prm.imu_shift).collect(),
