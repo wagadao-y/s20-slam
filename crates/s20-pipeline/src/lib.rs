@@ -2236,16 +2236,25 @@ impl RunConfig {
         self.run_step_for(step, false, job)
     }
 
-    /// As [`RunConfig::run_step`]; `missing`: only for the sessions without a finished result.
+    /// The units (sessions, or the one of a step of all) a run of `step` runs; `missing`: only
+    /// those without a finished, current result.
+    fn units_to_run(&self, step: Step, missing: bool) -> Vec<Option<usize>> {
+        (self.units(step).into_iter())
+            .filter(|&k| {
+                !(missing && self.done_of(step, k) && self.staleness_of(step, k).is_none())
+            })
+            .collect()
+    }
+
+    /// As [`RunConfig::run_step`]; `missing`: only for the sessions without a finished, current
+    /// result.
     fn run_step_for(&self, step: Step, missing: bool, job: &Job) -> Result<()> {
         job.check()?;
         job.log(&format!("== {}", step.key()));
         self.write_project()?;
         std::fs::create_dir_all(self.runs())?;
         std::fs::create_dir_all(self.output())?;
-        let units: Vec<Option<usize>> = (self.units(step).into_iter())
-            .filter(|&k| !(missing && self.done_of(step, k)))
-            .collect();
+        let units = self.units_to_run(step, missing);
         for (i, &k) in units.iter().enumerate() {
             if let (Some(k), true) = (k, self.multi()) {
                 job.log(&format!("-- {}", self.sessions[k].name));
@@ -2540,7 +2549,15 @@ impl RunConfig {
             if step == Step::Images && (!self.images || (!self.color && first != Step::Images)) {
                 continue;
             }
-            self.run_step_for(step, step < first && !outdated, job)?;
+            // only the sessions without a current result: before the first step, and from it on
+            // for a step of each session (a session added: the others' extraction and LIO stay),
+            // unless the first was asked for again with every session's done
+            let only_missing = if step < first {
+                !outdated
+            } else {
+                step.per_session() && !(step == first && self.done(step))
+            };
+            self.run_step_for(step, only_missing, job)?;
         }
         job.log(&format!("done: {}", self.output().display()));
         Ok(())
@@ -2763,6 +2780,27 @@ mod tests {
         assert_eq!(c.revisions().len(), 1);
         // ids never leave the folder
         assert!(c.delete_revision("../s20_edits").is_err());
+        std::fs::remove_dir_all(&work).unwrap();
+    }
+
+    #[test]
+    fn an_added_session_runs_alone() {
+        let work = std::env::temp_dir().join(format!("s20_added_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&work);
+        let c = RunConfig::with_sessions(vec!["x/room".into(), "x/hall".into()], work.clone());
+        // the first session's LIO done and current, the added second's missing
+        std::fs::create_dir_all(c.session_runs(0)).unwrap();
+        std::fs::write(c.lio_file_of(0), "x").unwrap();
+        c.write_record(Step::Lio, Some(0), true).unwrap();
+        assert_eq!(c.units_to_run(Step::Lio, true), vec![Some(1)]);
+        assert_eq!(c.units_to_run(Step::Lio, false), vec![Some(0), Some(1)]);
+        // the first's settings changed: it runs too
+        let mut changed = c.clone();
+        changed.params.lio.down *= 2.0;
+        assert_eq!(
+            changed.units_to_run(Step::Lio, true),
+            vec![Some(0), Some(1)]
+        );
         std::fs::remove_dir_all(&work).unwrap();
     }
 

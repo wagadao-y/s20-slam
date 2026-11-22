@@ -102,7 +102,7 @@ The right panel's **Trajectory** has a list of each kind under **Corrections**. 
 
 ## Multiple sessions
 
-Recordings of the same place made in multiple sessions are joined into one trajectory and point cloud by adding their raw folders with **Add session…**. The import and LIO run per session (`sessions/<session name>/`), and the trajectory optimization and the later steps once for all the sessions.
+Recordings of the same place made in multiple sessions are joined into one trajectory and point cloud by adding their raw folders with **Add session…**. The import and LIO run per session (`sessions/<session name>/`; for an added session, that one only), and the trajectory optimization and the later steps once for all the sessions.
 
 - With GNSS (RTK / PPK), the sessions are placed by it.
 - Without GNSS (indoors and so on), the first session is the reference, and the others are connected to it by loops across sessions (two clicks on the trajectory) or point matches (clicks on the same feature in two sessions). Loops are easier when the paths pass the same spot. When they do not come close, use point matches, two pairs or more, far apart.
