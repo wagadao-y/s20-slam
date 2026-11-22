@@ -1992,7 +1992,12 @@ impl RunConfig {
     /// Session `k`'s result of a step is on disk and its last run finished (an interrupted run
     /// leaves its record unfinished). Without a record (results of older versions) the file decides.
     fn done_of(&self, step: Step, k: Option<usize>) -> bool {
-        self.result_of(step, k).exists() && self.record(step, k).is_none_or(|r| r.done)
+        // (the refinement for the tracks also writes their poses and points, which the images
+        // take: one missing, it is not done)
+        let tracks = step != Step::Refine
+            || !self.tracks()
+            || (self.tracked_poses().exists() && self.tracked_points().exists());
+        tracks && self.result_of(step, k).exists() && self.record(step, k).is_none_or(|r| r.done)
     }
 
     /// The step's results are on disk (of every session) and its last runs finished.
