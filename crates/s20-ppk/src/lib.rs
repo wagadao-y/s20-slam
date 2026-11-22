@@ -288,13 +288,33 @@ fn write(path: &Path, result: &ResultFile) -> Result<()> {
     if let Some(dir) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
         std::fs::create_dir_all(dir)?;
     }
-    let tmp = path.with_extension("json.tmp");
-    let mut w = std::io::BufWriter::new(std::fs::File::create(&tmp)?);
-    serde_json::to_writer(&mut w, result)?;
-    w.flush()?;
-    drop(w);
-    std::fs::rename(&tmp, path)?;
-    Ok(())
+    // (a temporary file of this write's own, made new: two writes at once do not truncate each
+    // other's)
+    let mut n = 0u32;
+    let (tmp, file) = loop {
+        let t = path.with_extension(format!("json.{}-{n}.tmp", std::process::id()));
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&t)
+        {
+            Ok(f) => break (t, f),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => n += 1,
+            Err(e) => return Err(anyhow::Error::from(e).context(format!("write {}", t.display()))),
+        }
+    };
+    let written = (|| -> Result<()> {
+        let mut w = std::io::BufWriter::new(file);
+        serde_json::to_writer(&mut w, result)?;
+        w.flush()?;
+        drop(w);
+        std::fs::rename(&tmp, path)?;
+        Ok(())
+    })();
+    if written.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    written
 }
 
 /// Piecewise-linear UTC -> device clock. Never silently extrapolate across missing sync data.
@@ -367,6 +387,24 @@ fn crc24(b: &[u8]) -> u32 {
     }
     c & 0xffffff
 }
+/// RTKLIB's most satellites in an epoch of one receiver (MAXOBS).
+const MAXOBS: i32 = 96;
+
+/// Unicore's OBSVM (message 12): its observations' count within the payload (24-byte header, a
+/// 4-byte count, 40 bytes each, a 4-byte CRC). RTKLIB checks the length with the count in a signed
+/// int, which a damaged count overflows into a read past the frame.
+fn obsvm_fits(v: &[u8]) -> bool {
+    const OBSVM: u16 = 12;
+    if v.len() < 6 || u16::from_le_bytes([v[4], v[5]]) != OBSVM {
+        return true;
+    }
+    let Some(payload) = v.len().checked_sub(24 + 4) else {
+        return false;
+    };
+    payload >= 4
+        && (u32::from_le_bytes([v[24], v[25], v[26], v[27]]) as usize) <= (payload - 4) / 40
+}
+
 fn frames(b: &[u8], rover: bool, job: &Job) -> Result<Frames> {
     let mut f = Frames::default();
     let mut i = 0;
@@ -408,6 +446,7 @@ fn frames(b: &[u8], rover: bool, job: &Job) -> Result<Frames> {
         let v = &b[i..i + n];
         let valid = if rover {
             crc32(&v[..n - 4]) == u32::from_le_bytes(v[n - 4..].try_into().unwrap())
+                && obsvm_fits(v)
         } else {
             crc24(&v[..n - 3])
                 == ((v[n - 3] as u32) << 16) | ((v[n - 2] as u32) << 8) | v[n - 1] as u32
@@ -522,8 +561,13 @@ pub fn process(raw: &Path, out: &Path, p: &Params, job: &Job) -> Result<ResultFi
     let mut inputs = Vec::new();
     for path in [&rover_path, &base_path].into_iter().chain(info.iter()) {
         let m = std::fs::metadata(path).with_context(|| format!("PPK input {}", path.display()))?;
+        let path = std::fs::canonicalize(path)?;
+        // (the result written over an input would replace the recording)
+        if let Ok(o) = std::fs::canonicalize(out) {
+            ensure!(o != path, "the PPK result {} is an input", out.display());
+        }
         inputs.push(Input {
-            path: std::fs::canonicalize(path)?,
+            path,
             bytes: m.len(),
             modified_ns: m
                 .modified()?
@@ -644,6 +688,10 @@ pub fn process(raw: &Path, out: &Path, p: &Params, job: &Job) -> Result<ResultFi
     }
     job.check()?;
     ensure!(
+        n != -3,
+        "PPK: an epoch holds more satellites than RTKLIB takes ({MAXOBS})"
+    );
+    ensure!(
         n > 0 && !c.raw.is_empty(),
         "PPK produced no solution (code {n}); check common observations, ephemerides and base position"
     );
@@ -693,6 +741,8 @@ pub fn process(raw: &Path, out: &Path, p: &Params, job: &Job) -> Result<ResultFi
         inconsistent_fixed_epochs: stats[2] as usize,
         inconsistent_mixed_epochs: stats[3] as usize,
     };
+    // (canceled while solving: the result before it stays)
+    job.check()?;
     write(out, &result)?;
     job.log(&result.summary());
     Ok(result)
@@ -701,6 +751,24 @@ pub fn process(raw: &Path, out: &Path, p: &Params, job: &Job) -> Result<ResultFi
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn an_obsvm_count_past_its_payload_is_refused() {
+        // a header (message 12), the count, two 40-byte observations, the CRC
+        let frame = |count: u32| {
+            let mut v = vec![0u8; 24 + 4 + 80 + 4];
+            v[4..6].copy_from_slice(&12u16.to_le_bytes());
+            v[24..28].copy_from_slice(&count.to_le_bytes());
+            v
+        };
+        assert!(obsvm_fits(&frame(2)));
+        assert!(!obsvm_fits(&frame(3)));
+        assert!(!obsvm_fits(&frame(u32::MAX)));
+        // another message: not looked into
+        let mut other = frame(u32::MAX);
+        other[4..6].copy_from_slice(&106u16.to_le_bytes());
+        assert!(obsvm_fits(&other));
+    }
+
     #[test]
     fn native_combination_validates_fix_float_in_both_directions() {
         unsafe extern "C" {

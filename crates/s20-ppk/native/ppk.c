@@ -203,6 +203,15 @@ extern int s20_ppk_solve(double elevation,double ratio,int estimate_ionosphere,i
         (timediff(obss.data[i].time,start)>=-DTTOL&&timediff(obss.data[i].time,end)<=DTTOL))
         obss.data[n++]=obss.data[i];
     obss.n=n;nepoch=sortobs(&obss);uniqnav(&navs);
+    /* An epoch of one receiver holds at most MAXOBS satellites: the base's merged MSM
+       fragments could pass it, and RTKLIB's interpolation of the base writes MAXOBS entries. */
+    for(i=0;i<obss.n;) {
+        int k=i;
+        while(k<obss.n&&obss.data[k].rcv==obss.data[i].rcv&&
+              fabs(timediff(obss.data[k].time,obss.data[i].time))<DTTOL) k++;
+        if(k-i>MAXOBS) return -3;
+        i=k;
+    }
     memcpy(navs.glo_fcn,base->nav.glo_fcn,sizeof(navs.glo_fcn));
     p.mode=PMODE_KINEMA;p.soltype=SOLTYPE_COMBINED;p.nf=frequencies;
     p.navsys=systems;
