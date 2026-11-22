@@ -391,7 +391,16 @@ pub fn opt(
     }
     std::fs::write(quality_file(out), q)?;
     frames::record(data, &[out], Some(frame))?;
-    frame.write(&data.join("coordinate_frame.json"))?;
+    // the GNSS origin kept when solved without GNSS: the next run with it takes the same one
+    // (the results' own frames are in the ledger)
+    let keep_origin = frame == CoordinateFrame::LocalSlam
+        && matches!(
+            s20_io::dataset::load_frame(data)?,
+            CoordinateFrame::LocalEnu { .. }
+        );
+    if !keep_origin {
+        frame.write(&data.join("coordinate_frame.json"))?;
+    }
     job.log(&format!("saved {}", out.display()));
     Ok(())
 }
