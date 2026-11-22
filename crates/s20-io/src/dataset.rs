@@ -636,6 +636,37 @@ pub fn output_offsets(data: &Path) -> Result<Vec<f64>> {
         .collect())
 }
 
+/// The fields of a row of `ImgPose.txt` (`name x y z roll pitch yaw qx qy qz qw timestamp`): the
+/// name first, then the numbers. The name is all before the numbers at the end of the row, so it
+/// may hold spaces (the absolute path of a session's image). None without eleven numbers after a
+/// name.
+pub fn img_pose_fields(line: &str) -> Option<Vec<&str>> {
+    let mut tokens: Vec<(usize, &str)> = Vec::new();
+    let mut start = None;
+    for (i, c) in line.char_indices() {
+        if c.is_whitespace() {
+            if let Some(s) = start.take() {
+                tokens.push((s, &line[s..i]));
+            }
+        } else if start.is_none() {
+            start = Some(i);
+        }
+    }
+    if let Some(s) = start {
+        tokens.push((s, &line[s..]));
+    }
+    let mut first = tokens.len();
+    while first > 1 && tokens[first - 1].1.parse::<f64>().is_ok() {
+        first -= 1;
+    }
+    if tokens.len() - first < 11 {
+        return None;
+    }
+    let mut v = vec![line[..tokens[first].0].trim()];
+    v.extend(tokens[first..].iter().map(|t| t.1));
+    Some(v)
+}
+
 /// Trajectory text file: rows `t x y z qx qy qz qw` ('#' comments). Returns rows.
 pub fn read_tum(path: &Path) -> Result<Vec<[f64; 8]>> {
     let s = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
@@ -686,6 +717,21 @@ pub fn read_table(path: &Path) -> Result<Vec<Vec<f64>>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_image_name_with_spaces_stays_whole() {
+        let nums = "1 2 3 0.1 0.2 0.3 0 0 0 1 12.5";
+        let line = format!("C:/My work/A b/images/left/l_1.jpg {nums}");
+        let v = img_pose_fields(&line).unwrap();
+        assert_eq!(v[0], "C:/My work/A b/images/left/l_1.jpg");
+        assert_eq!(v.len(), 12);
+        assert_eq!(v[11], "12.5");
+        let line = format!("left/l_1.jpg  {nums}");
+        let v = img_pose_fields(&line).unwrap();
+        assert_eq!(v[0], "left/l_1.jpg");
+        assert!(img_pose_fields("left/l_1.jpg 1 2 3").is_none());
+        assert!(img_pose_fields(nums).is_none());
+    }
 
     #[test]
     fn recording_maps_are_shared_only_while_readers_are_alive() {

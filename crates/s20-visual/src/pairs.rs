@@ -467,8 +467,12 @@ pub fn read_image_poses(path: &Path) -> Result<ImagePoses> {
         .lines()
         .filter(|l| !l.trim().is_empty() && !l.starts_with("index") && !l.starts_with('#'))
     {
-        let v: Vec<String> = line.split_whitespace().map(str::to_string).collect();
-        anyhow::ensure!(v.len() >= 12, "{}: bad line {line:?}", path.display());
+        // (a name may hold spaces)
+        let v: Vec<String> = s20_io::dataset::img_pose_fields(line)
+            .with_context(|| format!("{}: bad line {line:?}", path.display()))?
+            .into_iter()
+            .map(str::to_string)
+            .collect();
         let f = |k: usize| -> Result<f64> { Ok(v[k].parse::<f64>()?) };
         let q = UnitQuaternion::from_quaternion(Quaternion::new(f(10)?, f(7)?, f(8)?, f(9)?));
         out.names.push(v[0].clone());

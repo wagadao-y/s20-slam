@@ -170,8 +170,9 @@ fn load_poses(imgpose: &Path) -> Result<Vec<Pose>> {
         if line.starts_with("index") || line.trim().is_empty() {
             continue;
         }
-        let f: Vec<&str> = line.split_whitespace().collect();
-        ensure!(f.len() >= 12, "ImgPose.txt: short line {line}");
+        // (a name may hold spaces)
+        let f = s20_io::dataset::img_pose_fields(line)
+            .with_context(|| format!("ImgPose.txt: short line {line}"))?;
         let x = |i: usize| {
             f[i].parse::<f64>()
                 .with_context(|| format!("ImgPose.txt: {line}"))
