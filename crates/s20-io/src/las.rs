@@ -53,6 +53,28 @@ fn put_str(buf: &mut Vec<u8>, s: &str, n: usize) {
     buf.extend(std::iter::repeat_n(0u8, n - k));
 }
 
+/// Today's day of the year (1 for January 1) and year, in UTC: the header's creation date.
+fn utc_day_and_year() -> (u16, u16) {
+    let days = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() / 86_400) as i64;
+    day_and_year(days)
+}
+
+/// The day of the year and the year of `days` after 1970-01-01.
+fn day_and_year(days: i64) -> (u16, u16) {
+    let leap = |y: i64| (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
+    let (mut year, mut left) = (1970i64, days);
+    loop {
+        let n = if leap(year) { 366 } else { 365 };
+        if left < n {
+            return ((left + 1) as u16, year as u16);
+        }
+        left -= n;
+        year += 1;
+    }
+}
+
 fn extra_bytes_vlr(extras: &[(&str, ExtraKind)]) -> Vec<u8> {
     let mut v = Vec::new();
     for &(name, kind) in extras {
@@ -62,7 +84,7 @@ fn extra_bytes_vlr(extras: &[(&str, ExtraKind)]) -> Vec<u8> {
         put_str(&mut d, name, 32);
         d.extend([0u8; 4]);
         d.extend([0u8; 8 + 16 + 8 + 16 + 8 + 16]); // no_data, min, max (+ deprecated)
-        d.extend(1.0f64.to_le_bytes()); // scale (unused: option bit not set)
+        d.extend(0.0f64.to_le_bytes()); // scale (unused, its option bit not set: zero)
         d.extend([0u8; 16]);
         d.extend(0.0f64.to_le_bytes()); // offset
         d.extend([0u8; 16]);
@@ -142,6 +164,12 @@ impl LasWriter {
     ) -> Result<Self> {
         let extra_len: usize = extras.iter().map(|e| e.1.size()).sum();
         let record_len = BASE_LEN + extra_len;
+        // (the VLR's and the record's lengths are 16-bit)
+        anyhow::ensure!(
+            extras.len() * EXTRA_DESC <= u16::MAX as usize && record_len <= u16::MAX as usize,
+            "{} extra attributes: more than a LAS record holds",
+            extras.len()
+        );
         let mut vlrs = vlr_header("LASF_Spec", 4, extras.len() * EXTRA_DESC, "extra bytes");
         vlrs.extend(extra_bytes_vlr(extras));
         let laz_vlr = if is_laz(path) {
@@ -204,8 +232,9 @@ impl LasWriter {
         h.push(4);
         put_str(&mut h, "s20-slam", 32);
         put_str(&mut h, "s20-slam", 32);
-        h.extend(1u16.to_le_bytes()); // creation day
-        h.extend(2026u16.to_le_bytes());
+        let (day, year) = utc_day_and_year();
+        h.extend(day.to_le_bytes()); // creation day of the year (UTC)
+        h.extend(year.to_le_bytes());
         h.extend(HEADER_SIZE.to_le_bytes());
         h.extend(((HEADER_SIZE as usize + self.vlrs.len()) as u32).to_le_bytes());
         h.extend((1 + self.laz as u32).to_le_bytes()); // number of VLRs
@@ -538,6 +567,18 @@ impl LasReader {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn creation_dates_by_the_calendar() {
+        assert_eq!(day_and_year(0), (1, 1970));
+        assert_eq!(day_and_year(365), (1, 1971));
+        // 2024 is a leap year: December 31 its 366th day
+        let to_2024: i64 = (1970..2024)
+            .map(|y| if y % 4 == 0 { 366 } else { 365 })
+            .sum();
+        assert_eq!(day_and_year(to_2024 + 365), (366, 2024));
+        assert_eq!(day_and_year(to_2024 + 366), (1, 2025));
+    }
 
     #[test]
     fn a_coordinate_the_integers_cannot_hold_is_refused() {

@@ -1023,6 +1023,11 @@ impl App {
         // settings that could not be saved: again now, with the run
         if self.work_settings_failed.take().is_some() {
             self.save_work_settings();
+            // (still not saved: not run, the results would be of settings the folder does not
+            // keep)
+            if self.work_settings_failed.is_some() {
+                return;
+            }
         }
         let Some(cfg) = self.config() else { return };
         let what = match last {

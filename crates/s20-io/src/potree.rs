@@ -580,12 +580,21 @@ fn write_into(
         source.display()
     );
     let keep = |p: &crate::las::LasPoint| opt.skip_class != Some(p.classification);
-    let to_int = |p: &crate::las::LasPoint| -> [u32; 3] {
-        std::array::from_fn(|d| {
-            ((p.xyz[d] - offset[d]) / scale)
-                .round()
-                .clamp(0.0, cube.size - 1.0) as u32
-        })
+    // (a point outside the header's bounds by more than a step refused: moved onto the cube's
+    // side, its count would hide it)
+    let to_int = |p: &crate::las::LasPoint| -> Result<[u32; 3]> {
+        let mut out = [0u32; 3];
+        for d in 0..3 {
+            let v = ((p.xyz[d] - offset[d]) / scale).round();
+            ensure!(
+                v.is_finite() && v >= -1.0 && v <= cube.size,
+                "{}: a point at {:?} outside the header's bounds",
+                source.display(),
+                p.xyz
+            );
+            out[d] = v.clamp(0.0, cube.size - 1.0) as u32;
+        }
+        Ok(out)
     };
     let cells = 1usize << COUNT_LEVEL;
     let cell_of = |k: [u32; 3]| {
@@ -616,7 +625,7 @@ fn write_into(
         read += part.len() as u64;
         records.clear();
         for p in part.iter().filter(|p| keep(p)) {
-            let x = to_int(p);
+            let x = to_int(p)?;
             counts[cell_of(cube.key(x))] += 1;
             let mut r = [0u8; RECORD_TIME];
             for d in 0..3 {
