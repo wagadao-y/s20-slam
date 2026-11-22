@@ -459,9 +459,10 @@ pub fn write_replacing(f: &Path, bytes: &[u8]) -> Result<()> {
 pub fn read_traj(traj: &Path) -> Result<s20_geom::traj::Traj> {
     let rows = s20_io::dataset::read_tum(traj)?;
     ensure!(!rows.is_empty(), "{}: no poses", traj.display());
-    if let Some(k) = rows.iter().position(|r| {
-        !r.iter().all(|x| x.is_finite()) || r[4..].iter().map(|q| q * q).sum::<f64>() < 0.25
-    }) {
+    if let Some(k) = rows
+        .iter()
+        .position(|r| !r.iter().all(|x| x.is_finite()) || r[4..].iter().all(|q| *q == 0.))
+    {
         bail!("{}: pose {} is not a pose", traj.display(), k + 1);
     }
     Ok(s20_geom::traj::Traj::from_rows(&rows))

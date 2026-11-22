@@ -267,7 +267,17 @@ fn main() -> Result<()> {
             let (pts, info) = s20_io::las::read(&inp)?;
             // (the finest of the axes' scales: one scale is written for all)
             let scale = info.scale.iter().copied().fold(f64::INFINITY, f64::min);
-            s20_io::las::write(&out, &pts, scale, info.offset)?;
+            // (written beside, of the same extension (LAS or LAZ), put in place once complete: a
+            // failure, a coordinate the output cannot hold among them, leaves the output as it
+            // was, also when it is the input)
+            let ext = out.extension().unwrap_or_default().to_string_lossy();
+            let stem = out.file_stem().unwrap_or_default().to_string_lossy();
+            let tmp = out.with_file_name(format!("{stem}.{}-tmp.{ext}", std::process::id()));
+            if let Err(e) = s20_io::las::write(&tmp, &pts, scale, info.offset) {
+                let _ = std::fs::remove_file(&tmp);
+                return Err(e);
+            }
+            std::fs::rename(&tmp, &out).with_context(|| format!("write {}", out.display()))?;
             job.log(&format!("wrote {} ({} points)", out.display(), pts.len()));
         }
         "potree" => {

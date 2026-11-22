@@ -600,9 +600,13 @@ pub fn load_imu(data: &Path) -> Result<Vec<[f64; 7]>> {
     let p = data.join("imu.npy");
     let (a, rows, cols) = npy::read_f64(&p)?;
     ensure!(cols == 7, "{}: {cols} columns, not 7", p.display());
-    Ok((0..rows)
+    let mut v: Vec<[f64; 7]> = (0..rows)
         .map(|r| a[r * 7..r * 7 + 7].try_into().unwrap())
-        .collect())
+        .collect();
+    // (in time order, for every step that integrates it: the bag holds the samples by their
+    // record times, which may swap two)
+    v.sort_by(|a, b| a[0].total_cmp(&b[0]));
+    Ok(v)
 }
 
 /// GNSS rows (see msgs::pvtsln), 14 columns.
@@ -664,10 +668,22 @@ pub fn output_offsets(data: &Path) -> Result<Vec<f64>> {
 /// may hold spaces (the absolute path of a session's image). None without eleven numbers after a
 /// name.
 pub fn img_pose_fields(line: &str) -> Option<Vec<&str>> {
-    // (a comment after the numbers, from a '#' after a space, left out)
+    // (a comment after the numbers left out: from a '#' after a space that follows the eleven
+    // numbers, not one in the name)
     let line = line
         .char_indices()
-        .find(|&(i, c)| c == '#' && line[..i].ends_with(char::is_whitespace))
+        .find(|&(i, c)| {
+            let before = &line[..i];
+            c == '#'
+                && before.ends_with(char::is_whitespace)
+                && before
+                    .split_whitespace()
+                    .rev()
+                    .take(11)
+                    .filter(|t| t.parse::<f64>().is_ok())
+                    .count()
+                    == 11
+        })
         .map_or(line, |(i, _)| &line[..i]);
     let mut tokens: Vec<(usize, &str)> = Vec::new();
     let mut start = None;
@@ -763,6 +779,10 @@ mod tests {
         let line = format!("C:/My work/l_1.jpg {nums}  # refined");
         let v = img_pose_fields(&line).unwrap();
         assert_eq!((v[0], v.len(), v[11]), ("C:/My work/l_1.jpg", 12, "12.5"));
+        // a '#' after a space in the name is the name's
+        let line = format!("C:/Survey #2/l_1.jpg {nums} # refined");
+        let v = img_pose_fields(&line).unwrap();
+        assert_eq!((v[0], v.len()), ("C:/Survey #2/l_1.jpg", 12));
     }
 
     #[test]

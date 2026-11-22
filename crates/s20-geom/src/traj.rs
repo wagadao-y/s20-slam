@@ -22,8 +22,14 @@ impl Traj {
             }
             tr.t.push(r[0]);
             tr.p.push(V3::new(r[1], r[2], r[3]));
+            // (scaled by its largest component first: a large one would overflow the norm)
+            let m = r[4..8].iter().fold(0f64, |m, x| m.max(x.abs()));
+            let m = if m > 0. && m.is_finite() { m } else { 1. };
             tr.q.push(UnitQuaternion::from_quaternion(Quaternion::new(
-                r[7], r[4], r[5], r[6],
+                r[7] / m,
+                r[4] / m,
+                r[5] / m,
+                r[6] / m,
             )));
         }
         tr

@@ -582,12 +582,17 @@ fn write_into(
     let keep = |p: &crate::las::LasPoint| opt.skip_class != Some(p.classification);
     // (a point outside the header's bounds by more than a step refused: moved onto the cube's
     // side, its count would hide it)
+    // (each axis to its own header bound: the cube is the longest axis')
+    let axis_end: [f64; 3] = std::array::from_fn(|d| {
+        let u = ((hi[d] - offset[d]) / scale).ceil();
+        if u.is_finite() { u + 1.0 } else { cube.size }
+    });
     let to_int = |p: &crate::las::LasPoint| -> Result<[u32; 3]> {
         let mut out = [0u32; 3];
         for d in 0..3 {
             let v = ((p.xyz[d] - offset[d]) / scale).round();
             ensure!(
-                v.is_finite() && v >= -1.0 && v <= cube.size,
+                v.is_finite() && v >= -1.0 && v <= axis_end[d],
                 "{}: a point at {:?} outside the header's bounds",
                 source.display(),
                 p.xyz

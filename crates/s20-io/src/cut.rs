@@ -117,8 +117,10 @@ pub fn cut_raw(raw: &Path, out: &Path, from: f64, to: f64, job: &Job) -> Result<
         ensure!(!others, "{} is no longer empty", out.display());
         for e in fs::read_dir(&stage)? {
             let p = e?.path();
-            fs::rename(&p, out.join(p.file_name().context("no name")?))
-                .with_context(|| format!("move {}", p.display()))?;
+            let to = out.join(p.file_name().context("no name")?);
+            // (a file come there meanwhile is not replaced: the rename would)
+            ensure!(!to.exists(), "{} came there meanwhile", to.display());
+            fs::rename(&p, &to).with_context(|| format!("move {}", p.display()))?;
         }
         fs::remove_dir(&stage).with_context(|| format!("remove {}", stage.display()))
     })();
