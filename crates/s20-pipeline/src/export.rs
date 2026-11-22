@@ -117,6 +117,8 @@ pub struct CameraPose {
     /// its data folder (absolute) and name there (`left/left_00001.jpg`)
     pub dir: PathBuf,
     pub name: String,
+    /// its session (in the order of the work's): a relative name is read in the first's folder
+    pub session: usize,
     /// sensor-clock time
     pub t: f64,
     /// camera to world (output frame)
@@ -148,7 +150,7 @@ pub fn camera_poses(
     }
     let o = V3::from(origin);
     let mut out = Vec::new();
-    for sd in sessions(data)? {
+    for (session, sd) in sessions(data)?.iter().enumerate() {
         let dir = std::path::absolute(&sd.dir)?;
         for im in s20_io::dataset::image_index(&dir)? {
             let tt = im.t + sd.shift;
@@ -163,6 +165,7 @@ pub fn camera_poses(
             out.push(CameraPose {
                 dir: dir.clone(),
                 name: im.name,
+                session,
                 t: im.t,
                 r: rb * rbc,
                 p: rb * tbc + pb + o,
@@ -186,10 +189,13 @@ fn pose_row(s: &mut String, name: &str, c: &CameraPose) -> Result<()> {
     Ok(())
 }
 
-/// `ImgPose.txt` of `poses`; the names are absolute when the images are of several sessions (as
-/// coloring reads a relative name under its own image folder).
+/// `ImgPose.txt` of `poses`; the names are absolute when the images are of several sessions, or of
+/// another than the first (as coloring and the refinement read a relative name under the first
+/// session's image folder).
 pub fn image_poses(poses: &[CameraPose], out: &Path) -> Result<usize> {
-    let multi = poses.iter().any(|c| c.dir != poses[0].dir);
+    let multi = poses
+        .iter()
+        .any(|c| c.session != 0 || c.dir != poses[0].dir);
     let mut s = String::from(IMG_POSE_HEADER);
     for c in poses {
         let name = if multi {
@@ -362,10 +368,35 @@ mod tests {
     use super::*;
 
     #[test]
+    fn image_poses_of_another_session_than_the_first_are_absolute() {
+        let dir = std::env::temp_dir().join(format!("s20-imgpose-{}", std::process::id()));
+        let out = dir.join("ImgPose.txt");
+        let pose = |session: usize| CameraPose {
+            dir: dir.join("b"),
+            name: "left/left_00001.jpg".into(),
+            session,
+            t: 0.,
+            r: M3::identity(),
+            p: V3::zeros(),
+        };
+        let first_name = |poses: &[CameraPose]| {
+            image_poses(poses, &out).unwrap();
+            let text = fs::read_to_string(&out).unwrap();
+            s20_io::dataset::img_pose_fields(text.lines().nth(1).unwrap()).unwrap()[0].to_string()
+        };
+        // the first session's alone: relative to its folder
+        assert_eq!(first_name(&[pose(0)]), "left/left_00001.jpg");
+        // the second's alone: read in the first's folder otherwise
+        assert!(first_name(&[pose(1)]).ends_with("b/images/left/left_00001.jpg"));
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
     fn set_names_keep_one_sessions_names_and_number_on_across_several() {
         let pose = |dir: &str, name: &str| CameraPose {
             dir: PathBuf::from(dir),
             name: name.to_string(),
+            session: usize::from(dir != "a"),
             t: 0.,
             r: M3::identity(),
             p: V3::zeros(),
@@ -409,7 +440,7 @@ mod tests {
         let root = std::env::temp_dir().join(format!("s20_image_set_{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         let mut poses = Vec::new();
-        for (s, t0) in [("a", 100.0), ("b", 500.0)] {
+        for (session, (s, t0)) in [("a", 100.0), ("b", 500.0)].into_iter().enumerate() {
             let dir = root.join(s);
             for (k, side) in ["left", "right", "left"].into_iter().enumerate() {
                 let name = format!("{side}/{side}_{:05}.jpg", k + 1);
@@ -419,6 +450,7 @@ mod tests {
                 poses.push(CameraPose {
                     dir: dir.clone(),
                     name,
+                    session,
                     t: t0 + k as f64,
                     r: M3::identity(),
                     p: V3::new(k as f64, 0.0, 0.0),
