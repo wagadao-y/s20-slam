@@ -393,6 +393,8 @@ pub struct App {
     steps_key: Option<(Option<ProcessParams>, bool, bool)>,
     /// the processing settings as last read from or written to the open work folder
     work_settings_saved: Option<WorkSettings>,
+    /// the settings whose saving failed (told once; tried again when a run starts)
+    work_settings_failed: Option<WorkSettings>,
     current: Option<Step>,
     log: Vec<String>,
     log_view: crate::log_view::LogView,
@@ -743,6 +745,7 @@ impl App {
             stale_why: HashMap::new(),
             steps_key: None,
             work_settings_saved: None,
+            work_settings_failed: None,
             current: None,
             log: Vec::new(),
             log_view: crate::log_view::LogView::default(),
@@ -1016,6 +1019,10 @@ impl App {
         // the corrections the optimization runs with stay as a revision
         if first <= Step::Opt && last.is_none_or(|l| l >= Step::Opt) {
             self.save_revision(true);
+        }
+        // settings that could not be saved: again now, with the run
+        if self.work_settings_failed.take().is_some() {
+            self.save_work_settings();
         }
         let Some(cfg) = self.config() else { return };
         let what = match last {
@@ -1393,6 +1400,7 @@ impl App {
     /// ones (those used last), which [`Self::save_work_settings`] then saves in it.
     fn load_work_settings(&mut self) {
         self.work_settings_saved = None;
+        self.work_settings_failed = None;
         // (a preset asked for in the work before is not applied to this one)
         self.confirm_preset = None;
         let work = PathBuf::from(self.s.work.trim());
@@ -1427,13 +1435,16 @@ impl App {
     /// Saves the processing settings in the open work folder when they changed.
     fn save_work_settings(&mut self) {
         let now = self.s.work_settings();
-        if self.work_settings_saved.as_ref() == Some(&now) {
+        if self.work_settings_saved.as_ref() == Some(&now)
+            || self.work_settings_failed.as_ref() == Some(&now)
+        {
             return;
         }
         let work = PathBuf::from(self.s.work.trim());
         if self.s.work.trim().is_empty() || !work.join("project.json").is_file() {
             return;
         }
+        // (failed: not taken for saved, so tried again)
         if let Err(e) = now.save(&work) {
             self.notify(
                 Level::Error,
@@ -1442,7 +1453,10 @@ impl App {
                     "Could not save the processing settings: {e:#}"
                 ),
             );
+            self.work_settings_failed = Some(now);
+            return;
         }
+        self.work_settings_failed = None;
         self.work_settings_saved = Some(now);
     }
 
@@ -4280,6 +4294,7 @@ mod tests {
             stale_why: HashMap::new(),
             steps_key: None,
             work_settings_saved: None,
+            work_settings_failed: None,
             current: None,
             log: Vec::new(),
             log_view: Default::default(),
