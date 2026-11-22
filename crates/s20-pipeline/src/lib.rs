@@ -63,6 +63,8 @@ pub fn lio(
         None => None,
     };
     let res = s20_lio::run(&l, &imu, p, init, &hold, job)?;
+    // (canceled after the last check of the scans: the trajectory before it stays)
+    job.check()?;
     s20_lio::save(out, &res)?;
     job.log(&format!(
         "saved {} scans {} imu-only updates {} heading held {} taken from the gate's second search {}",
@@ -417,6 +419,19 @@ pub fn opt(
     Ok(())
 }
 
+/// The trajectory of TUM file `traj`, refused when it has no pose, or a pose not finite or of a
+/// zero quaternion (the interpolation would panic or give NaN to every point after it).
+pub fn read_traj(traj: &Path) -> Result<s20_geom::traj::Traj> {
+    let rows = s20_io::dataset::read_tum(traj)?;
+    ensure!(!rows.is_empty(), "{}: no poses", traj.display());
+    if let Some(k) = rows.iter().position(|r| {
+        !r.iter().all(|x| x.is_finite()) || r[4..].iter().map(|q| q * q).sum::<f64>() < 0.25
+    }) {
+        bail!("{}: pose {} is not a pose", traj.display(), k + 1);
+    }
+    Ok(s20_geom::traj::Traj::from_rows(&rows))
+}
+
 /// Per-knot quality written next to an optimized trajectory.
 pub fn quality_file(traj: &Path) -> PathBuf {
     beside(traj, "_quality.txt")
@@ -474,7 +489,7 @@ pub fn cloud(
     job: &Job,
 ) -> Result<()> {
     let l = s20_io::dataset::LidarData::open(data)?;
-    let tr = s20_geom::traj::Traj::from_rows(&s20_io::dataset::read_tum(traj)?);
+    let tr = read_traj(traj)?;
     let frame = frames::result_frame(data, traj)?;
     let origin = frame.output_offset();
     let off = s20_io::dataset::output_offsets(data)?;
@@ -664,7 +679,7 @@ pub const IMG_POSE_FILE: &str = "ImgPose.txt";
 /// earlier export goes, as it would not follow the trajectory).
 pub fn export(data: &Path, traj: &Path, out: &Path, calib: Option<&Path>, job: &Job) -> Result<()> {
     let l = s20_io::dataset::LidarData::open(data)?;
-    let tr = s20_geom::traj::Traj::from_rows(&s20_io::dataset::read_tum(traj)?);
+    let tr = read_traj(traj)?;
     let frame = frames::result_frame(data, traj)?;
     let origin = frame.output_offset();
     let off = s20_io::dataset::output_offsets(data)?;
@@ -739,7 +754,7 @@ pub fn images(
     job: &Job,
 ) -> Result<()> {
     let cal = s20_io::calib::load(calib)?;
-    let tr = s20_geom::traj::Traj::from_rows(&s20_io::dataset::read_tum(traj)?);
+    let tr = read_traj(traj)?;
     let frame = frames::result_frame(data, traj)?;
     let mut poses = export::camera_poses(data, &tr, &cal, frame.output_offset(), cal.lidar_imu_t)?;
     // the poses refined (the image names as image_poses writes them)
@@ -969,6 +984,8 @@ pub fn colorize(
         w.write(&pts, |i, b| s20_io::las::fill_normal(&pts[i], b))?;
     }
     let n = w.finish()?;
+    // (canceled while blending or writing: the colored cloud before it stays)
+    job.check()?;
     part.keep()?;
     frames::record(data, &[out], cloud_frame)?;
     job.log(&format!("wrote {} ({n} points)", out.display()));

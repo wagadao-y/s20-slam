@@ -28,7 +28,7 @@ use s20_io::dataset::LidarData;
 
 pub const GRAV: f64 = 9.80665;
 pub const LIDAR_IMU_T: [f64; 3] = [-0.011, -0.02329, 0.04412];
-/// Accelerometer bias of the S20 used so far (m/s^2, body), as the PPK unified optimizations of
+/// Accelerometer bias of the SHARE SLAM S20 used so far (m/s^2, body), as the PPK unified optimizations of
 /// three outdoor recordings estimated it.
 pub const S20_BA0: [f64; 3] = [-0.13, 0.0, -0.10];
 
@@ -309,7 +309,8 @@ fn deskew_to_end(t: &[f64], x: &[V3], rec: &Rec, re: &M3, pe: &V3) -> Vec<V3> {
             let k =
                 (rec.t.partition_point(|&s| s < ti) as isize - 1).clamp(0, n as isize - 1) as usize;
             let dt = ti - rec.t[k];
-            let rk = rec.r[k] * so3::exp(&(rec.w[k] * dt));
+            // (the rate the propagation turned by from rec.t[k]: recorded at the interval's end)
+            let rk = rec.r[k] * so3::exp(&(rec.w[(k + 1).min(n - 1)] * dt));
             let pk = if k < n - 1 {
                 let a = dt / (rec.t[k + 1] - rec.t[k]).max(1e-9);
                 rec.p[k] * (1.0 - a) + rec.p[k + 1] * a
@@ -482,16 +483,36 @@ pub fn run(
         }
     }
     let log = |s: &str| job.log(s);
+    // (integrated in time order: a sample not finite is refused, one out of order (the bag holds
+    // them by their record times) put in its place, gaps told)
+    if let Some(k) = imu_rows
+        .iter()
+        .position(|r| !r.iter().all(|x| x.is_finite()))
+    {
+        bail!("imu sample {k} is not finite");
+    }
+    let mut order: Vec<usize> = (0..imu_rows.len()).collect();
+    order.sort_by(|&a, &b| imu_rows[a][0].total_cmp(&imu_rows[b][0]));
+    let rows = || order.iter().map(|&k| &imu_rows[k]);
     let imu = Imu {
-        t: imu_rows.iter().map(|r| r[0] - prm.imu_shift).collect(),
-        gyr: imu_rows.iter().map(|r| V3::new(r[1], r[2], r[3])).collect(),
-        acc: imu_rows
-            .iter()
-            .map(|r| V3::new(r[4], r[5], r[6]) * GRAV)
-            .collect(),
+        t: rows().map(|r| r[0] - prm.imu_shift).collect(),
+        gyr: rows().map(|r| V3::new(r[1], r[2], r[3])).collect(),
+        acc: rows().map(|r| V3::new(r[4], r[5], r[6]) * GRAV).collect(),
     };
+    let unordered = order.windows(2).filter(|w| w[1] < w[0]).count();
+    if unordered > 0 {
+        log(&format!(
+            "imu: {unordered} samples out of time order, put in order"
+        ));
+    }
     if imu.t.is_empty() || data.is_empty() {
         bail!("no imu or lidar data");
+    }
+    let gaps = imu.t.windows(2).filter(|w| w[1] - w[0] > 0.05).count();
+    if gaps > 0 {
+        log(&format!(
+            "imu: {gaps} gaps over 50 ms (the samples after each applied across it)"
+        ));
     }
     let (i0, i1) = prm.scans.unwrap_or((0, data.len()));
     let ids: Vec<usize> = (i0..i1.min(data.len())).collect();
@@ -814,6 +835,15 @@ pub fn run(
                 t_start.elapsed().as_secs_f64()
             ));
         }
+    }
+    // (every scan with too few points left: no trajectory, not an empty one taken for done)
+    if out.is_empty() {
+        bail!(
+            "no scan of {} kept enough points (range {}..{} m)",
+            ids.len(),
+            prm.rmin,
+            prm.rmax
+        );
     }
     Ok(Output {
         poses: out,

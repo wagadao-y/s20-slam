@@ -107,7 +107,7 @@ pub fn calibrate(works: &[RunConfig], job: &Job) -> Result<(String, serde_json::
         );
         // the image poses with the maker's calibration (the export may have used a device calibration)
         let traj = cfg.opt_file();
-        let tr = s20_geom::traj::Traj::from_rows(&s20_io::dataset::read_tum(&traj)?);
+        let tr = crate::read_traj(&traj)?;
         let frame = frames::result_frame(&cfg.data(), &traj)?;
         let poses = export::camera_poses(
             &cfg.data(),
