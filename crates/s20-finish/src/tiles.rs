@@ -137,7 +137,36 @@ struct Tile {
 }
 
 /// Removes the folder of the temporary files when the run ends, also on an error.
-pub(crate) struct TempDir(pub(crate) PathBuf);
+pub(crate) struct TempDir(PathBuf);
+impl TempDir {
+    /// Creates the folder `dir`. One already there is taken (and removed at the end) only when it
+    /// holds nothing but temporary files (`<number>.<kind>`, those of a run that stopped): a folder
+    /// of the user's of that name is not removed.
+    pub(crate) fn create(dir: &Path) -> Result<Self> {
+        if dir.exists() {
+            let ours = std::fs::read_dir(dir)?.all(|e| {
+                e.is_ok_and(|e| {
+                    let name = e.file_name();
+                    let name = name.to_string_lossy();
+                    e.file_type().is_ok_and(|t| t.is_file())
+                        && name.split_once('.').is_some_and(|(k, kind)| {
+                            !k.is_empty()
+                                && k.bytes().all(|b| b.is_ascii_digit())
+                                && !kind.is_empty()
+                                && kind.bytes().all(|b| b.is_ascii_alphabetic())
+                        })
+                })
+            });
+            anyhow::ensure!(
+                ours,
+                "{} is there and holds other files: move it, it would be removed",
+                dir.display()
+            );
+        }
+        std::fs::create_dir_all(dir).with_context(|| format!("create {}", dir.display()))?;
+        Ok(Self(dir.to_path_buf()))
+    }
+}
 impl Drop for TempDir {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.0);
@@ -319,8 +348,7 @@ pub fn finish_tiled(
         }
     }
     // 2. each square's observations and rays to its files
-    std::fs::create_dir_all(tmp).with_context(|| format!("create {}", tmp.display()))?;
-    let _cleanup = TempDir(tmp.to_path_buf());
+    let _cleanup = TempDir::create(tmp)?;
     let file = |k: usize, kind: &str| tmp.join(format!("{k}.{kind}"));
     let mut writers: Vec<(BufWriter<std::fs::File>, BufWriter<std::fs::File>)> = (0..tiles.len())
         .map(|k| -> Result<_> {
@@ -513,6 +541,23 @@ mod tests {
 
     /// A floor and a wall measured from a walk, finished in two halves (each from its
     /// observations and the rays crossing them), give the points of the whole.
+    #[test]
+    fn a_folder_of_other_files_is_not_taken_for_the_temporary_one() {
+        let dir = std::env::temp_dir().join(format!("s20-tempdir-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        // a stopped run's files: taken, and removed at the end
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("3.obs"), "x").unwrap();
+        drop(TempDir::create(&dir).unwrap());
+        assert!(!dir.exists());
+        // another file: refused, kept
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("notes.txt"), "x").unwrap();
+        assert!(TempDir::create(&dir).is_err());
+        assert!(dir.join("notes.txt").exists());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
     #[test]
     fn a_cell_across_squares_gives_both() {
         // a side of 250 BASE cells: the small cell 2 (200..300) lies in the first square and the

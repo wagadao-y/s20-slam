@@ -353,6 +353,8 @@ pub fn opt(
             deg
         ));
     }
+    // (canceled in the last iteration: the trajectory before it stays)
+    job.check()?;
     s20_io::dataset::write_tum(
         out,
         &pr.dense(p, 0.01),

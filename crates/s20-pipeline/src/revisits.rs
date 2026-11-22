@@ -167,7 +167,8 @@ pub fn eval(
     for f in &found {
         let (a, b) = (f.rel.a, f.rel.b);
         s += &format!(
-            "{:.3},{:.3},{},{:.3},{:.3},{},{:.1},{:.3},{:.4},{},{}\n",
+            // (the knots' times in full: read back, a time rounded down took the knot before)
+            "{:.9},{:.9},{},{:.3},{:.3},{},{:.1},{:.3},{:.4},{},{}\n",
             pr.kt[a],
             pr.kt[b],
             pr.session[a] != pr.session[b],
