@@ -41,6 +41,7 @@ pub struct Patch {
 impl Cloud {
     /// Every `step`-th point of a LAS/LAZ (by its index in the file) with its normal.
     pub fn load(path: &Path, step: usize) -> Result<Self> {
+        anyhow::ensure!(step > 0, "the cloud's sampling step is 0");
         let mut r = s20_io::las::LasReader::open(path)?;
         let (mut xyz, mut normal, mut at) = (Vec::new(), Vec::new(), 0usize);
         loop {

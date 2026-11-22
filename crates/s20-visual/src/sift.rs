@@ -539,6 +539,10 @@ fn select(mut kps: Vec<Keypoint>, max_features: usize) -> Vec<Keypoint> {
             .then(a.angle.total_cmp(&b.angle))
     });
     kps.dedup_by(|a, b| a.x == b.x && a.y == b.y && a.size == b.size && a.angle == b.angle);
+    // (none asked for: none, not the 0th's response read below)
+    if max_features == 0 {
+        kps.clear();
+    }
     if kps.len() > max_features {
         kps.sort_by(|a, b| b.response.total_cmp(&a.response));
         let cut = kps[max_features - 1].response;

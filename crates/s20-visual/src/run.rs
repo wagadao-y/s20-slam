@@ -1091,6 +1091,8 @@ pub fn run(input: &Input, job: &Job) -> Result<serde_json::Value> {
             onto.scale_hold * 100.
         ));
         let solved = onto.poses;
+        // (canceled while adjusting: the poses before it stay)
+        job.check()?;
         write_poses(tracks_out, &poses.rows, &solved)?;
         if let Some(points_out) = &input.track_points {
             let started = std::time::Instant::now();
@@ -1201,6 +1203,7 @@ pub fn run(input: &Input, job: &Job) -> Result<serde_json::Value> {
         }
         checks.insert(label.into(), entry);
     }
+    job.check()?;
     write_poses(&input.out, &poses.rows, &refined)?;
     let mut solved = serde_json::Value::Null;
     if let Some(path) = &input.calib_out {
