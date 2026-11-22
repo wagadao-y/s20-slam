@@ -151,7 +151,7 @@ impl Default for Params {
         };
         Params {
             // indoors and outdoors: every 4 gave the same clouds (haze, gaps, thickness against
-            // PointClouds Studio's), in a half to a third of the time
+            // PointClouds Studio's); every 8 takes a half to a third of its time
             every: 8,
             rmin: 0.5,
             rmax: 60.0,
@@ -684,8 +684,8 @@ impl Problem {
         // yaw are observed, the prior only keeps the system regular.
         // Without RTK the prior only fixes the gauge, loosely: held tight on its one knot, the
         // corrections that turn the whole map (a loop's) bend the first seconds instead, the knot
-        // staying while the rest slides by the turn about the map (13 cm in 2 s on a 25-minute
-        // loop). `run` puts the first knot back afterwards.
+        // staying while the rest slides by the turn about the map. `run` puts the first knot back
+        // afterwards.
         let (sy, sp) = if self.rtk.is_empty() {
             (1f64.to_radians(), 0.1f64)
         } else {
@@ -1418,6 +1418,7 @@ impl Problem {
     pub fn run(&mut self, prm: &Params, job: &s20_io::job::Job) -> Result<Vec<IterStats>> {
         // (the quality is that of the last stage)
         anyhow::ensure!(!prm.stages.is_empty(), "opt: no stages in the parameters");
+        anyhow::ensure!(prm.lm_tries > 0, "opt: lm_tries must be at least 1");
         // with loops, a pose-graph stage first spreads the loop corrections along the trajectory
         let mut stages = prm.stages.clone();
         if !self.loops.is_empty() && prm.loop_pre_iters > 0 {
@@ -1534,6 +1535,14 @@ impl Problem {
                     self.remeasure_revisits(&prm.revisits, &log);
                 }
             }
+        }
+        // (told: the last iterations found no step lowering the cost, the result is where they
+        // stopped, not converged)
+        if let Some(s) = hist.last().filter(|s| !s.accepted) {
+            log(&format!(
+                "{tag}the last iteration took no step ({} tries raised the cost): not converged",
+                s.tries
+            ));
         }
         Ok(hist)
     }

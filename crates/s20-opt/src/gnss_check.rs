@@ -42,7 +42,7 @@ impl Default for CheckParams {
     }
 }
 
-/// Consecutive fixes further apart than this (s), or than 1.5 times the fixes' usual interval
+/// Consecutive fixes further apart than this (s), or than 1.5 times the fixes' own interval
 /// when longer (PPK at 1 Hz), are not compared.
 const CONTINUOUS: f64 = 0.5;
 /// Steps within this time of an unhealthy LIO knot are attributed to the LIO (s).
@@ -76,7 +76,8 @@ pub fn screen(t: &[f64], o: &[V3], lio_bad: &[f64], p: &CheckParams) -> (Vec<boo
         let i = lio_bad.partition_point(|&x| x < ta - LIO_WINDOW);
         i < lio_bad.len() && lio_bad[i] <= tb + LIO_WINDOW
     };
-    // the fixes' usual interval (the median), for what is continuous
+    // the fixes' own interval (a low share of the intervals, not the median: with many gaps the
+    // gaps would pass for continuous), for what is continuous
     let mut dts: Vec<f64> = t
         .windows(2)
         .map(|w| w[1] - w[0])
@@ -84,7 +85,7 @@ pub fn screen(t: &[f64], o: &[V3], lio_bad: &[f64], p: &CheckParams) -> (Vec<boo
         .collect();
     dts.sort_by(f64::total_cmp);
     let continuous = dts
-        .get(dts.len() / 2)
+        .get(dts.len() / 10)
         .map_or(CONTINUOUS, |&m| CONTINUOUS.max(1.5 * m));
     // segments [start, end) and the edges between them
     let mut segs = Vec::new();
@@ -229,6 +230,19 @@ mod tests {
         add(&t, &mut o, 20.0, 30.0, V3::new(0.2, 0.0, 0.0));
         let (keep, _) = screen(&t, &o, &[], &CheckParams::default());
         assert_eq!(rejected_in(&t, &keep, 20.0, 30.0), (100, 0));
+    }
+
+    #[test]
+    fn fixes_mostly_apart_are_not_compared_across_the_gaps() {
+        // a fix a second after the first, then one every 10 s; the odometry drifts 2 cm/s, a
+        // step of 20 cm over each gap
+        let t: Vec<f64> = [0.0, 1.0]
+            .into_iter()
+            .chain((1..9).map(|k| 1.0 + 10.0 * k as f64))
+            .collect();
+        let o: Vec<V3> = t.iter().map(|&x| V3::new(0.02 * x, 0., 0.)).collect();
+        let (keep, rej) = screen(&t, &o, &[], &CheckParams::default());
+        assert!(keep.iter().all(|k| *k) && rej.is_empty());
     }
 
     #[test]

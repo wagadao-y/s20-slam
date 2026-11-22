@@ -736,9 +736,9 @@ impl Problem<'_> {
         c
     }
 
-    /// Drops the sightings missing by more than `outlier`, then the tracks no longer usable;
-    /// returns the sightings dropped.
-    fn prune(&mut self, x: &mut Vec<V3>, rot: &[M3], shift: &[V3]) -> usize {
+    /// Drops the sightings missing by more than `outlier` (`by_residual`) and those of a point
+    /// behind the camera, then the tracks no longer usable; returns the sightings dropped.
+    fn prune(&mut self, x: &mut Vec<V3>, rot: &[M3], shift: &[V3], by_residual: bool) -> usize {
         let tracks = std::mem::take(&mut self.tracks);
         let pinned = std::mem::take(&mut self.pinned);
         let points = std::mem::take(x);
@@ -749,7 +749,7 @@ impl Problem<'_> {
             // straight behind)
             t.sightings.retain(|sg| {
                 let (r, v) = sg.residual(&self.pose(rot, shift, sg.image), &p);
-                v.dot(&sg.bearing) > 0. && r.norm() <= self.s.outlier
+                v.dot(&sg.bearing) > 0. && (!by_residual || r.norm() <= self.s.outlier)
             });
             dropped += n - t.sightings.len();
             if usable(&t) {
@@ -906,6 +906,15 @@ pub fn solve(
     let mut x: Vec<V3> = pb.tracks.iter().map(|t| t.anchor).collect();
     let mut rot = vec![M3::identity(); frames];
     let mut shift = vec![V3::zeros(); frames];
+    // (the sightings of a point behind their camera from the start: their residual is small,
+    // zero straight behind, so the adjustment would keep them)
+    let behind = pb.prune(&mut x, &rot, &shift, false);
+    if behind > 0 {
+        log(&format!(
+            "tracks: {behind} sightings of points behind the camera dropped, {} tracks left",
+            pb.tracks.len()
+        ));
+    }
     let rot_prior = 1. / s.rot_sigma.powi(2);
     let pos_prior = 1. / s.pos_sigma.powi(2);
     let rot_smooth = 1. / s.rot_smooth.powi(2);
@@ -1080,7 +1089,7 @@ pub fn solve(
                 largest.to_degrees()
             ));
             if accepted == 3 || accepted == 6 {
-                let dropped = pb.prune(&mut x, &rot, &shift);
+                let dropped = pb.prune(&mut x, &rot, &shift, true);
                 tf = TrackFrames::new(&pb);
                 pattern = Pattern::new(&tf, pb.tracks.len(), frames, chain);
                 cost = pb.cost(&x, &rot, &shift);
