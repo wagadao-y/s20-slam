@@ -2518,7 +2518,10 @@ impl RunConfig {
                 && self.tracks()
                 && last >= Step::Images
                 && !self.tracked_poses().exists();
-            if step < first && self.done(step) && !tracks_missing {
+            // (an earlier step done but no longer current, its settings changed (the CLI's run
+            // after --outdoor or --params): again, for every session; the GUI starts at it)
+            let outdated = step < first && self.done(step) && self.staleness(step).is_some();
+            if step < first && self.done(step) && !tracks_missing && !outdated {
                 continue;
             }
             // without coloring, a run stops before the colorize step (unless that step is asked for)
@@ -2533,7 +2536,7 @@ impl RunConfig {
             if step == Step::Images && (!self.images || (!self.color && first != Step::Images)) {
                 continue;
             }
-            self.run_step_for(step, step < first, job)?;
+            self.run_step_for(step, step < first && !outdated, job)?;
         }
         job.log(&format!("done: {}", self.output().display()));
         Ok(())

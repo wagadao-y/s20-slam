@@ -27,7 +27,7 @@ The steps are extract → lio → opt → cloud → export → refine → colori
 | `--sky_sphere`, `--no_sky_sphere` | With `--images`, add / do not add the sky sphere (see below) to the COLMAP model's initial points. By default added with `--outdoor` |
 | `--no_refine` | Do not refine the image poses |
 | `--device_calibration` | Use the device calibration (made by `calibrate-device`) instead of the maker's factory calibration file (`calibration.yaml`) |
-| `--redo` | Redo the import and LIO even when they are there |
+| `--redo` | Redo the import and LIO even when they are there (when the LIO settings changed, with `--outdoor` or `--params`, LIO is redone without it) |
 | `--until` | Stop after that step |
 
 With multiple sessions, the import and LIO run per session in `<work folder>/sessions/<session name>/` (at first the raw folder's name; only the sessions added are run), and the trajectory optimization and the later steps once for all the sessions.
