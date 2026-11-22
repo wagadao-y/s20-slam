@@ -61,6 +61,8 @@ pub fn cut_raw(raw: &Path, out: &Path, from: f64, to: f64, job: &Job) -> Result<
         }
     };
     let (mut messages, mut bytes, mut span) = (0usize, 0u64, [f64::INFINITY, f64::NEG_INFINITY]);
+    // what this run moved into `out`: removed again when the rest fails
+    let mut moved: Vec<std::path::PathBuf> = Vec::new();
     let written = (|| -> Result<()> {
         let name = src.file_name().context("bag without a name")?;
         let mut w = BagWriter::create(&stage.join(name))?;
@@ -121,11 +123,19 @@ pub fn cut_raw(raw: &Path, out: &Path, from: f64, to: f64, job: &Job) -> Result<
             // (a file come there meanwhile is not replaced: the rename would)
             ensure!(!to.exists(), "{} came there meanwhile", to.display());
             fs::rename(&p, &to).with_context(|| format!("move {}", p.display()))?;
+            moved.push(to);
         }
         fs::remove_dir(&stage).with_context(|| format!("remove {}", stage.display()))
     })();
     if let Err(e) = written {
         let _ = fs::remove_dir_all(&stage);
+        for p in &moved {
+            let _ = if p.is_dir() {
+                fs::remove_dir_all(p)
+            } else {
+                fs::remove_file(p)
+            };
+        }
         return Err(e);
     }
     Ok(CutStats {

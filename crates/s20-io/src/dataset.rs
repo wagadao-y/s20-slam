@@ -668,10 +668,11 @@ pub fn output_offsets(data: &Path) -> Result<Vec<f64>> {
 /// may hold spaces (the absolute path of a session's image). None without eleven numbers after a
 /// name.
 pub fn img_pose_fields(line: &str) -> Option<Vec<&str>> {
-    // (a comment after the numbers left out: from a '#' after a space that follows the eleven
+    // (a comment after the numbers left out: from the last '#' after a space that follows eleven
     // numbers, not one in the name)
     let line = line
         .char_indices()
+        .rev()
         .find(|&(i, c)| {
             let before = &line[..i];
             c == '#'

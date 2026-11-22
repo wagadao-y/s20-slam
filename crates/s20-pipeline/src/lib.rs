@@ -816,12 +816,12 @@ pub fn images(
             .names
             .iter()
             .enumerate()
-            .map(|(i, n)| (n.as_str(), i))
+            .map(|(i, n)| (export::pose_key(n), i))
             .collect();
         let names = export::pose_names(poses);
         let mut missed = 0;
         for (c, name) in poses.iter_mut().zip(&names) {
-            match by_name.get(name.as_str()) {
+            match by_name.get(export::pose_key(name)) {
                 Some(&i) => {
                     c.r = refined.poses[i].r;
                     c.p = refined.poses[i].p;
@@ -1506,6 +1506,10 @@ pub struct RunConfig {
     pub sky_sphere: bool,
     /// the device's calibration (`s20 calibrate-device`), in place of the maker's
     pub device_calib: Option<PathBuf>,
+    /// the sessions were read from the work folder's `project.json` (the GUI): a run refuses to
+    /// start when they changed there since (another window or the CLI), instead of writing them
+    /// back as they were
+    pub from_project: bool,
     /// the first step of a run is redone for every session, also when some have no result yet
     /// (`s20 run --redo`); else only for those without a current one, unless every session's is
     /// done (asked for again)
@@ -1564,6 +1568,7 @@ impl RunConfig {
             poses_3dgs: false,
             sky_sphere: false,
             device_calib: None,
+            from_project: false,
             redo_all: false,
         }
     }
@@ -2339,14 +2344,29 @@ impl RunConfig {
     /// until the step finishes, so a run that is canceled or fails is not taken for a finished one
     /// even when it left files behind.
     pub fn run_step(&self, step: Step, job: &Job) -> Result<()> {
-        let _lock = self.lock()?;
-        self.relink_sources()?;
+        let _lock = self.begin()?;
         self.run_step_for(step, false, job)
     }
 
     /// Takes the work folder for this run: refused while another run holds it (the GUI and the
     /// CLI, or two CLIs, on one folder would overwrite each other's temporary files). Held until
     /// the lock is dropped; the system lets it go when the process ends.
+    /// Takes the work folder for a run (its lock), and makes it ready: the sessions as read, the
+    /// extractions pointed at their raw folders.
+    fn begin(&self) -> Result<WorkLock> {
+        let lock = self.lock()?;
+        if self.from_project
+            && Self::project_sessions(&self.work).is_some_and(|now| now != self.sessions)
+        {
+            bail!(
+                "the sessions of {} changed meanwhile (another window or the CLI): open it again",
+                self.work.display()
+            );
+        }
+        self.relink_sources()?;
+        Ok(lock)
+    }
+
     /// Points each session's extraction at its raw folder's bag when it holds the same recording
     /// (a bag of the same name and size) somewhere else: the raw folder moved, or given anew to
     /// `s20 run`. The extraction read the old place otherwise, gone or another recording's.
@@ -2667,14 +2687,16 @@ impl RunConfig {
 
     /// Runs the steps `first..=last` in order.
     pub fn run_range(&self, first: Step, last: Step, job: &Job) -> Result<()> {
-        let _lock = self.lock()?;
-        self.relink_sources()?;
+        let _lock = self.begin()?;
         for step in Step::ALL.into_iter().filter(|&s| {
             (first..=last).contains(&s)
                 && (s != Step::Refine || self.refine)
                 && (s != Step::Images || self.images)
         }) {
-            self.run_step_for(step, false, job)?;
+            // (a step of each session for the sessions without a current result, as a run from
+            // `first`: after a session added, the others stay; the first asked for again with
+            // every session's done runs for all)
+            self.run_step_for(step, self.only_missing(step, first, false), job)?;
         }
         job.log(&format!("done: {}", self.output().display()));
         Ok(())
@@ -2701,8 +2723,7 @@ impl RunConfig {
 
     /// As [`RunConfig::run_from`], stopping after `last`.
     pub fn run_until(&self, first: Step, last: Step, job: &Job) -> Result<()> {
-        let _lock = self.lock()?;
-        self.relink_sources()?;
+        let _lock = self.begin()?;
         for step in Step::ALL.into_iter().filter(|&s| s <= last) {
             // (a refinement without the tracks does not serve the images: again when they are
             // asked for)

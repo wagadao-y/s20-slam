@@ -41,7 +41,7 @@ s20 opt      <data> runs/lio.txt runs/opt.txt [--rtk] [--ppk runs/ppk.json] [--r
 s20 cloud    <data> runs/opt.txt out/cloud.laz [--config params.json]
 s20 export   <data> runs/opt.txt out --calib <raw folder>/info/calibration.yaml
 s20 refine-images --data <data> --imgpose runs/ImgPose.txt --calib calibration.yaml --cloud out/cloud.laz runs/ImgPose_refined.txt
-s20 colorize out/cloud.laz out/cloud_col.laz --images <data>/images --imgpose runs/ImgPose.txt --calib calibration.yaml --trajectory out/trajectory.txt
+s20 colorize out/cloud.laz out/cloud_col.laz --images <data>/images --imgpose runs/ImgPose_refined.txt --calib calibration.yaml --trajectory out/trajectory.txt
 ```
 
 - Times are seconds from the session's first scan; negative values are seconds back from its end. With multiple sessions, give `<session name>@<s>` or `<number>@<s>`.

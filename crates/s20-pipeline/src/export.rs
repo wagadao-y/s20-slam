@@ -212,6 +212,16 @@ pub fn pose_names(poses: &[CameraPose]) -> Vec<String> {
         .collect()
 }
 
+/// What an image name of [`pose_names`] is matched by: from its session's folder on for an
+/// absolute one (`<session>/data/images/<side>/<file>`), so the names stay matched when the work
+/// folder moved; a relative one as it is.
+pub fn pose_key(name: &str) -> &str {
+    match name.rfind("/sessions/") {
+        Some(i) => &name[i + "/sessions/".len()..],
+        None => name,
+    }
+}
+
 /// `ImgPose.txt` of `poses`; the names are absolute when the images are of several sessions, or of
 /// another than the first (as coloring and the refinement read a relative name under the first
 /// session's image folder).
@@ -399,6 +409,12 @@ mod tests {
         assert_eq!(first_name(&[pose(0)]), "left/left_00001.jpg");
         // the second's alone: read in the first's folder otherwise
         assert!(first_name(&[pose(1)]).ends_with("b/images/left/left_00001.jpg"));
+        // the work folder moved: matched by the part from the session's folder on
+        assert_eq!(
+            pose_key("C:/old/work/sessions/hall/data/images/left/l_1.jpg"),
+            pose_key("D:/new/work/sessions/hall/data/images/left/l_1.jpg")
+        );
+        assert_eq!(pose_key("left/l_1.jpg"), "left/l_1.jpg");
         // the image export finds the refined poses by the same names
         for poses in [[pose(0)], [pose(1)]] {
             assert_eq!(pose_names(&poses)[0], first_name(&poses));

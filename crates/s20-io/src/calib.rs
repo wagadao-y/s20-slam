@@ -88,9 +88,20 @@ fn fisheye(b: &str) -> Result<FisheyeIntrinsics> {
         a22: scalar(b, "A22")?,
         u0: scalar(b, "u0")?,
         v0: scalar(b, "v0")?,
-        width: scalar(b, "image_width")? as u32,
-        height: scalar(b, "image_height")? as u32,
+        width: size(b, "image_width")?,
+        height: size(b, "image_height")?,
     })
+}
+
+/// An image side of the calibration: whole, and of 16 pixels at least (the projection's bounds
+/// keep 2 pixels from the edges).
+fn size(b: &str, key: &str) -> Result<u32> {
+    let v = scalar(b, key)?;
+    anyhow::ensure!(
+        v.fract() == 0. && (16.0..=65_536.0).contains(&v),
+        "{key} {v} is not an image side"
+    );
+    Ok(v as u32)
 }
 
 fn matrix16(text: &str, key: &str) -> Result<[f64; 16]> {

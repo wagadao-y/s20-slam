@@ -836,6 +836,7 @@ impl App {
         }
         let work = PathBuf::from(self.s.work.trim());
         let mut c = RunConfig::of_sessions(RunConfig::project_sessions(&work)?, work);
+        c.from_project = true;
         c.params = self
             .s
             .params
@@ -1016,10 +1017,6 @@ impl App {
             );
             return;
         }
-        // the corrections the optimization runs with stay as a revision
-        if first <= Step::Opt && last.is_none_or(|l| l >= Step::Opt) {
-            self.save_revision(true);
-        }
         // settings that could not be saved: again now, with the run
         if self.work_settings_failed.take().is_some() {
             self.save_work_settings();
@@ -1028,6 +1025,11 @@ impl App {
             if self.work_settings_failed.is_some() {
                 return;
             }
+        }
+        // the corrections the optimization runs with stay as a revision (once the run is sure
+        // to start)
+        if first <= Step::Opt && last.is_none_or(|l| l >= Step::Opt) {
+            self.save_revision(true);
         }
         let Some(cfg) = self.config() else { return };
         let what = match last {

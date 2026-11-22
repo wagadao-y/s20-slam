@@ -593,9 +593,12 @@ fn write_into(
             let v = ((p.xyz[d] - offset[d]) / scale).round();
             ensure!(
                 v.is_finite() && v >= -1.0 && v <= axis_end[d],
-                "{}: a point at {:?} outside the header's bounds",
+                // (the axis and how far, not the coordinates: the log is shared, they would tell
+                // the place)
+                "{}: a point outside the header's bounds on the {} axis by {:.3} m",
                 source.display(),
-                p.xyz
+                ["X", "Y", "Z"][d],
+                if v < 0. { -v } else { v - axis_end[d] } * scale
             );
             out[d] = v.clamp(0.0, cube.size - 1.0) as u32;
         }

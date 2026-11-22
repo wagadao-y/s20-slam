@@ -2157,6 +2157,8 @@ pub fn colorize(
     let start = std::time::Instant::now();
     let cal = s20_io::calib::load(calibration)?;
     let mut poses = load_poses(imgpose)?;
+    // (no image to color from: an error, not points of no color)
+    ensure!(!poses.is_empty(), "{}: no image poses", imgpose.display());
     let mut audit = ColorAudit::from_env(origin, poses.len())?;
     ensure!(poses.len() < NO_IMAGE as usize, "too many images");
     let omega = turning(trajectory, &poses)?;

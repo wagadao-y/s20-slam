@@ -272,7 +272,11 @@ fn main() -> Result<()> {
             // was, also when it is the input)
             let ext = out.extension().unwrap_or_default().to_string_lossy();
             let stem = out.file_stem().unwrap_or_default().to_string_lossy();
-            let tmp = out.with_file_name(format!("{stem}.{}-tmp.{ext}", std::process::id()));
+            // (a name no file has: a file there is not overwritten nor removed)
+            let tmp = (0u32..)
+                .map(|n| out.with_file_name(format!("{stem}.{}-{n}-tmp.{ext}", std::process::id())))
+                .find(|t| !t.exists())
+                .context("no temporary name")?;
             if let Err(e) = s20_io::las::write(&tmp, &pts, scale, info.offset) {
                 let _ = std::fs::remove_file(&tmp);
                 return Err(e);
@@ -893,7 +897,7 @@ const USAGE: &str = "usage:
   s20 eval-revisits <data> <opt_knots.txt> [out.csv] [--pairs pairs.csv] [--revisit_len s] [--revisit_dist m] [--revisit_inliers f] [--revisit_path_sd k] [--revisit_min_weak r]
   s20 eval-traj <estimate.txt> <reference.txt> [--align_s 30]
       (drift after fitting the first seconds, ATE, relative errors over 1/5/30 s, jump intervals; both TUM
-       rows `t x y z qx qy qz qw`, as runs/opt.txt or output/trajectory_100hz_tum.txt)
+       rows `t x y z qx qy qz qw`, as runs/opt.txt or runs/trajectory_100hz_tum.txt)
   s20 lio <data folder> <out.txt> [--indoor] [--scans a:b] [--init_traj prev.txt] [--down m] [--map_vox m]
       [--max_corr m] [--rmin m] [--rmax m] [--lidar_scale s] [--lru n] [--iters n] [--min_inlier r] [--imu_shift s]
       [--static_sec s] [--ng x] [--na x] [--nbg x] [--nba x] [--hold a:b] [--search7] [--huber k] [--threads n]
