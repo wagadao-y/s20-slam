@@ -65,6 +65,11 @@ impl Joint {
         self.rec.is_empty()
     }
 
+    /// The observations the cameras are solved from (those not held out for the checks).
+    pub fn training(&self) -> usize {
+        self.held.iter().filter(|h| !**h).count()
+    }
+
     /// Refine the recordings of `subset` on their training observations; the cameras are solved
     /// as asked, else kept at `camera`.
     pub fn solve(

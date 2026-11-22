@@ -363,6 +363,16 @@ pub fn image_index(dir: &Path) -> Result<Vec<ImageRef>> {
             if v.len() != 4 {
                 bail!("{}: bad line {l:?}", f.display());
             }
+            // `left/<file>` or `right/<file>`: joined to the folders read and written
+            let ok = v[0].split_once('/').is_some_and(|(side, file)| {
+                matches!(side, "left" | "right")
+                    && !file.is_empty()
+                    && file != ".."
+                    && !file.contains(['/', '\\', ':'])
+            });
+            if !ok {
+                bail!("{}: bad image name {:?}", f.display(), v[0]);
+            }
             Ok(ImageRef {
                 name: v[0].to_string(),
                 t: v[1].parse()?,

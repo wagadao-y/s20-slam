@@ -148,6 +148,11 @@ pub fn calibrate(works: &[RunConfig], job: &Job) -> Result<(String, serde_json::
     job.log("solving the cameras with every image's pose");
     job.report("device calibration", 9, 10);
     let joint = s20_visual::joint::Joint::new(recordings);
+    // (without any, the solve gives the prior: no change, saved as if solved)
+    anyhow::ensure!(
+        joint.training() > 0,
+        "no observations to solve the cameras from (no matches between the images on the cloud)"
+    );
     let (cameras, mut report) =
         s20_visual::joint::compare(&joint, true, true, false, &|s: &str| job.log(s));
     // (canceled while solving: not saved in place of the device's calibration)
