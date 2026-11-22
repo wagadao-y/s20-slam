@@ -454,6 +454,22 @@ pub fn write_replacing(f: &Path, bytes: &[u8]) -> Result<()> {
     })
 }
 
+/// Points data folder `data`'s extraction at `bag` (the same recording elsewhere), its time kept:
+/// the extraction is not redone, so the steps after it stay current.
+fn relink(data: &Path, bag: PathBuf, size: u64) -> Result<()> {
+    let f = data.join(s20_io::dataset::Source::FILE);
+    let modified = std::fs::metadata(&f).and_then(|m| m.modified()).ok();
+    s20_io::dataset::Source { bag, size }.write(data)?;
+    if let Some(t) = modified {
+        std::fs::File::options()
+            .write(true)
+            .open(&f)
+            .and_then(|h| h.set_modified(t))
+            .with_context(|| format!("keep the time of {}", f.display()))?;
+    }
+    Ok(())
+}
+
 /// The trajectory of TUM file `traj`, refused when it has no pose, or a pose not finite or of a
 /// zero quaternion (the interpolation would panic or give NaN to every point after it).
 pub fn read_traj(traj: &Path) -> Result<s20_geom::traj::Traj> {
@@ -1595,11 +1611,7 @@ impl RunConfig {
     pub fn move_raw(&mut self, k: usize, raw: PathBuf) -> Result<()> {
         let data = self.session_data(k);
         if let Ok(src) = s20_io::dataset::Source::read(&data) {
-            s20_io::dataset::Source {
-                bag: s20_io::extract::find_bag(&raw)?,
-                size: src.size,
-            }
-            .write(&data)?;
+            relink(&data, s20_io::extract::find_bag(&raw)?, src.size)?;
         }
         self.sessions[k].raw = raw;
         self.write_project()
@@ -2328,12 +2340,37 @@ impl RunConfig {
     /// even when it left files behind.
     pub fn run_step(&self, step: Step, job: &Job) -> Result<()> {
         let _lock = self.lock()?;
+        self.relink_sources()?;
         self.run_step_for(step, false, job)
     }
 
     /// Takes the work folder for this run: refused while another run holds it (the GUI and the
     /// CLI, or two CLIs, on one folder would overwrite each other's temporary files). Held until
     /// the lock is dropped; the system lets it go when the process ends.
+    /// Points each session's extraction at its raw folder's bag when it holds the same recording
+    /// (a bag of the same name and size) somewhere else: the raw folder moved, or given anew to
+    /// `s20 run`. The extraction read the old place otherwise, gone or another recording's.
+    fn relink_sources(&self) -> Result<()> {
+        for (k, s) in self.sessions.iter().enumerate() {
+            let data = self.session_data(k);
+            let (Ok(src), Ok(bag)) = (
+                s20_io::dataset::Source::read(&data),
+                s20_io::extract::find_bag(&s.raw),
+            ) else {
+                continue;
+            };
+            let bag = std::path::absolute(&bag)?;
+            let same_place = |a: &Path, b: &Path| match (a.canonicalize(), b.canonicalize()) {
+                (Ok(a), Ok(b)) => a == b,
+                _ => a == b,
+            };
+            if !same_place(&src.bag, &bag) && Self::holds(&data, &s.raw) {
+                relink(&data, bag, src.size)?;
+            }
+        }
+        Ok(())
+    }
+
     pub fn lock(&self) -> Result<WorkLock> {
         std::fs::create_dir_all(&self.work)
             .with_context(|| format!("create {}", self.work.display()))?;
@@ -2631,6 +2668,7 @@ impl RunConfig {
     /// Runs the steps `first..=last` in order.
     pub fn run_range(&self, first: Step, last: Step, job: &Job) -> Result<()> {
         let _lock = self.lock()?;
+        self.relink_sources()?;
         for step in Step::ALL.into_iter().filter(|&s| {
             (first..=last).contains(&s)
                 && (s != Step::Refine || self.refine)
@@ -2664,6 +2702,7 @@ impl RunConfig {
     /// As [`RunConfig::run_from`], stopping after `last`.
     pub fn run_until(&self, first: Step, last: Step, job: &Job) -> Result<()> {
         let _lock = self.lock()?;
+        self.relink_sources()?;
         for step in Step::ALL.into_iter().filter(|&s| s <= last) {
             // (a refinement without the tracks does not serve the images: again when they are
             // asked for)
@@ -2926,6 +2965,37 @@ mod tests {
         // ids never leave the folder
         assert!(c.delete_revision("../s20_edits").is_err());
         std::fs::remove_dir_all(&work).unwrap();
+    }
+
+    #[test]
+    fn a_moved_raw_folder_is_relinked_without_redoing_the_extraction() {
+        let base = std::env::temp_dir().join(format!("s20_relink_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let (old, new) = (base.join("old").join("room"), base.join("new").join("room"));
+        for d in [&old, &new] {
+            std::fs::create_dir_all(d).unwrap();
+            std::fs::write(d.join("all_0.bag"), "bag").unwrap();
+        }
+        let c = RunConfig::new(new.clone(), base.join("work"));
+        std::fs::create_dir_all(c.session_data(0)).unwrap();
+        s20_io::dataset::Source {
+            bag: std::path::absolute(old.join("all_0.bag")).unwrap(),
+            size: 3,
+        }
+        .write(&c.session_data(0))
+        .unwrap();
+        let f = c.session_data(0).join(s20_io::dataset::Source::FILE);
+        let before = std::fs::metadata(&f).unwrap().modified().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        c.relink_sources().unwrap();
+        let src = s20_io::dataset::Source::read(&c.session_data(0)).unwrap();
+        assert_eq!(
+            src.bag.canonicalize().unwrap(),
+            new.join("all_0.bag").canonicalize().unwrap()
+        );
+        // the extraction's time kept: the steps after it stay current
+        assert_eq!(std::fs::metadata(&f).unwrap().modified().unwrap(), before);
+        std::fs::remove_dir_all(&base).unwrap();
     }
 
     #[test]
