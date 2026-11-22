@@ -1964,13 +1964,24 @@ impl RunConfig {
                 }
                 v
             }
-            Step::Cloud => comparable(json(&self.params.cloud)),
+            Step::Cloud => {
+                let mut v = comparable(json(&self.params.cloud));
+                // the format, so a record of the other's is not taken for this one's (LAZ as
+                // before, keeping older records current)
+                if let Some(o) = v.as_object_mut().filter(|_| !self.laz) {
+                    o.insert("las".into(), true.into());
+                }
+                v
+            }
             Step::Colorize => {
                 let mut v = comparable(json(&self.params.color));
                 if let Some(o) = v.as_object_mut() {
                     // without refined poses as before, keeping older records current
                     if self.refine {
                         o.insert("refined_poses".into(), true.into());
+                    }
+                    if !self.laz {
+                        o.insert("las".into(), true.into());
                     }
                 }
                 v
@@ -2774,6 +2785,16 @@ mod tests {
         c.write_record(Step::Opt, None, true).unwrap();
         c.rtk = !c.rtk;
         assert_eq!(c.staleness(Step::Opt), Some(Stale::Params));
+        // a cloud in LAS recorded: an older LAZ cloud is not taken for current by its record
+        c.rtk = !c.rtk;
+        std::fs::create_dir_all(c.output()).unwrap();
+        std::fs::write(c.uncolored(), "old laz").unwrap();
+        c.laz = false;
+        std::fs::write(c.uncolored(), "las").unwrap();
+        c.write_record(Step::Cloud, None, true).unwrap();
+        assert_eq!(c.staleness(Step::Cloud), None);
+        c.laz = true;
+        assert_eq!(c.staleness(Step::Cloud), Some(Stale::Params));
         std::fs::remove_dir_all(&work).unwrap();
     }
 
