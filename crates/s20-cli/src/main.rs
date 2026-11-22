@@ -659,6 +659,11 @@ fn calibrate_cameras(
         recordings.push((name, c));
     }
     let joint = s20_visual::joint::Joint::new(recordings);
+    // (without any, the solve gives the prior: no change, saved as if solved)
+    anyhow::ensure!(
+        joint.training() > 0,
+        "no observations to solve the cameras from (no matches between the images on the cloud)"
+    );
     let (cameras, mut report) =
         s20_visual::joint::compare(&joint, true, true, check, &|s: &str| job.log(s));
     let cal = s20_io::calib::load(&calib)?;
@@ -762,6 +767,11 @@ fn run(a: &mut Args, job: &Job) -> Result<()> {
     );
     // the poses for 3DGS come from the image refinement, for the image export
     anyhow::ensure!(!poses_3dgs || images, "--3dgs_poses needs --images");
+    // the sky sphere is of the COLMAP model
+    anyhow::ensure!(
+        !(sky_sphere || no_sky_sphere) || images,
+        "--sky_sphere and --no_sky_sphere need --images"
+    );
     // the images follow the coloring (the seed points of the COLMAP model)
     anyhow::ensure!(
         !(images && no_color),
@@ -790,6 +800,7 @@ fn run(a: &mut Args, job: &Job) -> Result<()> {
     // outdoors on, unless chosen
     cfg.sky_sphere = sky_sphere || (outdoor && !no_sky_sphere);
     cfg.device_calib = device.map(PathBuf::from);
+    cfg.redo_all = redo;
     let first = if redo {
         s20_pipeline::Step::Extract
     } else {
@@ -841,10 +852,11 @@ const USAGE: &str = "usage:
   s20 version
   s20 run <raw folder>[,<raw folder>...] <work folder> [--outdoor | --params file.json] [--no_rtk] [--no_color]
       [--redo] [--ppk] [--las] [--images [--3dgs_poses] [--sky_sphere | --no_sky_sphere]] [--no_refine] [--device_calibration file.yaml] [--until step]
-      (extract -> lio -> opt -> cloud -> export -> refine -> colorize; RTK is used when the receiver has fixes;
+      (extract -> lio -> opt -> cloud -> export -> refine -> colorize; RTK is used when the receiver has 100 fixes or more;
        refine: every image's pose refined against the cloud for the coloring, and the cameras solved from
-       the recording, or with --device_calibration (made by calibrate-cameras) used in place of the maker's;
-       extraction and odometry are reused when present unless --redo; --params: parameters saved from the GUI;
+       the recording, or with --device_calibration (made by calibrate-device) used in place of the maker's;
+       extraction and odometry are reused when present and current (LIO redone when its settings changed),
+       every session's redone with --redo; --images not with --no_color; --params: parameters saved from the GUI;
        point clouds are written as .laz, or .las with --las; --images: after the coloring, the photos with
        their refined poses in output/images as PointClouds Studio's and a COLMAP model beside them (output/sparse/0,
        masks, gauge.txt: the output folder opens as a dataset in Gaussian Splatting tools), the COLMAP model
@@ -913,9 +925,9 @@ const USAGE: &str = "usage:
        threshold --contrast (0.04), the image doubled first unless --no_double; the trajectory and the cloud stay; --fit_camera also
        solves the cameras' mounts, fisheye angles and principal points and writes them as a calibration to
        color with, moving them freely from a maker's calibration, or with --device_calibration only a little
-       from one calibrate-cameras made; a report beside the output with the held-out residuals, overall and per image)
+       from one calibrate-device made; a report beside the output with the held-out residuals, overall and per image)
   s20 calibrate-device <work folder>... --out <calibration.yaml> [--threads n]
-      (calibrate-cameras from processed work folders of one device, as the GUI's Device calibration: the image poses
+      (the device's cameras from processed work folders of one device, as the GUI's Device calibration: the image poses
        with the maker's calibration, the mounts, fisheye angles and principal points solved with them;
        the calibration to use with s20 run --device_calibration, and a report beside it)
   s20 calibrate-cameras <manifest.json> <out folder> [--check] [--step n] [--threads n]

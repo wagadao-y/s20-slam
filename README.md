@@ -42,7 +42,7 @@ Processing time, for example: a 19-minute outdoor recording (4650 images) takes 
 
 1. Copy the S20's recording folder (the one holding `all_*.bag`) to your PC as a whole. The app reads the points and images from the bag instead of copying them into the work folder, so leave the copy in place while you work on it.
 2. Start `s20-gui.exe`, choose **New work folder…**, then pick the raw folder and an empty folder for the results.
-3. In **Processing settings** on the left, choose the GNSS (none / the device's RTK / PPK). **Other settings…** has indoor / outdoor and the output format.
+3. In **Processing settings** on the left, choose indoor / outdoor and the GNSS (none / the device's RTK / PPK). **Other settings…** has the output format and more.
 4. Press **Run from unfinished or unapplied steps**. The progress and the log are shown, and you can cancel at any time.
 5. When it finishes, the results are in `<work folder>/output/`.
 

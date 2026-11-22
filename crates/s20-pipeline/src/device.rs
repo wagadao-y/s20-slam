@@ -1,4 +1,4 @@
-//! The device's camera calibration (`s20 calibrate-cameras` in the GUI): solved from several of a
+//! The device's camera calibration (`s20 calibrate-device`, the GUI's Device calibration): solved from several of a
 //! device's recordings, kept in a folder by the digest of the maker's calibration file (the raw
 //! data carry no serial number, and each device has its own maker calibration), and used in place
 //! of the maker's for its recordings (the export's image poses, the refinement and the coloring).
@@ -21,7 +21,7 @@ pub struct Info {
     pub made_at: u64,
     /// the work folders of the recordings
     pub recordings: Vec<PathBuf>,
-    /// the cameras solved (the mounts' rotation, the principal points), as `s20 calibrate-cameras` reports them
+    /// the cameras solved (the mounts' rotation, the principal points), as the joint solve reports them
     pub report: serde_json::Value,
 }
 

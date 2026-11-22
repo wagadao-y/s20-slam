@@ -1,16 +1,16 @@
-//! Trajectory outputs in the maker's formats and the image poses for coloring
+//! Trajectory outputs in PointClouds Studio's formats and the image poses for coloring
 //! (ports of `export_traj_raw.py` and `imgpose_raw.py`).
 //!
 //! - `trajectory.txt`: poses at the scan ends (10 Hz), `x y z roll pitch yaw qx qy qz qw timestamp`
 //!   (trajectory output frame, Euler 'xyz' in radians, output clock = sensor clock - maker offset,
 //!   each session's own)
-//! - `trajectory_100hz_tum.txt` (not the maker's: beside the trajectory it is made from, as
+//! - `trajectory_100hz_tum.txt` (not PointClouds Studio's: beside the trajectory it is made from, as
 //!   `runs/`): the dense trajectory, TUM rows in the output clock
 //! - `trajectory.las`: the 10 Hz poses as points with roll/pitch/yaw extra bytes
 //! - `ImgPose.txt`: camera poses at the image stamps (each session's sensor clock), Euler in degrees
-//! - `images/` (optional), as the maker's: the photos of `left/` and `right/` with their times
+//! - `images/` (optional), as PointClouds Studio's: the photos of `left/` and `right/` with their times
 //!   (`leftImgTime.txt`, `rightImgTime.txt`), their `ImgPose.txt`, the poses as omega, phi, kappa
-//!   (`xyzopk.txt`) and the cameras (`Left.opt`, `Right.opt`); not the maker's masks
+//!   (`xyzopk.txt`) and the cameras (`Left.opt`, `Right.opt`); not PointClouds Studio's masks
 
 use anyhow::{Context, Result};
 use nalgebra::Matrix4;
@@ -189,24 +189,35 @@ fn pose_row(s: &mut String, name: &str, c: &CameraPose) -> Result<()> {
     Ok(())
 }
 
+/// The names [`image_poses`] gives the images of `poses` (and by which their refined poses are
+/// found again): absolute when the images are of several sessions, or of another than the first;
+/// else relative to the first session's image folder.
+pub fn pose_names(poses: &[CameraPose]) -> Vec<String> {
+    let multi = poses
+        .iter()
+        .any(|c| c.session != 0 || c.dir != poses[0].dir);
+    poses
+        .iter()
+        .map(|c| {
+            if multi {
+                c.dir
+                    .join("images")
+                    .join(&c.name)
+                    .to_string_lossy()
+                    .replace('\\', "/")
+            } else {
+                c.name.clone()
+            }
+        })
+        .collect()
+}
+
 /// `ImgPose.txt` of `poses`; the names are absolute when the images are of several sessions, or of
 /// another than the first (as coloring and the refinement read a relative name under the first
 /// session's image folder).
 pub fn image_poses(poses: &[CameraPose], out: &Path) -> Result<usize> {
-    let multi = poses
-        .iter()
-        .any(|c| c.session != 0 || c.dir != poses[0].dir);
     let mut s = String::from(IMG_POSE_HEADER);
-    for c in poses {
-        let name = if multi {
-            c.dir
-                .join("images")
-                .join(&c.name)
-                .to_string_lossy()
-                .replace('\\', "/")
-        } else {
-            c.name.clone()
-        };
+    for (c, name) in poses.iter().zip(pose_names(poses)) {
         pose_row(&mut s, &name, c)?;
     }
     if let Some(p) = out.parent() {
@@ -227,7 +238,7 @@ pub fn omega_phi_kappa(r: &M3) -> [f64; 3] {
     [omega, phi, kappa].map(f64::to_degrees)
 }
 
-/// The sensor's longer side (mm) as the maker writes it in `Left.opt` / `Right.opt`.
+/// The sensor's longer side (mm) as PointClouds Studio writes it in `Left.opt` / `Right.opt`.
 const SENSOR_SIZE_MM: f64 = 11.21;
 
 /// A number with six significant digits, without trailing zeros (as C's `%g`).
@@ -244,7 +255,7 @@ fn g6(v: f64) -> String {
     }
 }
 
-/// A camera's optical properties as the maker's `.opt` file (CRLF, no newline at the end).
+/// A camera's optical properties as PointClouds Studio's `.opt` file (CRLF, no newline at the end).
 fn optical_properties(c: &s20_io::calib::FisheyeIntrinsics) -> String {
     let focal = c.a11 * SENSOR_SIZE_MM / c.width.max(c.height) as f64;
     format!(
@@ -313,7 +324,7 @@ pub fn set_poses(poses: &[CameraPose], out: &Path) -> Result<()> {
     fs::write(out, s).with_context(|| out.display().to_string())
 }
 
-/// The maker's `images/` folder into `out`: per camera the photos (their names kept for one
+/// PointClouds Studio's `images/` folder into `out`: per camera the photos (their names kept for one
 /// session, numbered on across several) with their times, the poses of all (`ImgPose.txt`, the
 /// left camera's first) and as omega, phi, kappa (`xyzopk.txt`), and the cameras. Returns the
 /// images written.
@@ -388,6 +399,10 @@ mod tests {
         assert_eq!(first_name(&[pose(0)]), "left/left_00001.jpg");
         // the second's alone: read in the first's folder otherwise
         assert!(first_name(&[pose(1)]).ends_with("b/images/left/left_00001.jpg"));
+        // the image export finds the refined poses by the same names
+        for poses in [[pose(0)], [pose(1)]] {
+            assert_eq!(pose_names(&poses)[0], first_name(&poses));
+        }
         fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -425,8 +440,8 @@ mod tests {
     }
 
     #[test]
-    fn omega_phi_kappa_as_the_maker() {
-        // left_00001 of a maker's output: its ImgPose quaternion and xyzopk angles
+    fn omega_phi_kappa_as_pointclouds_studio() {
+        // left_00001 of a PointClouds Studio output: its ImgPose quaternion and xyzopk angles
         let r = so3::from_quat([-0.684158, 0.185882, -0.184669, 0.680642]);
         let want = [89.65141489651188, -30.37939213726911, -0.19647934517865842];
         let got = omega_phi_kappa(&r);

@@ -36,6 +36,14 @@ pub fn lio(
     let (t_first, t_last) = (l.scan_start(0), l.scan_start(l.len() - 1));
     let abs = |t: f64| if t < 0.0 { t_last + t } else { t_first + t };
     let hold: Vec<(f64, f64)> = hold.iter().map(|&(a, b)| (abs(a), abs(b))).collect();
+    // (before the initial state is read at the range's first scan)
+    if let Some((i0, i1)) = p.scans {
+        anyhow::ensure!(
+            i0 < i1.min(l.len()),
+            "no scans in {i0}..{i1} ({} scans)",
+            l.len()
+        );
+    }
     job.log(&format!(
         "{} scans, {} imu samples; {p:?}",
         l.len(),
@@ -353,13 +361,8 @@ pub fn opt(
             deg
         ));
     }
-    // (canceled in the last iteration: the trajectory before it stays)
-    job.check()?;
-    s20_io::dataset::write_tum(
-        out,
-        &pr.dense(p, 0.01),
-        "t x y z qx qy qz qw (world_T_imu, sensor clock; unified optimization)",
-    )?;
+    // everything written made first, the cancellation checked last before the old is replaced
+    let dense = pr.dense(p, 0.01);
     let knots = pr.knots();
     if !knots.is_empty() {
         let med = |c: usize| {
@@ -368,8 +371,7 @@ pub fn opt(
             v[v.len() / 2]
         };
         job.log(&format!(
-            "accelerometer bias (median over the knots): {:.3},{:.3},{:.3} m/s^2 \
-             (the LIO's ba0 when the fixes held the optimization)",
+            "accelerometer bias (median over the knots): {:.3},{:.3},{:.3} m/s^2 (the LIO's ba0 when the fixes held the optimization)",
             med(14),
             med(15),
             med(16)
@@ -385,22 +387,30 @@ pub fn opt(
         );
         s.push('\n');
     }
-    std::fs::write(beside(out, "_knots.txt"), s)?;
     let mut q = format!("# {}\n", s20_opt::quality::HEADER);
     for r in pr.quality(p) {
         q.push_str(&r.row());
         q.push('\n');
     }
+    // the GNSS origin kept when solved without GNSS (the next run with it takes the same one; the
+    // results' own frames are in the ledger), and a file that cannot be read left as it is: this
+    // run does not need it
+    let write_frame = frame != CoordinateFrame::LocalSlam
+        || matches!(
+            s20_io::dataset::load_frame(data),
+            Ok(CoordinateFrame::LocalSlam | CoordinateFrame::LegacyProjected { .. })
+        );
+    // (canceled in the last iteration or since: the results before it stay)
+    job.check()?;
+    s20_io::dataset::write_tum(
+        out,
+        &dense,
+        "t x y z qx qy qz qw (world_T_imu, sensor clock; unified optimization)",
+    )?;
+    std::fs::write(beside(out, "_knots.txt"), s)?;
     std::fs::write(quality_file(out), q)?;
     frames::record(data, &[out], Some(frame))?;
-    // the GNSS origin kept when solved without GNSS: the next run with it takes the same one
-    // (the results' own frames are in the ledger)
-    let keep_origin = frame == CoordinateFrame::LocalSlam
-        && matches!(
-            s20_io::dataset::load_frame(data)?,
-            CoordinateFrame::LocalEnu { .. }
-        );
-    if !keep_origin {
+    if write_frame {
         frame.write(&data.join("coordinate_frame.json"))?;
     }
     job.log(&format!("saved {}", out.display()));
@@ -647,7 +657,7 @@ fn refresh_pdal_pipeline(data: &Path, cloud: &Path, frame: Option<CoordinateFram
 /// in the `images/` folder, when it is asked for).
 pub const IMG_POSE_FILE: &str = "ImgPose.txt";
 
-/// Trajectory files in the maker's formats with the Potree octree of `trajectory.las` (and
+/// Trajectory files in PointClouds Studio's formats with the Potree octree of `trajectory.las` (and
 /// `coordinate_frame.json` unless in the SLAM frame) into `out`; beside `traj` the dense
 /// trajectory ([`TUM_FILE`]) and, when a calibration is given, the camera poses
 /// ([`IMG_POSE_FILE`]), with the maker's `images/` folder in `out` if `images` (else one of an
@@ -733,7 +743,6 @@ pub fn images(
     let frame = frames::result_frame(data, traj)?;
     let mut poses = export::camera_poses(data, &tr, &cal, frame.output_offset(), cal.lidar_imu_t)?;
     // the poses refined (the image names as image_poses writes them)
-    let multi = poses.iter().any(|c| c.dir != poses[0].dir);
     let take = |poses: &mut [export::CameraPose], file: &Path| -> Result<()> {
         let refined = s20_visual::pairs::read_image_poses(file)?;
         let by_name: std::collections::HashMap<&str, usize> = refined
@@ -742,20 +751,31 @@ pub fn images(
             .enumerate()
             .map(|(i, n)| (n.as_str(), i))
             .collect();
-        for c in poses {
-            let name = if multi {
-                c.dir
-                    .join("images")
-                    .join(&c.name)
-                    .to_string_lossy()
-                    .replace('\\', "/")
-            } else {
-                c.name.clone()
-            };
-            if let Some(&i) = by_name.get(name.as_str()) {
-                c.r = refined.poses[i].r;
-                c.p = refined.poses[i].p;
+        let names = export::pose_names(poses);
+        let mut missed = 0;
+        for (c, name) in poses.iter_mut().zip(&names) {
+            match by_name.get(name.as_str()) {
+                Some(&i) => {
+                    c.r = refined.poses[i].r;
+                    c.p = refined.poses[i].p;
+                }
+                None => missed += 1,
             }
+        }
+        // (none found: the file is of other images, not to be exported as refined)
+        ensure!(
+            missed < poses.len() || poses.is_empty(),
+            "none of the {} images has a pose in {}",
+            poses.len(),
+            file.display()
+        );
+        // (told: those keep the poses before the refinement)
+        if missed > 0 {
+            job.log(&format!(
+                "{missed} of {} images without a pose in {}: their poses unrefined",
+                poses.len(),
+                file.display()
+            ));
         }
         Ok(())
     };
@@ -1348,12 +1368,40 @@ impl WorkSettings {
     }
 
     pub fn save(&self, work: &Path) -> Result<()> {
-        // (through a temporary file: a failed write leaves the settings before it)
+        // (through a temporary file of this save's own, made new: a failed write leaves the
+        // settings before it, and two windows saving at once do not put each other's half)
         let f = Self::file(work);
-        let temp = f.with_extension("json.tmp");
-        std::fs::write(&temp, serde_json::to_string_pretty(self)?)
-            .with_context(|| format!("write {}", temp.display()))?;
-        std::fs::rename(&temp, &f).with_context(|| format!("write {}", f.display()))
+        let text = serde_json::to_string_pretty(self)?;
+        let mut n = 0u32;
+        let temp = loop {
+            let t = f.with_extension(format!("json.{}-{n}.tmp", std::process::id()));
+            match std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&t)
+            {
+                Ok(mut file) => {
+                    use std::io::Write;
+                    let written = file.write_all(text.as_bytes());
+                    drop(file);
+                    if let Err(e) = written {
+                        let _ = std::fs::remove_file(&t);
+                        return Err(
+                            anyhow::Error::from(e).context(format!("write {}", t.display()))
+                        );
+                    }
+                    break t;
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => n += 1,
+                Err(e) => {
+                    return Err(anyhow::Error::from(e).context(format!("write {}", t.display())));
+                }
+            }
+        };
+        std::fs::rename(&temp, &f).map_err(|e| {
+            let _ = std::fs::remove_file(&temp);
+            anyhow::Error::from(e).context(format!("write {}", f.display()))
+        })
     }
 }
 
@@ -1410,8 +1458,12 @@ pub struct RunConfig {
     /// on a large sphere around the scene, for the sky and the far background where the cloud has
     /// none; see [`s20_visual::colmap::sky_sphere`])
     pub sky_sphere: bool,
-    /// the device's calibration (`s20 calibrate-cameras`), in place of the maker's
+    /// the device's calibration (`s20 calibrate-device`), in place of the maker's
     pub device_calib: Option<PathBuf>,
+    /// the first step of a run is redone for every session, also when some have no result yet
+    /// (`s20 run --redo`); else only for those without a current one, unless every session's is
+    /// done (asked for again)
+    pub redo_all: bool,
 }
 
 fn folder_name(p: &Path) -> String {
@@ -1466,6 +1518,7 @@ impl RunConfig {
             poses_3dgs: false,
             sky_sphere: false,
             device_calib: None,
+            redo_all: false,
         }
     }
 
@@ -2109,28 +2162,31 @@ impl RunConfig {
         self.params.color.clone()
     }
 
-    /// RTK options when enabled and the receivers reported enough fixes.
-    pub fn rtk_options(&self) -> Option<RtkOptions> {
+    /// RTK options when enabled and the receivers reported enough fixes (none without a GNSS
+    /// table; a table that cannot be read an error, not a run without RTK).
+    pub fn rtk_options(&self) -> Result<Option<RtkOptions>> {
         let mut exclude = self.rtk_exclude.clone();
         exclude.extend(self.edits().rtk_exclude);
         if self.ppk {
-            return Some(RtkOptions {
+            return Ok(Some(RtkOptions {
                 params: self.params.rtk,
                 exclude,
                 ppk: (0..self.sessions.len())
                     .map(|k| self.ppk_file_of(k))
                     .collect(),
-            });
+            }));
         }
-        if !self.rtk {
-            return None;
+        if !self.rtk || !self.data().join("gnss.npy").exists() {
+            return Ok(None);
         }
-        let g = s20_io::dataset::load_gnss(&self.data()).ok()?;
-        (g.iter().filter(|r| r[1] == s20_io::gnss::FIX).count() >= 100).then_some(RtkOptions {
-            params: self.params.rtk,
-            exclude,
-            ppk: Vec::new(),
-        })
+        let g = s20_io::dataset::load_gnss(&self.data())?;
+        Ok(
+            (g.iter().filter(|r| r[1] == s20_io::gnss::FIX).count() >= 100).then_some(RtkOptions {
+                params: self.params.rtk,
+                exclude,
+                ppk: Vec::new(),
+            }),
+        )
     }
 
     /// Session `k`'s heading hold intervals from the corrections, in seconds as for [`At`].
@@ -2391,7 +2447,7 @@ impl RunConfig {
                     &lio_files,
                     &self.opt_file(),
                     &self.opt_params(),
-                    self.rtk_options().as_ref(),
+                    self.rtk_options()?.as_ref(),
                     &self.edits(),
                     job,
                 )?;
@@ -2475,14 +2531,19 @@ impl RunConfig {
             Step::Images => {
                 let (imgpose, calib) = self.color_inputs();
                 // the COLMAP model with the poses of the tracks, when refined with them
+                // (both asked for: one missing, the export stops before it replaces anything,
+                // rather than writing the refined poses under the record of the tracks')
                 let tracked = self.tracked_poses();
-                let colmap = (self.tracks() && tracked.exists()).then_some(tracked.as_path());
-                if self.tracks() && colmap.is_none() {
-                    job.log(
-                        "the tracks' poses are missing (the refinement ran without the images): \
-                         the COLMAP model takes the refined poses; run the refinement again for the tracks'",
-                    );
+                if self.tracks() {
+                    for f in [&tracked, &self.tracked_points()] {
+                        ensure!(
+                            f.exists(),
+                            "{} is missing: run the image pose refinement again (with \"Poses for 3DGS\")",
+                            f.display()
+                        );
+                    }
                 }
+                let colmap = self.tracks().then_some(tracked.as_path());
                 images(
                     &self.data(),
                     &self.opt_file(),
@@ -2555,6 +2616,18 @@ impl RunConfig {
         self.run_until(first, Step::Images, job)
     }
 
+    /// Whether a run from `first` runs `step` only for the sessions without a current result:
+    /// before the first step (unless `outdated`: done but no longer current), and from it on for a
+    /// step of each session (a session added: the others' extraction and LIO stay), unless the
+    /// first was asked for again (every session's done, or [`RunConfig::redo_all`]).
+    fn only_missing(&self, step: Step, first: Step, outdated: bool) -> bool {
+        if step < first {
+            !outdated
+        } else {
+            step.per_session() && !(step == first && (self.redo_all || self.done(step)))
+        }
+    }
+
     /// As [`RunConfig::run_from`], stopping after `last`.
     pub fn run_until(&self, first: Step, last: Step, job: &Job) -> Result<()> {
         let _lock = self.lock()?;
@@ -2583,15 +2656,7 @@ impl RunConfig {
             if step == Step::Images && (!self.images || (!self.color && first != Step::Images)) {
                 continue;
             }
-            // only the sessions without a current result: before the first step, and from it on
-            // for a step of each session (a session added: the others' extraction and LIO stay),
-            // unless the first was asked for again with every session's done
-            let only_missing = if step < first {
-                !outdated
-            } else {
-                step.per_session() && !(step == first && self.done(step))
-            };
-            self.run_step_for(step, only_missing, job)?;
+            self.run_step_for(step, self.only_missing(step, first, outdated), job)?;
         }
         job.log(&format!("done: {}", self.output().display()));
         Ok(())
@@ -2852,6 +2917,18 @@ mod tests {
             changed.units_to_run(Step::Lio, true),
             vec![Some(0), Some(1)]
         );
+        // a run from LIO: the added session's alone; with --redo, every session's
+        assert!(c.only_missing(Step::Lio, Step::Lio, false));
+        let mut redo = c.clone();
+        redo.redo_all = true;
+        assert!(!redo.only_missing(Step::Lio, Step::Lio, false));
+        // the optimization (of all sessions) runs whole
+        assert!(!c.only_missing(Step::Opt, Step::Lio, false));
+        // every session's done: asked for again, every session's
+        std::fs::create_dir_all(c.session_runs(1)).unwrap();
+        std::fs::write(c.lio_file_of(1), "x").unwrap();
+        c.write_record(Step::Lio, Some(1), true).unwrap();
+        assert!(!c.only_missing(Step::Lio, Step::Lio, false));
         std::fs::remove_dir_all(&work).unwrap();
     }
 
@@ -3293,15 +3370,24 @@ mod tests {
     fn ppk_is_explicit_and_does_not_silently_fall_back_to_rtk() {
         let mut c = RunConfig::new("missing_raw".into(), "missing_work".into());
         c.rtk = false;
-        assert!(c.rtk_options().is_none());
+        assert!(c.rtk_options().unwrap().is_none());
         let original = c.step_params(Step::Opt);
         assert!(original.get("use_ppk").is_none());
         c.ppk = true;
         c.rtk_exclude.push((At::new(10.), At::new(20.)));
-        let source = c.rtk_options().unwrap();
+        let source = c.rtk_options().unwrap().unwrap();
         assert_eq!(source.ppk, vec![c.ppk_file()]);
         assert_eq!(source.exclude, vec![(At::new(10.), At::new(20.))]);
         assert_ne!(original, c.step_params(Step::Opt));
+        // a GNSS table that cannot be read stops the run instead of leaving RTK out
+        let work = std::env::temp_dir().join(format!("s20_gnss_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&work);
+        let g = RunConfig::new("raw".into(), work.clone());
+        assert!(g.rtk_options().unwrap().is_none());
+        std::fs::create_dir_all(g.data()).unwrap();
+        s20_io::npy::write_f64(&g.data().join("gnss.npy"), &[0.; 6], 3).unwrap();
+        assert!(g.rtk_options().is_err());
+        std::fs::remove_dir_all(&work).unwrap();
     }
     #[test]
     fn settings_at_an_old_default_take_the_new_one() {

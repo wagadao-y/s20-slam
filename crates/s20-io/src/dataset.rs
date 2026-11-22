@@ -225,9 +225,10 @@ pub fn build_set(out: &Path, dirs: &[PathBuf]) -> Result<Vec<f64>> {
             imu_all.push(r[0] + shift);
             imu_all.extend_from_slice(&r[1..]);
         }
-        // a session without GNSS (indoors) may have no table
-        if let Ok(g) = load_gnss(&full(d)) {
-            for r in g {
+        // a session without GNSS (indoors) may have no table; one that cannot be read is an
+        // error, not a session without fixes
+        if full(d).join("gnss.npy").exists() {
+            for r in load_gnss(&full(d))? {
                 gnss_all.push(r[0] + shift);
                 gnss_all.extend_from_slice(&r[1..]);
             }
