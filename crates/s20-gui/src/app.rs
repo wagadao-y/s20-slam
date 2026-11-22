@@ -1391,6 +1391,7 @@ impl App {
         self.load_work_settings();
         self.clear_view();
         self.reload_edits();
+        self.forget_work_state();
         self.error = None;
         self.refresh_steps();
         self.load_scene(ctx);
@@ -1399,6 +1400,17 @@ impl App {
             "Opened the work folder: {}",
             work.file_name().unwrap_or_default().to_string_lossy()
         ));
+    }
+
+    /// What was asked for in the work folder left (a session to take out, replace or rename by its
+    /// index, the corrections' undo and redo), not to be applied to the one open now.
+    pub(super) fn forget_work_state(&mut self) {
+        self.confirm_replace = None;
+        self.confirm_remove = None;
+        self.rename_session = None;
+        self.confirm_run = None;
+        self.confirm_preset = None;
+        self.edit_history.reset(self.edits.clone());
     }
 
     /// Takes the processing settings of the open work folder. One without them keeps the current
@@ -2678,7 +2690,9 @@ impl App {
 
     /// The name session `k` is stored under in the corrections (none for one session: the first).
     fn session_key(&self, k: usize) -> String {
-        if self.multi() {
+        // (the name left out only when the project has one session: with one of several shown,
+        // an unnamed correction would be read as the project's first)
+        if self.multi() || self.project().is_some_and(|c| c.sessions.len() > 1) {
             self.scene.sessions[k].name.clone()
         } else {
             String::new()

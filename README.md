@@ -22,7 +22,7 @@ Get the latest zip from [Releases](../../releases/latest), unzip it anywhere and
 
 The executables are not code-signed, so Windows may show "Windows protected your PC" the first time. Choose **More info → Run anyway**. They are built by GitHub Actions from the public source of this repository. To check the download, compare `Get-FileHash <zip>` in PowerShell with the `.sha256` file attached to the release.
 
-The app keeps its settings, the device calibrations and crash logs in `%APPDATA%\S20 SLAM\data`. To move the device calibrations to another PC, copy that folder. To remove the app, delete the unzipped folder and that folder.
+The app keeps its settings and the device calibrations in `%APPDATA%\S20 SLAM\data`. A crash log goes to the open work folder's `logs/`, or to `%APPDATA%\S20 SLAM\data` with none open (the next start tells where). To move the device calibrations to another PC, copy that folder. To remove the app, delete the unzipped folder and that folder.
 
 | File | |
 |---|---|

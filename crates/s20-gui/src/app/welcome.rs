@@ -102,6 +102,7 @@ impl App {
         self.s.work.clear();
         self.error = None;
         self.reload_edits();
+        self.forget_work_state();
         self.refresh_steps();
         self.log
             .push(tl("作業フォルダーを閉じました", "Closed the work folder").into());

@@ -66,6 +66,10 @@ impl App {
     }
 
     pub(super) fn open_device_calib(&mut self) {
+        // (open with a calibration running: that one kept, not dropped for a new window)
+        if self.device_calib_running() {
+            return;
+        }
         let current = self.config().map(|c| c.calib());
         let digest = current.as_deref().map(s20_pipeline::file_digest);
         let mut picks: Vec<(PathBuf, bool)> = Vec::new();
