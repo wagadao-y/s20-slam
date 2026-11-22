@@ -265,7 +265,9 @@ fn main() -> Result<()> {
             let out = PathBuf::from(a.positional_req("output .las/.laz")?);
             a.finish()?;
             let (pts, info) = s20_io::las::read(&inp)?;
-            s20_io::las::write(&out, &pts, info.scale[0], info.offset)?;
+            // (the finest of the axes' scales: one scale is written for all)
+            let scale = info.scale.iter().copied().fold(f64::INFINITY, f64::min);
+            s20_io::las::write(&out, &pts, scale, info.offset)?;
             job.log(&format!("wrote {} ({} points)", out.display(), pts.len()));
         }
         "potree" => {

@@ -77,7 +77,12 @@ pub fn rtk_valid(g: &[[f64; 14]], v: &Validity) -> Vec<bool> {
             let delta = frame.position(psr);
             let dh = delta[0].hypot(delta[1]);
             let dv = (r[4] - r[11]).abs();
-            dh < v.max_dh && dv < v.max_dv && r[12] >= v.sv_frac * svmed
+            // (up in the frame too: a solution on the far side of the earth is near in east and
+            // north, of the same height, but thousands of km down)
+            dh < v.max_dh
+                && dv < v.max_dv
+                && delta[2].abs() < v.max_dv
+                && r[12] >= v.sv_frac * svmed
         })
         .collect()
 }

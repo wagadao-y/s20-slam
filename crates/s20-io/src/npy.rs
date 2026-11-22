@@ -48,7 +48,9 @@ pub fn read_f64(path: &Path) -> Result<(Vec<f64>, usize, usize)> {
         v => bail!("unsupported npy version {v}"),
     };
     let header = std::str::from_utf8(b.get(hstart..hstart + hlen).ok_or_else(short)?)?;
-    if !header.contains("'<f8'") || header.contains("'fortran_order': True") {
+    // (read without the spaces: a Python literal may have them or not)
+    let compact: String = header.chars().filter(|c| !c.is_whitespace()).collect();
+    if !compact.contains("'<f8'") || compact.contains("'fortran_order':True") {
         bail!(
             "{}: only C-order float64 arrays are supported ({header})",
             path.display()

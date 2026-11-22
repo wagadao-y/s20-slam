@@ -247,7 +247,14 @@ impl LasWriter {
         let scale = self.scale;
         for p in pts {
             for (d, (&x, &o)) in p.xyz.iter().zip(&offset).enumerate() {
-                let stored = o + ((x - o) * inv).round() as i32 as f64 * scale;
+                // (a coordinate the 32-bit integer of the scale and offset cannot hold, or not
+                // finite, refused: cast, it would be moved to the integer's end or to 0)
+                let q = ((x - o) * inv).round();
+                anyhow::ensure!(
+                    q.is_finite() && q >= i32::MIN as f64 && q <= i32::MAX as f64,
+                    "a coordinate {x} the scale {scale} and offset {o} cannot hold"
+                );
+                let stored = o + q as i32 as f64 * scale;
                 self.lo[d] = self.lo[d].min(stored);
                 self.hi[d] = self.hi[d].max(stored);
             }
@@ -531,6 +538,25 @@ impl LasReader {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_coordinate_the_integers_cannot_hold_is_refused() {
+        let f = std::env::temp_dir().join(format!("s20_las_range_{}.las", std::process::id()));
+        let pt = |x: f64| LasPoint {
+            xyz: [x, 0., 0.],
+            intensity: 0,
+            source_id: 0,
+            gps_time: 0.,
+            rgb: [0; 3],
+            classification: 0,
+            normal: [0.; 3],
+        };
+        // 300 km at 0.1 mm: beyond the 32-bit integers (214 km), it was moved to their end
+        assert!(write(&f, &[pt(300_000.)], 1e-4, [0.; 3]).is_err());
+        assert!(write(&f, &[pt(f64::NAN)], 1e-4, [0.; 3]).is_err());
+        write(&f, &[pt(200_000.)], 1e-4, [0.; 3]).unwrap();
+        let _ = std::fs::remove_file(&f);
+    }
 
     #[test]
     fn roundtrip() {
