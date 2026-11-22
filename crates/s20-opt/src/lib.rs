@@ -380,8 +380,19 @@ pub struct IterStats {
     pub cost1: f64,
     pub lambda: f64,
     pub tries: usize,
+    /// a step was taken (else every try raised the cost: no step, which is not convergence)
+    pub accepted: bool,
     pub rtk_h_mm: f64,
     pub rtk_v_mm: f64,
+}
+
+/// The planes' centroids in [`Problem::cost`].
+enum Centers {
+    /// the planes' own (`Plane::c`), as the step takes them without the coupling
+    Fixed,
+    /// moving with the points (weighted as in the step), offset by these to the planes' own at
+    /// the states of the step
+    Moving(Vec<V3>),
 }
 
 struct RtkTerm {
@@ -526,10 +537,15 @@ impl Problem {
         rc: f64,
         rels: &[relpose::RelPose],
         pose_graph: bool,
+        centers: &Centers,
+        within: &[Option<Preint>],
     ) -> f64 {
         let k = self.kt.len();
         let nz = prm.noise;
-        let pre = if pose_graph && pl.planes.is_empty() && self.rtk.is_empty() {
+        // the IMU factors integrated at `states`; the points and the antenna placed by the
+        // motion within the knots of the step (`within`), as its Jacobians take it (without the
+        // biases' part)
+        let pre = if pose_graph {
             Vec::new()
         } else {
             self.preintegrate_states(states, &nz)
@@ -549,7 +565,7 @@ impl Problem {
                     let mut a = vec![[0f64; 4]; np];
                     let mut qc = Vec::new();
                     for j in c * CHUNK..((c + 1) * CHUNK).min(k) {
-                        if let Some(Some(pi)) = pre.get(j) {
+                        if let Some(Some(pi)) = within.get(j) {
                             for i in off[j]..off[j + 1] {
                                 let id = pl.pid[i];
                                 if id == NONE {
@@ -586,26 +602,29 @@ impl Problem {
                     s
                 })
                 .collect();
-            let cen: Vec<V3> = sums
-                .iter()
-                .map(|s| {
-                    if s[3] > 0.0 {
-                        V3::new(s[0], s[1], s[2]) / s[3]
-                    } else {
-                        V3::zeros()
-                    }
-                })
-                .collect();
+            let moving = sums.iter().map(|s| {
+                if s[3] > 0.0 {
+                    V3::new(s[0], s[1], s[2]) / s[3]
+                } else {
+                    V3::zeros()
+                }
+            });
+            // the centroids as the step takes them: fixed, or moving with the points from the
+            // planes' (so that at the states of the step the residuals are the step's)
+            let cen: Vec<V3> = match centers {
+                Centers::Fixed => pl.planes.iter().map(|p| p.c).collect(),
+                Centers::Moving(off) => moving.zip(off.iter()).map(|(c, o)| c + o).collect(),
+            };
             let wpt = prm.lidar_w / (prm.sigma_pt * prm.sigma_pt);
             // per knot, summed in knot order
-            let (pre, cen) = (&pre, &cen);
+            let cen = &cen;
             let lidar: f64 = qs
                 .par_iter()
                 .enumerate()
                 .flat_map_iter(|(c, qc)| {
                     let mut qc = qc.iter();
                     (c * CHUNK..((c + 1) * CHUNK).min(k)).map(move |j| {
-                        let Some(Some(_)) = pre.get(j) else {
+                        let Some(Some(_)) = within.get(j) else {
                             return 0.0;
                         };
                         let mut c = 0.0;
@@ -652,7 +671,7 @@ impl Problem {
             .iter()
             .sum();
         let rtk: f64 = self
-            .rtk_terms(states, &pre, rc, pose_graph)
+            .rtk_terms(states, within, rc, pose_graph)
             .iter()
             .map(|t| t.cost)
             .sum();
@@ -1208,6 +1227,45 @@ impl Problem {
                 far.push((t.a, t.b, relpose::embed(&t.hab)));
             }
         }
+        // the planes' centroids in the cost as in the step: fixed when the planes are not coupled
+        // to the points; coupled, moving with the points by their weights from the planes'
+        let centers = match (&qs, couple && !pl.planes.is_empty()) {
+            (Some(q), true) => {
+                let off = &self.pts.off;
+                let mut sums = vec![[0f64; 4]; pl.planes.len()];
+                for j in 0..k {
+                    if !matches!(pre.get(j), Some(Some(_))) {
+                        continue;
+                    }
+                    for i in off[j]..off[j + 1] {
+                        let id = pl.pid[i];
+                        if id == NONE {
+                            continue;
+                        }
+                        let (w, e) = (wts[i] as f64, &mut sums[id as usize]);
+                        e[0] += w * q[i].x;
+                        e[1] += w * q[i].y;
+                        e[2] += w * q[i].z;
+                        e[3] += w;
+                    }
+                }
+                Centers::Moving(
+                    pl.planes
+                        .iter()
+                        .zip(&sums)
+                        .map(|(p, s)| {
+                            let c = if s[3] > 0.0 {
+                                V3::new(s[0], s[1], s[2]) / s[3]
+                            } else {
+                                V3::zeros()
+                            };
+                            p.c - c
+                        })
+                        .collect(),
+                )
+            }
+            _ => Centers::Fixed,
+        };
         // --- Levenberg-Marquardt: accept the step only if the cost (same plane assignment) decreases
         let c0 = self.cost(
             &self.states,
@@ -1219,6 +1277,8 @@ impl Problem {
             rc,
             &rels,
             stage.odometry,
+            &centers,
+            &pre,
         );
         drop(qs);
         let mut lambda = self.lambda.max(prm.lambda);
@@ -1226,6 +1286,10 @@ impl Problem {
         let mut accepted = None;
         let mut tries = 0;
         let mut c1 = c0;
+        // a try whose system could not be solved goes on with more damping, as one that raised
+        // the cost (the error kept for when every try fails so)
+        let mut solve_error = None;
+        let mut solved = false;
         while tries < prm.lm_tries {
             tries += 1;
             // a loop is a small part of the residual next to the whole map: the pose-graph stage
@@ -1237,12 +1301,21 @@ impl Problem {
             } else {
                 prm.cg_tol.min(prm.loop_cg_tol)
             };
-            let (dx, it) = match (&coupling, far.is_empty()) {
-                (None, true) => (h.solve(lambda)?, 0),
-                (Some(c), _) => c.solve(&h, lambda, cg_tol, prm.cg_max, &far)?,
+            let solution = match (&coupling, far.is_empty()) {
+                (None, true) => h.solve(lambda).map(|dx| (dx, 0)),
+                (Some(c), _) => c.solve(&h, lambda, cg_tol, prm.cg_max, &far),
                 (None, false) => PlaneCoupling::new(Vec::new(), Vec::new())
-                    .solve(&h, lambda, cg_tol, prm.cg_max, &far)?,
+                    .solve(&h, lambda, cg_tol, prm.cg_max, &far),
             };
+            let (dx, it) = match solution {
+                Ok(s) => s,
+                Err(e) => {
+                    solve_error = Some(e);
+                    lambda *= 10.0;
+                    continue;
+                }
+            };
+            solved = true;
             cg_iters += it;
             let cand: Vec<State> = self
                 .states
@@ -1254,7 +1327,19 @@ impl Problem {
                     n
                 })
                 .collect();
-            c1 = self.cost(&cand, None, prm, &pl, &wts, cc, rc, &rels, stage.odometry);
+            c1 = self.cost(
+                &cand,
+                None,
+                prm,
+                &pl,
+                &wts,
+                cc,
+                rc,
+                &rels,
+                stage.odometry,
+                &centers,
+                &pre,
+            );
             if c1.is_finite() && c1 <= c0 {
                 self.states = cand;
                 accepted = Some(dx);
@@ -1263,9 +1348,13 @@ impl Problem {
             }
             lambda *= 10.0;
         }
+        if !solved && let Some(e) = solve_error {
+            return Err(e);
+        }
         if accepted.is_none() {
             self.lambda = lambda;
         }
+        let taken = accepted.is_some();
         let dx = accepted.unwrap_or_else(|| vec![V15::zeros(); k]);
         let (mut mr, mut mt, mut at) = (0.0f64, 0.0f64, 0usize);
         for (j, d) in dx.iter().enumerate() {
@@ -1292,6 +1381,7 @@ impl Problem {
             cost1: c1,
             lambda,
             tries,
+            accepted: taken,
             ..Default::default()
         })
     }
@@ -1387,8 +1477,10 @@ impl Problem {
             };
             let before = st.odometry.then(|| self.states.clone());
             for it in 0..max_it {
+                // (converged on a step taken: a rejected one is no step, the damping goes up)
                 if it >= st.iters
                     && let Some(p) = hist.last()
+                    && p.accepted
                     && p.step_mm < prm.conv_mm
                     && p.step_rot_deg < prm.conv_deg
                 {
@@ -1432,8 +1524,12 @@ impl Problem {
                     s.v = s.r * o.r.transpose() * o.v;
                 }
             }
-            if prm.loop_reg.remeasure && !st.odometry && si != last && !self.loops.is_empty() {
-                self.remeasure_loops(&prm.loop_reg, prm.rmax, &log);
+            if prm.loop_reg.remeasure && !st.odometry && si != last {
+                if !self.loops.is_empty() {
+                    self.remeasure_loops(&prm.loop_reg, prm.rmax, &log);
+                }
+                // (searched again also when none was found before, nor a loop picked: the
+                // trajectory may have come nearer)
                 if prm.revisits.enabled {
                     self.remeasure_revisits(&prm.revisits, &log);
                 }
