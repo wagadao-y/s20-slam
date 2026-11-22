@@ -1208,8 +1208,13 @@ impl App {
                     }
                 }
                 Err(e) => {
-                    if let Some(c) = self.current {
-                        self.steps.insert(c, StepState::Failed);
+                    match self.current {
+                        Some(c) => {
+                            self.steps.insert(c, StepState::Failed);
+                        }
+                        // failed before any step began (the work folder taken by another run):
+                        // the steps as they are on disk, not the run's pending ones
+                        None => self.refresh_steps(),
                     }
                     let e = self.path_mask().apply(&format!("{e:#}"));
                     self.s.show_log = true;
@@ -1401,8 +1406,9 @@ impl App {
     fn load_work_settings(&mut self) {
         self.work_settings_saved = None;
         self.work_settings_failed = None;
-        // (a preset asked for in the work before is not applied to this one)
+        // (a preset or a run asked for in the work before is not applied to this one)
         self.confirm_preset = None;
+        self.confirm_run = None;
         let work = PathBuf::from(self.s.work.trim());
         if self.s.work.trim().is_empty() {
             return;
@@ -1435,6 +1441,15 @@ impl App {
     /// Saves the processing settings in the open work folder when they changed.
     fn save_work_settings(&mut self) {
         let now = self.s.work_settings();
+        // (a failure is held back only while the settings stay as they were: changed and back,
+        // they are tried again)
+        if self
+            .work_settings_failed
+            .as_ref()
+            .is_some_and(|f| *f != now)
+        {
+            self.work_settings_failed = None;
+        }
         if self.work_settings_saved.as_ref() == Some(&now)
             || self.work_settings_failed.as_ref() == Some(&now)
         {
@@ -2347,6 +2362,14 @@ impl App {
             );
             return;
         }
+        // (not while a run of another window or the CLI processes the work folder)
+        let _lock = match cfg.lock() {
+            Ok(l) => l,
+            Err(e) => {
+                self.notify(Level::Warn, format!("{e:#}"));
+                return;
+            }
+        };
         let mut c = cfg.clone();
         match c.rename_session(k, name) {
             Ok(()) => {
@@ -2518,6 +2541,14 @@ impl App {
         cfg: &RunConfig,
         v: Vec<s20_pipeline::SessionCfg>,
     ) {
+        // (not while a run of another window or the CLI processes the work folder)
+        let _lock = match cfg.lock() {
+            Ok(l) => l,
+            Err(e) => {
+                self.notify(Level::Warn, format!("{e:#}"));
+                return;
+            }
+        };
         if let Some(first) = cfg.sessions.first() {
             Self::name_first(&mut self.edits, &first.name);
         }
