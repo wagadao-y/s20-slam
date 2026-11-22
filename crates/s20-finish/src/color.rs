@@ -245,6 +245,21 @@ fn decode(data: &[u8]) -> Result<(Vec<u8>, usize)> {
     Ok((px, w))
 }
 
+/// [`decode`] of a photo of camera `cam`: its size the calibration's (the projection's bounds are
+/// the calibration's, the pixels read by the photo's rows: another size reads other pixels, or
+/// past the end).
+fn decode_as(data: &[u8], cam: &s20_io::calib::FisheyeIntrinsics) -> Result<(Vec<u8>, usize)> {
+    let (px, w) = decode(data)?;
+    let h = px.len() / (3 * w.max(1));
+    ensure!(
+        (w, h) == (cam.width as usize, cam.height as usize),
+        "the photo is {w} x {h} px, the calibration {} x {}",
+        cam.width,
+        cam.height
+    );
+    Ok((px, w))
+}
+
 /// Pixel (u, v) and the angle off the optical axis of a camera-frame point (polynomial fisheye).
 fn project(c: &FisheyeIntrinsics, x: V) -> (f64, f64, f64) {
     let rho = x.x.hypot(x.y);
@@ -366,7 +381,7 @@ impl Lens {
     }
     /// (without branches, so that the compiler makes it vector instructions)
     #[inline(always)]
-    #[allow(clippy::needless_range_loop)] // `l` indexes the lanes of `d` and `out` together (vectorised)
+    #[allow(clippy::needless_range_loop)] // `l` indexes the lanes of `d` and `out` together (vectorized)
     fn lanes(&self, d: &[[f32; LANES]; 3], out: &mut Lanes) {
         use std::f32::consts::{FRAC_PI_2, PI};
         let (r, k) = (&self.r, &self.k);
@@ -747,8 +762,11 @@ impl Scene<'_> {
         } else {
             self.images.join(img_path)
         };
-        let (img, iw) = decode(&s20_io::dataset::read_image(&img_path)?)
-            .with_context(|| format!("decode {}", img_path.display()))?;
+        let (img, iw) = decode_as(
+            &s20_io::dataset::read_image(&img_path)?,
+            if pose.left { &self.left } else { &self.right },
+        )
+        .with_context(|| format!("decode {}", img_path.display()))?;
         let px = |x: usize, y: usize| {
             let o = 3 * (y * iw + x);
             [img[o] as f32, img[o + 1] as f32, img[o + 2] as f32]
@@ -843,8 +861,11 @@ impl Scene<'_> {
         } else {
             self.images.join(img_path)
         };
-        let (img, iw) = decode(&s20_io::dataset::read_image(&img_path)?)
-            .with_context(|| format!("decode {}", img_path.display()))?;
+        let (img, iw) = decode_as(
+            &s20_io::dataset::read_image(&img_path)?,
+            if pose.left { &self.left } else { &self.right },
+        )
+        .with_context(|| format!("decode {}", img_path.display()))?;
         lap(3, &mut t);
         let shot = crate::gpu_color::Shot {
             cam: &zc,
@@ -1295,6 +1316,10 @@ fn solve_gains(cols: GainColumns, images: usize) -> Vec<[f32; 3]> {
         ys,
         cell_start,
     } = cols;
+    // (no cell to compare the images in: no gain, not 0 / 0)
+    if ws.is_empty() {
+        return vec![[1.; 3]; images];
+    }
     let nc = cell_start.len() - 1;
     assert!(
         cs.len() < u32::MAX as usize,
