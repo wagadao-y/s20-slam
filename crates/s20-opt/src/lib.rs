@@ -279,7 +279,7 @@ impl Default for RtkParams {
 pub struct GnssSetup {
     /// fixes inside the trajectory kept as factors
     pub used: usize,
-    /// rms horizontal residual after the initial alignment (m)
+    /// rms residual (3D: horizontal and vertical) after the initial alignment (m)
     pub rms: f64,
     /// segments removed by the false-fix check
     pub rejected: Vec<gnss_check::Rejected>,
@@ -1455,6 +1455,10 @@ impl Problem {
             push(&mut out, self.kt[k], &s.r, &s.p);
             if let Some(Some(pi)) = pre.get(k) {
                 let mut t = (self.kt[k] / dt).floor() * dt + dt;
+                // (rounded onto the knot's own time: the next, not a second row at that time)
+                if t <= self.kt[k] + 1e-6 {
+                    t += dt;
+                }
                 while t < self.kt[k + 1] - 1e-6 {
                     let (r, p) = s.pose_at(pi, t - self.kt[k]);
                     push(&mut out, t, &r, &p);

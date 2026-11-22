@@ -340,6 +340,12 @@ pub fn export(input: &Input, job: &Job) -> Result<serde_json::Value> {
         (cal.right.width, cal.right.height),
     ];
     let cams = [Fisheye::from(&cal.left), Fisheye::from(&cal.right)];
+    // (the camera's rays go to 85 degrees: a fit beyond would take the pixels past it for 85)
+    anyhow::ensure!(
+        input.max_angle > 0. && input.max_angle <= 85.,
+        "max_angle {} degrees: above 0, at most 85",
+        input.max_angle
+    );
     let max_angle = input.max_angle.to_radians();
     let sparse = input.out.join("sparse").join("0");
     std::fs::create_dir_all(&sparse)?;

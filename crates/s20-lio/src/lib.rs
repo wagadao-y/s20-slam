@@ -593,6 +593,11 @@ pub fn run(
             continue;
         };
         // --- IMU propagation t_state -> te
+        if te < ts0 {
+            bail!(
+                "scan {i}: it ends at {te:.6} s, before the state's {ts0:.6} s (the lidar's clock went back)"
+            );
+        }
         let k0 = imu.t.partition_point(|&s| s <= ts0);
         let k1 = imu.t.partition_point(|&s| s <= te);
         let kl = k1.min(nk - 1);
