@@ -36,18 +36,22 @@ pub fn cut_raw(raw: &Path, out: &Path, from: f64, to: f64, job: &Job) -> Result<
     // (a time past the recording's end, even infinite, is its end)
     let at = |s: f64| t0.saturating_add((s * 1e9) as u64);
     let (lo, hi) = (at(from), at(to));
-    // (checked before writing: a span outside the recording leaves the folder as it was)
-    ensure!(
-        bag.messages.iter().any(|m| (lo..=hi).contains(&m.time_ns)),
-        "no messages from {from} to {to} s"
-    );
+    // (checked before writing: a span outside the recording, or without the scans and IMU
+    // samples a processing needs, leaves the folder as it was)
+    for topic in ["/livox/lidar", "/livox/imu"] {
+        ensure!(
+            bag.topic_messages(topic)
+                .iter()
+                .any(|m| (lo..=hi).contains(&m.time_ns)),
+            "no {topic} messages from {from} to {to} s"
+        );
+    }
     fs::create_dir_all(out).with_context(|| format!("create {}", out.display()))?;
-    let name = src.file_name().context("bag without a name")?;
-    let bag_out = out.join(name);
-    let mut w = BagWriter::create(&bag_out)?;
-    let total = bag.messages.len() as u64;
     let (mut messages, mut bytes, mut span) = (0usize, 0u64, [f64::INFINITY, f64::NEG_INFINITY]);
     let written = (|| -> Result<()> {
+        let name = src.file_name().context("bag without a name")?;
+        let mut w = BagWriter::create(&out.join(name))?;
+        let total = bag.messages.len() as u64;
         for (i, m) in bag.messages.iter().enumerate() {
             if i % 10_000 == 0 {
                 job.check()?;
@@ -62,34 +66,45 @@ pub fn cut_raw(raw: &Path, out: &Path, from: f64, to: f64, job: &Job) -> Result<
             messages += 1;
             bytes += m.len as u64;
         }
-        w.finish()
-    })();
-    // (canceled or failed: the partial bag removed, so the folder can be cut into again)
-    if let Err(e) = written {
-        let _ = fs::remove_file(&bag_out);
-        return Err(e);
-    }
-    // the other files, whole
-    for e in fs::read_dir(raw)? {
-        let p = e?.path();
-        if p == src {
-            continue;
-        }
-        if p.is_file() {
-            fs::copy(&p, out.join(p.file_name().context("file without a name")?))
-                .with_context(|| format!("copy {}", p.display()))?;
-        }
-    }
-    let info = raw.join("info");
-    if info.is_dir() {
-        fs::create_dir_all(out.join("info"))?;
-        for e in fs::read_dir(&info)? {
+        w.finish()?;
+        job.check()?;
+        // the other files, whole
+        for e in fs::read_dir(raw)? {
             let p = e?.path();
+            if p == src {
+                continue;
+            }
             if p.is_file() {
-                fs::copy(&p, out.join("info").join(p.file_name().context("no name")?))
+                fs::copy(&p, out.join(p.file_name().context("file without a name")?))
                     .with_context(|| format!("copy {}", p.display()))?;
             }
         }
+        let info = raw.join("info");
+        if info.is_dir() {
+            fs::create_dir_all(out.join("info"))?;
+            for e in fs::read_dir(&info)? {
+                let p = e?.path();
+                if p.is_file() {
+                    fs::copy(&p, out.join("info").join(p.file_name().context("no name")?))
+                        .with_context(|| format!("copy {}", p.display()))?;
+                }
+            }
+        }
+        job.check()
+    })();
+    // (canceled or failed: what was written removed, the folder empty as it was, so it can be cut
+    // into again)
+    if let Err(e) = written {
+        if let Ok(entries) = fs::read_dir(out) {
+            for p in entries.flatten().map(|e| e.path()) {
+                let _ = if p.is_dir() {
+                    fs::remove_dir_all(&p)
+                } else {
+                    fs::remove_file(&p)
+                };
+            }
+        }
+        return Err(e);
     }
     Ok(CutStats {
         messages,

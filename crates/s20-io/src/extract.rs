@@ -153,12 +153,6 @@ pub fn extract(raw: &Path, out: &Path, job: &crate::job::Job) -> Result<ExtractS
         bag.messages.len()
     ));
     fs::create_dir_all(out)?;
-    // (an earlier extraction's mark gone first: stopped or failed, the folder does not pass for
-    // extracted with the indices half new)
-    match fs::remove_file(out.join(Source::FILE)) {
-        Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.into()),
-        _ => {}
-    }
     job.check()?;
 
     // --- lidar
@@ -181,6 +175,13 @@ pub fn extract(raw: &Path, out: &Path, job: &crate::job::Job) -> Result<ExtractS
             n as f64,
         ]);
         total += n;
+    }
+    // (an earlier extraction's mark gone before its first index is replaced: stopped or failed
+    // from here, the folder does not pass for extracted with the indices half new)
+    job.check()?;
+    match fs::remove_file(out.join(Source::FILE)) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.into()),
+        _ => {}
     }
     npy::write_f64(&out.join("lidar_index.npy"), &scans, 4)?;
     log(&format!("lidar: {} scans, {} points", lid.len(), total));
