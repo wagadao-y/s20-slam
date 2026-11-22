@@ -1357,6 +1357,12 @@ impl WorkSettings {
     }
 }
 
+/// The file a run locks in its work folder ([`RunConfig::lock`]).
+const LOCK_FILE: &str = ".s20-lock";
+
+/// A work folder taken by a run ([`RunConfig::lock`]): let go when dropped.
+pub struct WorkLock(#[allow(dead_code)] std::fs::File);
+
 /// A session of a run: one raw S20 folder.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct SessionCfg {
@@ -2233,7 +2239,33 @@ impl RunConfig {
     /// until the step finishes, so a run that is canceled or fails is not taken for a finished one
     /// even when it left files behind.
     pub fn run_step(&self, step: Step, job: &Job) -> Result<()> {
+        let _lock = self.lock()?;
         self.run_step_for(step, false, job)
+    }
+
+    /// Takes the work folder for this run: refused while another run holds it (the GUI and the
+    /// CLI, or two CLIs, on one folder would overwrite each other's temporary files). Held until
+    /// the lock is dropped; the system lets it go when the process ends.
+    pub fn lock(&self) -> Result<WorkLock> {
+        std::fs::create_dir_all(&self.work)
+            .with_context(|| format!("create {}", self.work.display()))?;
+        let path = self.work.join(LOCK_FILE);
+        let f = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(false)
+            .open(&path)
+            .with_context(|| format!("open {}", path.display()))?;
+        match f.try_lock() {
+            Ok(()) => Ok(WorkLock(f)),
+            Err(std::fs::TryLockError::WouldBlock) => bail!(
+                "{} is being processed by another run (the GUI or the CLI): wait for it to end",
+                self.work.display()
+            ),
+            Err(std::fs::TryLockError::Error(e)) => {
+                Err(anyhow::Error::from(e).context(format!("lock {}", path.display())))
+            }
+        }
     }
 
     /// The units (sessions, or the one of a step of all) a run of `step` runs; `missing`: only
@@ -2505,12 +2537,13 @@ impl RunConfig {
 
     /// Runs the steps `first..=last` in order.
     pub fn run_range(&self, first: Step, last: Step, job: &Job) -> Result<()> {
+        let _lock = self.lock()?;
         for step in Step::ALL.into_iter().filter(|&s| {
             (first..=last).contains(&s)
                 && (s != Step::Refine || self.refine)
                 && (s != Step::Images || self.images)
         }) {
-            self.run_step(step, job)?;
+            self.run_step_for(step, false, job)?;
         }
         job.log(&format!("done: {}", self.output().display()));
         Ok(())
@@ -2524,6 +2557,7 @@ impl RunConfig {
 
     /// As [`RunConfig::run_from`], stopping after `last`.
     pub fn run_until(&self, first: Step, last: Step, job: &Job) -> Result<()> {
+        let _lock = self.lock()?;
         for step in Step::ALL.into_iter().filter(|&s| s <= last) {
             // (a refinement without the tracks does not serve the images: again when they are
             // asked for)
@@ -2780,6 +2814,23 @@ mod tests {
         assert_eq!(c.revisions().len(), 1);
         // ids never leave the folder
         assert!(c.delete_revision("../s20_edits").is_err());
+        std::fs::remove_dir_all(&work).unwrap();
+    }
+
+    #[test]
+    fn a_work_folder_takes_one_run_at_a_time() {
+        let work = std::env::temp_dir().join(format!("s20_lock_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&work);
+        let c = RunConfig::new(PathBuf::from("raw"), work.clone());
+        let held = c.lock().unwrap();
+        let e = c.lock().err().expect("a second run refused");
+        assert!(format!("{e:#}").contains("another run"), "{e:#}");
+        assert!(
+            c.run_step(Step::Opt, &Job::new(|_, _, _| {}, |_| {}))
+                .is_err()
+        );
+        drop(held);
+        drop(c.lock().unwrap());
         std::fs::remove_dir_all(&work).unwrap();
     }
 

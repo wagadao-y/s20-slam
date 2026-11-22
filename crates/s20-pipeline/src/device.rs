@@ -95,6 +95,8 @@ pub fn calibrate(works: &[RunConfig], job: &Job) -> Result<(String, serde_json::
     let cal = s20_io::calib::load(&maker)?;
     let mut recordings = Vec::new();
     for (i, cfg) in works.iter().enumerate() {
+        // (not while a run processes the work: it writes its image poses there)
+        let _lock = cfg.lock()?;
         if let Some(why) = unusable(cfg) {
             anyhow::bail!("{}: {why}", cfg.work.display());
         }

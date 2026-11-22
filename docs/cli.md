@@ -12,7 +12,7 @@ s20 run <raw folder> <work folder> [--outdoor | --params file.json] [--no_rtk] [
 s20 run <raw 1>,<raw 2>,... <work folder> --outdoor   # multiple sessions
 ```
 
-The steps are extract → lio → opt → cloud → export → refine → colorize.
+The steps are extract → lio → opt → cloud → export → refine → colorize. A work folder takes one run at a time (refused while the GUI or another `s20 run` processes it).
 
 | Option | |
 |---|---|

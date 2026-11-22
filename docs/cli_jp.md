@@ -12,7 +12,7 @@ s20 run <生データフォルダー> <作業フォルダー> [--outdoor | --par
 s20 run <生データ1>,<生データ2>,... <作業フォルダー> --outdoor   # 複数セッション
 ```
 
-工程は extract → lio → opt → cloud → export → refine → colorize の順です。
+工程は extract → lio → opt → cloud → export → refine → colorize の順です。1 つの作業フォルダーは 1 つの処理だけが使えます（GUI や別の `s20 run` が処理している間は断ります）。
 
 | オプション | |
 |---|---|
