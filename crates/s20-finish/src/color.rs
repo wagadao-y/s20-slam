@@ -118,8 +118,8 @@ pub struct ColorParams {
     pub graze: bool,
     /// The points are colored in squares in xy, split in four while the points of one (with
     /// its margin) would take more than this fraction of the memory available (0: all at once);
-    /// the result is the same. Fewer squares decode each image fewer times (77 M points: in 27
-    /// squares a fifth longer than all at once, in half the memory).
+    /// the result is the same. Fewer squares decode each image fewer times: more squares are a
+    /// little longer, in much less memory.
     pub tile_memory: f64,
 }
 impl Default for ColorParams {

@@ -136,25 +136,30 @@ struct Tile {
     obs: Rect,
 }
 
-/// The folder of a run's temporary files: made new for it inside `dir` (`<dir>/run-<process>-<n>`,
-/// created exclusively), removed when the run ends (also on an error), then `dir` too when nothing
-/// else is left in it. Only what the run made is removed: files of the user's in `dir` stay.
+/// The folder of a run's temporary files: made new for it beside `dir`'s place, named after it
+/// (`<dir>-<process>-<n>`, created exclusively), removed when the run ends (also on an error).
+/// Only what the run made is removed: a folder of the user's named `dir`, and another run's, stay.
 pub(crate) struct TempDir {
     dir: PathBuf,
-    parent: PathBuf,
 }
 impl TempDir {
     pub(crate) fn create(dir: &Path) -> Result<Self> {
-        std::fs::create_dir_all(dir).with_context(|| format!("create {}", dir.display()))?;
+        let name = dir
+            .file_name()
+            .context("a temporary folder without a name")?;
+        let parent = dir
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or(Path::new("."));
+        std::fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
         for n in 0u32.. {
-            let mine = dir.join(format!("run-{}-{n}", std::process::id()));
+            let mine = parent.join(format!(
+                "{}-{}-{n}",
+                name.to_string_lossy(),
+                std::process::id()
+            ));
             match std::fs::create_dir(&mine) {
-                Ok(()) => {
-                    return Ok(Self {
-                        dir: mine,
-                        parent: dir.to_path_buf(),
-                    });
-                }
+                Ok(()) => return Ok(Self { dir: mine }),
                 Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
                 Err(e) => {
                     return Err(
@@ -172,8 +177,6 @@ impl TempDir {
 impl Drop for TempDir {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.dir);
-        // (only when empty)
-        let _ = std::fs::remove_dir(&self.parent);
     }
 }
 
@@ -497,6 +500,8 @@ pub fn finish_tiled(
         ));
         let points: Vec<[f32; 3]> = held_res.iter().map(|r| r.xyz).collect();
         let passing = transient::find(data, tr, lever, p, &points, &job.part(0.8, 1.0));
+        // (canceled on the GPU, nothing passes: stopped here, the points not emitted)
+        job.check()?;
         let mut taken = 0;
         let (mut o, mut r) = (Vec::new(), Vec::new());
         for ((ob, res), t) in held_obs.iter().zip(&held_res).zip(passing) {
@@ -549,12 +554,14 @@ mod tests {
     fn a_run_removes_only_its_own_temporary_files() {
         let dir = std::env::temp_dir().join(format!("s20-tempdir-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        // nothing else there: the folder goes at the end
+        // a run's own folder beside, gone at the end
         let t = TempDir::create(&dir).unwrap();
+        assert!(!dir.exists() && t.path().exists());
         std::fs::write(t.path().join("3.obs"), "x").unwrap();
+        let own = t.path().to_path_buf();
         drop(t);
-        assert!(!dir.exists());
-        // a file of the user's of a temporary file's shape stays, with the folder
+        assert!(!own.exists());
+        // a folder of the user's of that name stays as it is, and two runs have their own
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("1.jpg"), "photo").unwrap();
         let (a, b) = (

@@ -43,8 +43,11 @@ impl Default for CheckParams {
 }
 
 /// Consecutive fixes further apart than this (s), or than 1.5 times the fixes' own interval
-/// when longer (PPK at 1 Hz), are not compared.
+/// when longer (PPK at 1 Hz) up to [`MAX_CONTINUOUS`], are not compared.
 const CONTINUOUS: f64 = 0.5;
+/// The longest step between fixes taken for continuous (s): a solution at 1 Hz, the slowest
+/// one used; longer intervals (fixes mostly apart) are gaps, not the solution's rate.
+const MAX_CONTINUOUS: f64 = 1.5;
 /// Steps within this time of an unhealthy LIO knot are attributed to the LIO (s).
 const LIO_WINDOW: f64 = 0.5;
 /// The longer side of a step is kept when it is this many times longer.
@@ -86,7 +89,7 @@ pub fn screen(t: &[f64], o: &[V3], lio_bad: &[f64], p: &CheckParams) -> (Vec<boo
     dts.sort_by(f64::total_cmp);
     let continuous = dts
         .get(dts.len() / 10)
-        .map_or(CONTINUOUS, |&m| CONTINUOUS.max(1.5 * m));
+        .map_or(CONTINUOUS, |&m| CONTINUOUS.max(1.5 * m).min(MAX_CONTINUOUS));
     // segments [start, end) and the edges between them
     let mut segs = Vec::new();
     let mut edges = Vec::new();
@@ -240,6 +243,11 @@ mod tests {
             .into_iter()
             .chain((1..9).map(|k| 1.0 + 10.0 * k as f64))
             .collect();
+        let o: Vec<V3> = t.iter().map(|&x| V3::new(0.02 * x, 0., 0.)).collect();
+        let (keep, rej) = screen(&t, &o, &[], &CheckParams::default());
+        assert!(keep.iter().all(|k| *k) && rej.is_empty());
+        // all apart (no two fixes a second apart): gaps all the same
+        let t: Vec<f64> = (0..10).map(|k| 10.0 * k as f64).collect();
         let o: Vec<V3> = t.iter().map(|&x| V3::new(0.02 * x, 0., 0.)).collect();
         let (keep, rej) = screen(&t, &o, &[], &CheckParams::default());
         assert!(keep.iter().all(|k| *k) && rej.is_empty());

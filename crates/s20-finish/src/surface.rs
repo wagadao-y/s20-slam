@@ -953,6 +953,8 @@ pub fn prepare(
     let free = (p.free_ratio > 0.).then(|| {
         crate::freespace::FreeSpace::new(raw, rays, &crate::freespace::Options::of(p), job)
     });
+    // (canceled on the GPU, the free space comes back empty: stopped here, not gone on with)
+    job.check()?;
     if let (Some(f), Ok(dir)) = (&free, std::env::var("S20_FREE_DUMP")) {
         f.dump(
             raw,
@@ -979,6 +981,7 @@ pub fn prepare(
     let fine = (p.free_fine_voxel > 0. && p.free_fine_ratio > 0.).then(|| {
         crate::freespace::FreeSpace::new(raw, rays, &crate::freespace::Options::fine(p), job)
     });
+    job.check()?;
     let is_free = |o: &Observation| is_free(&free, &fine, o, p);
     timed_stage(&mut timings, &mut clock, "free_space_fine", job);
     free_times(&mut timings, "free_space_fine", &fine);
@@ -1422,7 +1425,8 @@ mod tests {
 
     /// Without a second plane at an edge, the corner rounds a little: one face's 8 cm plane
     /// rejects the other face's points near the line, and the 4 / 2 cm retries lean between the
-    /// faces (3.9% of the points within 10 cm beyond 2 mm, at most 6.4 mm).
+    /// faces: a few percent of the points near the line, by a few millimeters at most (the test's
+    /// bounds).
     #[test]
     fn corner_rounds_by_a_few_millimeters_at_most() {
         for anchor_grid in ANCHORS {

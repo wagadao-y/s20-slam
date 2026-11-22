@@ -722,7 +722,12 @@ impl Problem<'_> {
         let s = self.s;
         let mut c = 0.;
         for sg in &t.sightings {
-            let (r, _) = sg.residual(&self.pose(rot, shift, sg.image), x);
+            let (r, v) = sg.residual(&self.pose(rot, shift, sg.image), x);
+            // (a point moved behind a camera that sees it: its residual is small, even zero
+            // straight behind, so a trial taking it there is not taken)
+            if v.dot(&sg.bearing) <= 0. {
+                return f64::INFINITY;
+            }
             c += soft_l1(r.norm_squared() / (s.pixel * s.pixel)).0;
         }
         if t.planar() {
