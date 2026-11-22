@@ -653,14 +653,14 @@ fn refresh_pdal_pipeline(data: &Path, cloud: &Path, frame: Option<CoordinateFram
     }
 }
 
-/// The camera poses coloring reads, written by [`export`] beside the trajectory (the maker's are
+/// The camera poses coloring reads, written by [`export`] beside the trajectory (PointClouds Studio's are
 /// in the `images/` folder, when it is asked for).
 pub const IMG_POSE_FILE: &str = "ImgPose.txt";
 
 /// Trajectory files in PointClouds Studio's formats with the Potree octree of `trajectory.las` (and
 /// `coordinate_frame.json` unless in the SLAM frame) into `out`; beside `traj` the dense
 /// trajectory ([`TUM_FILE`]) and, when a calibration is given, the camera poses
-/// ([`IMG_POSE_FILE`]), with the maker's `images/` folder in `out` if `images` (else one of an
+/// ([`IMG_POSE_FILE`]), with PointClouds Studio's `images/` folder in `out` if `images` (else one of an
 /// earlier export goes, as it would not follow the trajectory).
 pub fn export(data: &Path, traj: &Path, out: &Path, calib: Option<&Path>, job: &Job) -> Result<()> {
     let l = s20_io::dataset::LidarData::open(data)?;
@@ -719,7 +719,7 @@ pub fn export(data: &Path, traj: &Path, out: &Path, calib: Option<&Path>, job: &
     Ok(())
 }
 
-/// The photos with their poses in output folder `out`: the maker's `images/` (the photos, their
+/// The photos with their poses in output folder `out`: PointClouds Studio's `images/` (the photos, their
 /// poses as `ImgPose.txt` and `xyzopk.txt`, the cameras as `Left.opt` and `Right.opt`) and a COLMAP
 /// model beside it (`sparse/0`, `masks/`, `gauge.txt`; its images those of `images/`), so that the
 /// output folder opens as a dataset in Gaussian Splatting tools. `imgpose` and `calib`: the image
@@ -1188,7 +1188,7 @@ pub enum Step {
     /// every image's pose refined against the cloud (and the cameras without a device calibration)
     Refine,
     Colorize,
-    /// the photos with their poses as the maker's (`images/`) and as a COLMAP model beside them
+    /// the photos with their poses as PointClouds Studio's (`images/`) and as a COLMAP model beside them
     Images,
 }
 
@@ -1441,7 +1441,7 @@ pub struct RunConfig {
     pub color: bool,
     /// point clouds written LASzip-compressed (`.laz`) rather than as `.las`
     pub laz: bool,
-    /// the last step writes the maker's `images/` folder (the photos with their poses) and a COLMAP
+    /// the last step writes PointClouds Studio's `images/` folder (the photos with their poses) and a COLMAP
     /// model beside it in the output folder ([`Step::Images`])
     pub images: bool,
     /// every image's pose is refined against the cloud ([`Step::Refine`]) and the coloring uses
@@ -2619,12 +2619,13 @@ impl RunConfig {
     /// Whether a run from `first` runs `step` only for the sessions without a current result:
     /// before the first step (unless `outdated`: done but no longer current), and from it on for a
     /// step of each session (a session added: the others' extraction and LIO stay), unless the
-    /// first was asked for again (every session's done, or [`RunConfig::redo_all`]).
+    /// first was asked for again with every session's done, or with [`RunConfig::redo_all`] (then
+    /// every session's of each step from it on, not left to the files' times).
     fn only_missing(&self, step: Step, first: Step, outdated: bool) -> bool {
         if step < first {
             !outdated
         } else {
-            step.per_session() && !(step == first && (self.redo_all || self.done(step)))
+            step.per_session() && !self.redo_all && !(step == first && self.done(step))
         }
     }
 
@@ -2922,6 +2923,8 @@ mod tests {
         let mut redo = c.clone();
         redo.redo_all = true;
         assert!(!redo.only_missing(Step::Lio, Step::Lio, false));
+        // --redo from the extraction: LIO of every session too, whatever the files' times
+        assert!(!redo.only_missing(Step::Lio, Step::Extract, false));
         // the optimization (of all sessions) runs whole
         assert!(!c.only_missing(Step::Opt, Step::Lio, false));
         // every session's done: asked for again, every session's

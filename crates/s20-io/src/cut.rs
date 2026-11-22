@@ -47,10 +47,23 @@ pub fn cut_raw(raw: &Path, out: &Path, from: f64, to: f64, job: &Job) -> Result<
         );
     }
     fs::create_dir_all(out).with_context(|| format!("create {}", out.display()))?;
+    // written into a folder of this run's own inside `out` (made new), moved up once complete:
+    // canceled or failed, only that folder goes, nothing another run or the user put in `out`
+    let mut n = 0u32;
+    let stage = loop {
+        let d = out.join(format!(".cut-{}-{n}", std::process::id()));
+        match fs::create_dir(&d) {
+            Ok(()) => break d,
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => n += 1,
+            Err(e) => {
+                return Err(anyhow::Error::from(e).context(format!("create {}", d.display())));
+            }
+        }
+    };
     let (mut messages, mut bytes, mut span) = (0usize, 0u64, [f64::INFINITY, f64::NEG_INFINITY]);
     let written = (|| -> Result<()> {
         let name = src.file_name().context("bag without a name")?;
-        let mut w = BagWriter::create(&out.join(name))?;
+        let mut w = BagWriter::create(&stage.join(name))?;
         let total = bag.messages.len() as u64;
         for (i, m) in bag.messages.iter().enumerate() {
             if i % 10_000 == 0 {
@@ -75,35 +88,42 @@ pub fn cut_raw(raw: &Path, out: &Path, from: f64, to: f64, job: &Job) -> Result<
                 continue;
             }
             if p.is_file() {
-                fs::copy(&p, out.join(p.file_name().context("file without a name")?))
-                    .with_context(|| format!("copy {}", p.display()))?;
+                fs::copy(
+                    &p,
+                    stage.join(p.file_name().context("file without a name")?),
+                )
+                .with_context(|| format!("copy {}", p.display()))?;
             }
         }
         let info = raw.join("info");
         if info.is_dir() {
-            fs::create_dir_all(out.join("info"))?;
+            fs::create_dir_all(stage.join("info"))?;
             for e in fs::read_dir(&info)? {
                 let p = e?.path();
                 if p.is_file() {
-                    fs::copy(&p, out.join("info").join(p.file_name().context("no name")?))
-                        .with_context(|| format!("copy {}", p.display()))?;
+                    fs::copy(
+                        &p,
+                        stage.join("info").join(p.file_name().context("no name")?),
+                    )
+                    .with_context(|| format!("copy {}", p.display()))?;
                 }
             }
         }
-        job.check()
-    })();
-    // (canceled or failed: what was written removed, the folder empty as it was, so it can be cut
-    // into again)
-    if let Err(e) = written {
-        if let Ok(entries) = fs::read_dir(out) {
-            for p in entries.flatten().map(|e| e.path()) {
-                let _ = if p.is_dir() {
-                    fs::remove_dir_all(&p)
-                } else {
-                    fs::remove_file(&p)
-                };
-            }
+        job.check()?;
+        // (still empty but for this run's folder: else another run or the user wrote into it)
+        let others = fs::read_dir(out)?
+            .filter_map(|e| e.ok())
+            .any(|e| e.path() != stage);
+        ensure!(!others, "{} is no longer empty", out.display());
+        for e in fs::read_dir(&stage)? {
+            let p = e?.path();
+            fs::rename(&p, out.join(p.file_name().context("no name")?))
+                .with_context(|| format!("move {}", p.display()))?;
         }
+        fs::remove_dir(&stage).with_context(|| format!("remove {}", stage.display()))
+    })();
+    if let Err(e) = written {
+        let _ = fs::remove_dir_all(&stage);
         return Err(e);
     }
     Ok(CutStats {

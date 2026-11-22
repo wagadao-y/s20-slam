@@ -664,6 +664,11 @@ pub fn output_offsets(data: &Path) -> Result<Vec<f64>> {
 /// may hold spaces (the absolute path of a session's image). None without eleven numbers after a
 /// name.
 pub fn img_pose_fields(line: &str) -> Option<Vec<&str>> {
+    // (a comment after the numbers, from a '#' after a space, left out)
+    let line = line
+        .char_indices()
+        .find(|&(i, c)| c == '#' && line[..i].ends_with(char::is_whitespace))
+        .map_or(line, |(i, _)| &line[..i]);
     let mut tokens: Vec<(usize, &str)> = Vec::new();
     let mut start = None;
     for (i, c) in line.char_indices() {
@@ -754,6 +759,10 @@ mod tests {
         assert_eq!(v[0], "left/l_1.jpg");
         assert!(img_pose_fields("left/l_1.jpg 1 2 3").is_none());
         assert!(img_pose_fields(nums).is_none());
+        // a comment after the numbers, with a name of spaces
+        let line = format!("C:/My work/l_1.jpg {nums}  # refined");
+        let v = img_pose_fields(&line).unwrap();
+        assert_eq!((v[0], v.len(), v[11]), ("C:/My work/l_1.jpg", 12, "12.5"));
     }
 
     #[test]

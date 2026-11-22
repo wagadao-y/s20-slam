@@ -2172,6 +2172,14 @@ impl App {
                 ),
             );
         } else if cfg.same_recording(k, &raw) {
+            // (not while a run of another window or the CLI processes the work folder)
+            let _lock = match cfg.lock() {
+                Ok(l) => l,
+                Err(e) => {
+                    self.notify(Level::Warn, format!("{e:#}"));
+                    return;
+                }
+            };
             let mut c = cfg.clone();
             let name = c.sessions[k].name.clone();
             match c.move_raw(k, raw.clone()) {
