@@ -1326,6 +1326,8 @@ impl Problem {
     }
 
     pub fn run(&mut self, prm: &Params, job: &s20_io::job::Job) -> Result<Vec<IterStats>> {
+        // (the quality is that of the last stage)
+        anyhow::ensure!(!prm.stages.is_empty(), "opt: no stages in the parameters");
         // with loops, a pose-graph stage first spreads the loop corrections along the trajectory
         let mut stages = prm.stages.clone();
         if !self.loops.is_empty() && prm.loop_pre_iters > 0 {

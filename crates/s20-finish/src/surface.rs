@@ -353,6 +353,10 @@ impl Moments {
             }
         }
         bounds.push(keyed.len());
+        // (no observation far enough: no cell, the queries then without support)
+        if keyed.is_empty() {
+            bounds.clear();
+        }
         let cells: Vec<Cell> = bounds
             .par_windows(2)
             .map(|w| {
@@ -1373,6 +1377,20 @@ mod tests {
             dense_plane(anchor_grid);
         }
     }
+    #[test]
+    fn no_support_far_enough_does_not_panic() {
+        let raw: Vec<Observation> = (0..50)
+            .map(|i| obs([i as f32 * 0.01, 0., 1.], [0., 0., 0.]))
+            .collect();
+        // every observation nearer than the support's minimum range
+        let p = FinishParams {
+            support_min_range: 41.,
+            ..params()
+        };
+        let r = finish(&raw, &p, &Job::stderr()).unwrap();
+        assert_eq!(r.points.len(), raw.len());
+    }
+
     /// Every query fitted alone, and planes shared on a 2 cm grid.
     const ANCHORS: [f64; 2] = [0., 0.02];
     fn dense_plane(anchor_grid: f64) {

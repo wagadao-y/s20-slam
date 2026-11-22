@@ -313,6 +313,8 @@ pub fn find(
     if let Some(g) = crate::gpu::shared().filter(|_| std::env::var_os("S20_NO_GPU").is_none()) {
         match find_gpu(g, data, tr, lever, p, points, job) {
             Ok(t) => return t,
+            // canceled: not again on the CPU (the caller's next check stops the run)
+            Err(e) if s20_io::job::is_canceled(&e) => return vec![false; points.len()],
             Err(e) => job.log(&format!("transient on the GPU failed, on the CPU: {e:#}")),
         }
     }

@@ -144,6 +144,27 @@ impl Drop for TempDir {
     }
 }
 
+/// The squares of side `side` (BASE cells) that the small cells overlap, sorted. Every square a
+/// cell overlaps: with a side not a multiple of the cell, a cell's observations may lie in the
+/// square after its lower corner's.
+fn roots<'a>(cells: impl Iterator<Item = &'a [i64; 2]>, side: i64) -> Vec<[i64; 2]> {
+    let mut roots = Vec::new();
+    for c in cells {
+        let (lo, hi) = (
+            c.map(|x| (x * SMALL).div_euclid(side)),
+            c.map(|x| ((x + 1) * SMALL - 1).div_euclid(side)),
+        );
+        for i in lo[0]..=hi[0] {
+            for j in lo[1]..=hi[1] {
+                roots.push([i, j]);
+            }
+        }
+    }
+    roots.sort_unstable();
+    roots.dedup();
+    roots
+}
+
 /// The scans' observations, in scan order, chunk by chunk.
 fn for_chunks(
     data: &LidarData,
@@ -235,12 +256,7 @@ pub fn finish_tiled(
         }
         n
     };
-    let mut roots: Vec<[i64; 2]> = counts
-        .keys()
-        .map(|c| c.map(|x| (x * SMALL).div_euclid(side)))
-        .collect();
-    roots.sort_unstable();
-    roots.dedup();
+    let roots = roots(counts.keys(), side);
     let mut tiles: Vec<Tile> = Vec::new();
     let mut stack: Vec<Rect> = roots
         .iter()
@@ -409,7 +425,8 @@ pub fn finish_tiled(
             rays.len()
         ));
         lap(&mut seconds, "tiles.read");
-        let quiet = Job::new(|_, _, _| {}, |_| {});
+        // (no progress or log lines from the square's pieces, the cancellation the same)
+        let quiet = job.silent();
         let f = crate::finish_part(&obs, &rays, Some(&t.part), p, &quiet)?;
         drop((obs, rays));
         for (k, s) in &f.timings {
@@ -496,6 +513,17 @@ mod tests {
 
     /// A floor and a wall measured from a walk, finished in two halves (each from its
     /// observations and the rays crossing them), give the points of the whole.
+    #[test]
+    fn a_cell_across_squares_gives_both() {
+        // a side of 250 BASE cells: the small cell 2 (200..300) lies in the first square and the
+        // second, the cell 5 (500..600) in the third only
+        let side = 250;
+        assert_eq!(roots([[2, 0]].iter(), side), vec![[0, 0], [1, 0]]);
+        assert_eq!(roots([[5, -1]].iter(), side), vec![[2, -1]]);
+        // a multiple of the cell: the square of its lower corner
+        assert_eq!(roots([[1, 1], [0, 0]].iter(), 200), vec![[0, 0]]);
+    }
+
     #[test]
     fn two_halves_give_the_whole() {
         let mut raw = Vec::new();

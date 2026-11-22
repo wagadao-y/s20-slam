@@ -222,8 +222,15 @@ pub fn opt(
                 }),
             )?
         };
+        // (the kind only: the log is shared in issues, the origin would tell the place; it is
+        // in data/coordinate_frame.json)
+        let kind = match frame {
+            CoordinateFrame::LocalEnu { .. } => "local ENU at the GNSS origin",
+            CoordinateFrame::LocalSlam => "the SLAM frame",
+            CoordinateFrame::LegacyProjected { .. } => "legacy projected",
+        };
         job.log(&format!(
-            "GNSS coordinate frame: {frame:?} (meters; z is local up, not elevation)"
+            "GNSS coordinate frame: {kind} (meters; z is local up, not elevation)"
         ));
         let mut fixes = if ppk.is_empty() {
             s20_io::gnss::load_fixes(&g, &frame, &s20_io::gnss::Validity::default())
@@ -534,6 +541,8 @@ pub fn cloud(
             .collect();
         (total, f.input.len(), status, pts.len(), f.timings.clone())
     };
+    // (a cancellation the finishing let through, before the cloud takes the old one's place)
+    job.check()?;
     part.keep()?;
     std::fs::write(
         format!("{}.json", out.display()),

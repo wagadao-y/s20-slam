@@ -286,6 +286,10 @@ impl FreeSpace {
                     progress,
                 ) {
                     Ok(p) => Some(p),
+                    // canceled: not again on the CPU (the caller's next check stops the run)
+                    Err(e) if s20_io::job::is_canceled(&e) => {
+                        Some((vec![0; keys.len()], Default::default()))
+                    }
                     Err(e) => {
                         job.log(&format!("free space: on the CPU (GPU: {e:#})"));
                         None

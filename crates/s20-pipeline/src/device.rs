@@ -150,6 +150,8 @@ pub fn calibrate(works: &[RunConfig], job: &Job) -> Result<(String, serde_json::
     let joint = s20_visual::joint::Joint::new(recordings);
     let (cameras, mut report) =
         s20_visual::joint::compare(&joint, true, true, false, &|s: &str| job.log(s));
+    // (canceled while solving: not saved in place of the device's calibration)
+    job.check()?;
     let cams = [
         s20_visual::camera::Fisheye::from(&cal.left),
         s20_visual::camera::Fisheye::from(&cal.right),

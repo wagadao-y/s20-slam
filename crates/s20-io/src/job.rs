@@ -96,6 +96,15 @@ impl Job {
         }
     }
 
+    /// The same job without progress or log lines: canceled with this one.
+    pub fn silent(&self) -> Job {
+        Job {
+            cancel: self.cancel.clone(),
+            progress: Arc::new(|_, _, _| {}),
+            log: Arc::new(|_| {}),
+        }
+    }
+
     pub fn log(&self, s: &str) {
         (self.log)(s);
     }
