@@ -2166,7 +2166,11 @@ pub fn colorize(
     let blocks = blocks(p, n);
     // the z-buffers and the points each image sees on the GPU when there is one (S20_NO_GPU
     // set: on the CPU)
-    let gpu = match crate::gpu::shared().filter(|_| std::env::var_os("S20_NO_GPU").is_none()) {
+    let gpu = match std::env::var_os("S20_NO_GPU")
+        .is_none()
+        .then(crate::gpu::shared)
+        .flatten()
+    {
         Some(g) => match crate::gpu::ZBuffer::new(g, p, n, &blocks.order) {
             Ok(z) => {
                 job.log(&match &z.no_normals {

@@ -310,7 +310,11 @@ pub fn find(
     if points.is_empty() || o.angle <= 0. {
         return vec![false; points.len()];
     }
-    if let Some(g) = crate::gpu::shared().filter(|_| std::env::var_os("S20_NO_GPU").is_none()) {
+    if let Some(g) = std::env::var_os("S20_NO_GPU")
+        .is_none()
+        .then(crate::gpu::shared)
+        .flatten()
+    {
         match find_gpu(g, data, tr, lever, p, points, job) {
             Ok(t) => return t,
             // canceled: not again on the CPU (the caller's next check stops the run)

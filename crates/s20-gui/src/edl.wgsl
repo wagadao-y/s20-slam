@@ -33,7 +33,9 @@ fn srgb_from_linear(rgb: vec3<f32>) -> vec3<f32> {
     for (var i = 0; i < 8; i++) {
         let angle = f32(i) * 0.7853982;
         let offset = vec2(cos(angle), sin(angle)) * edl.radius;
-        let neighbor = clamp(vec2<i32>(round(position.xy + offset)), vec2(0), size - 1);
+        // (the texel the offset lands in: position is at a pixel's center, rounding it went
+        // one pixel further on one side than the other)
+        let neighbor = clamp(vec2<i32>(floor(position.xy + offset)), vec2(0), size - 1);
         let neighbor_w = textureLoad(depth, neighbor, 0).r;
         // Background neighbors do not darken silhouettes, as in Potree.
         if neighbor_w > 0.0 {

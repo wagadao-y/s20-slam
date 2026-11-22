@@ -161,7 +161,9 @@ fn run(
             cur.scans.len() as u64 * 32,
             cur.starts.len() as u64 * 4,
             cur.rays.len().max(1) as u64 * 16,
-            cur.ranges.len() as u64 * 16,
+            // (a batch without candidates still binds a buffer of one record: of none, 0 rounded
+            // up to a power of two was 1 byte, which the binding refused)
+            cur.ranges.len().max(1) as u64 * 16,
         ];
         if bufs.is_none() || (0..4).any(|k| sizes[k] > caps[k]) {
             for k in 0..4 {
@@ -239,8 +241,10 @@ fn run(
             gpu.queue
                 .write_buffer(&b[2], 0, bytemuck::cast_slice(&cur.rays));
         }
-        gpu.queue
-            .write_buffer(&b[3], 0, bytemuck::cast_slice(&cur.ranges));
+        if !cur.ranges.is_empty() {
+            gpu.queue
+                .write_buffer(&b[3], 0, bytemuck::cast_slice(&cur.ranges));
+        }
         let groups = cur.pairs.div_ceil(64);
         let x = groups.clamp(1, 65535);
         params.ranges = cur.ranges.len() as u32;

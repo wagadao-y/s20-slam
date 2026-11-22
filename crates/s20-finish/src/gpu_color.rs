@@ -342,11 +342,11 @@ impl ZBuffer {
         if total == 0 {
             return Ok(empty);
         }
-        // the points the results' read-back buffer holds with their gain entries (21 words of 20
-        // for each 20 points) within the GPU's largest buffer
+        // the points the results' read-back buffer holds with their gain entries within the GPU's
+        // largest buffer
         let most = self
             .max_places()
-            .min(self.gpu.limits.max_buffer_size.saturating_sub(16) / 21)
+            .min(readback_most(self.gpu.limits.max_buffer_size))
             .max(1);
         use wgpu::BufferUsages as U;
         // the image, padded to whole words
@@ -586,5 +586,29 @@ impl ZBuffer {
         };
         back.unmap();
         Ok(r)
+    }
+}
+
+/// The most points whose results and gain entries the read-back buffer of `max` bytes holds: it
+/// takes `16 + (points + points / 20 + 1) * 20` bytes, as allocated.
+fn readback_most(max: u64) -> u64 {
+    (max.saturating_sub(16) / 20).saturating_sub(1) * 20 / 21
+}
+
+#[cfg(test)]
+mod readback_tests {
+    use super::readback_most;
+
+    #[test]
+    fn the_read_back_buffer_of_the_most_points_fits() {
+        let bytes = |p: u64| 16 + (p + p / 20 + 1) * 20;
+        for max in [1u64 << 28, (1 << 31) - 1, 2_147_483_648, 1000, 37] {
+            let m = readback_most(max);
+            assert!(
+                bytes(m) <= max || m == 0,
+                "{max}: {m} points take {}",
+                bytes(m)
+            );
+        }
     }
 }

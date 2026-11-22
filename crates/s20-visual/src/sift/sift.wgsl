@@ -494,7 +494,8 @@ fn describe(@builtin(workgroup_id) wid: vec3<u32>, @builtin(num_workgroups) nwg:
     let bins_per_deg = f32(N) / 360.0;
     let exp_scale = -1.0 / (f32(D) * f32(D) * 0.5);
     let hist_width = DESCR_SCL * scl;
-    let diag = i32(sqrt(f32(sz.x * sz.x + sz.y * sz.y)));
+    // (squared in floating point: a long side's square overflows i32)
+    let diag = i32(sqrt(f32(sz.x) * f32(sz.x) + f32(sz.y) * f32(sz.y)));
     let radius = min(i32(floor(hist_width * 1.41421356 * (f32(D) + 1.0) * 0.5 + 0.5)), diag);
     cos_t /= hist_width;
     sin_t /= hist_width;

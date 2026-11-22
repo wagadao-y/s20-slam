@@ -240,8 +240,11 @@ impl FreeSpace {
         }
         job.report("free space rays", 0, scans.len() as u64);
         // On the GPU when there is one (S20_NO_GPU set: on the CPU)
-        let on_gpu = crate::gpu::shared()
-            .filter(|_| std::env::var_os("S20_NO_GPU").is_none())
+        // (the variable read first: set, the GPU is not even looked for)
+        let on_gpu = std::env::var_os("S20_NO_GPU")
+            .is_none()
+            .then(crate::gpu::shared)
+            .flatten()
             .and_then(|g| {
                 let mut bl: Vec<u64> = blocks.iter().copied().collect();
                 bl.sort_unstable();
