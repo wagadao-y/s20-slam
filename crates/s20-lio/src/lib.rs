@@ -4,7 +4,7 @@
 //! - IMU propagation at every sample, covariance with gyro/acc noise and bias random walks.
 //! - Deskew: per-point poses from the IMU-propagated states inside the scan.
 //! - Update: VGICP of the deskewed scan against the local Gaussian voxel map. At each iterate the registration
-//!   is linearised (H, b in the right perturbation [w, v] of world_T_imu) and fused with the IMU prior in
+//!   is linearized (H, b in the right perturbation [w, v] of world_T_imu) and fused with the IMU prior in
 //!   information form. Directions without geometric constraint follow the IMU prediction.
 //! - Initialization: gravity direction and gyro bias from the initial static period, or from a previous run.
 //! - Heading hold: in intervals the user marks (round hills, featureless slopes, where the registration drags
@@ -489,6 +489,9 @@ pub fn run(
     }
     let (i0, i1) = prm.scans.unwrap_or((0, data.len()));
     let ids: Vec<usize> = (i0..i1.min(data.len())).collect();
+    if ids.is_empty() {
+        bail!("no scans in {i0}..{i1} ({} scans)", data.len());
+    }
     let lever = V3::from(prm.lidar_imu_t);
 
     // --- initialization from the static start

@@ -36,7 +36,7 @@ use tridiag::BlockTridiag;
 
 /// One session's LIO rows: poses `t x y z qx qy qz qw` and states `t v bg ba`.
 pub type SessionRows = (Vec<[f64; 8]>, Vec<Vec<f64>>);
-/// Linearised IMU factor between knots j and j+1: H_aa, H_ab, H_bb, g_a, g_b, chi2.
+/// Linearized IMU factor between knots j and j+1: H_aa, H_ab, H_bb, g_a, g_b, chi2.
 type ImuTerm = (M15, M15, M15, V15, V15, f64);
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]

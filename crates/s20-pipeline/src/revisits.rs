@@ -203,11 +203,10 @@ fn read_pairs(f: &Path) -> Result<Vec<(f64, f64)>> {
 
 /// Where [`eval`] would write by default: `<knots without _knots.txt>_revisits.csv`.
 pub fn default_out(knots: &Path) -> PathBuf {
-    PathBuf::from(
-        knots
-            .to_string_lossy()
-            .replace("_knots.txt", "")
-            .replace(".txt", "")
-            + "_revisits.csv",
-    )
+    let name = knots.file_name().unwrap_or_default().to_string_lossy();
+    let stem = name
+        .strip_suffix("_knots.txt")
+        .or_else(|| name.strip_suffix(".txt"))
+        .unwrap_or(&name);
+    knots.with_file_name(format!("{stem}_revisits.csv"))
 }

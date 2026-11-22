@@ -18,9 +18,9 @@ The steps are extract → lio → opt → cloud → export → refine → colori
 |---|---|
 | `--outdoor` | Outdoor settings (indoor by default) |
 | `--params` | Settings saved by the GUI (the detailed parameters of `settings.json`) |
-| `--no_rtk` | Do not use the device's RTK (by default it is used when there are fixes) |
+| `--no_rtk` | Do not use the device's RTK (by default it is used when there are 100 fixes or more) |
 | `--ppk` | Compute and use PPK ([PPK](ppk.md), in Japanese) |
-| `--no_color` | Do not color |
+| `--no_color` | Do not color (not with `--images`: the image export follows the coloring) |
 | `--las` | Write the point clouds as LAS (LAZ by default) |
 | `--images` | After coloring, write the photos with their refined poses to `output/images` (in PointClouds Studio's layout) and a COLMAP model beside them. The COLMAP model takes the poses the coloring uses (fitted to the point cloud) |
 | `--3dgs_poses` | Experimental. With `--images`, image pose refinement also finds the poses for 3DGS (the photos agreeing best with one another) for the COLMAP model, and `image_points.txt` is written too. Image pose refinement takes longer. Not with `--no_refine` |

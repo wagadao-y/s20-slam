@@ -333,7 +333,9 @@ fn lio(a: &mut Args, job: &Job) -> Result<()> {
     } else {
         s20_lio::Params::outdoor()
     };
-    p.grav = (p.grav || a.flag("--grav")) && !a.flag("--no_grav");
+    // (both flags read: a preset already on must not leave --grav unread)
+    let grav = a.flag("--grav");
+    p.grav = (p.grav || grav) && !a.flag("--no_grav");
     let scans = a.get_str("--scans")?;
     let init = a.get_str("--init_traj")?;
     p.down = a.get("--down", p.down)?;
@@ -391,7 +393,7 @@ fn lio(a: &mut Args, job: &Job) -> Result<()> {
     )
 }
 
-/// Compare with small_gicp: map from scan i (identity), linearise scan j at identity.
+/// Compare with small_gicp: map from scan i (identity), linearize scan j at identity.
 fn debug_vgicp(a: &mut Args) -> Result<()> {
     use s20_geom::so3::{M3, V3};
     let down: f64 = a.get("--down", 0.1)?;
@@ -760,6 +762,11 @@ fn run(a: &mut Args, job: &Job) -> Result<()> {
     );
     // the poses for 3DGS come from the image refinement, for the image export
     anyhow::ensure!(!poses_3dgs || images, "--3dgs_poses needs --images");
+    // the images follow the coloring (the seed points of the COLMAP model)
+    anyhow::ensure!(
+        !(images && no_color),
+        "--images and --no_color together (the image export follows the coloring)"
+    );
     anyhow::ensure!(
         !(poses_3dgs && no_refine),
         "--3dgs_poses and --no_refine together (the poses for 3DGS come from the image refinement)"
@@ -882,7 +889,7 @@ const USAGE: &str = "usage:
   s20 colorize <in.las|laz> <out.las|laz> --images <folder> --calib calibration.yaml [--imgpose ImgPose.txt]
       [--trajectory trajectory.txt] [--data folder] [--rmax m] [--gain_window s] [--gain_cell m] [--no_gain] [--no_graze] [--fill m] [--tile_memory f] [--threads n]
       [--views n] [--keep n] [--max_theta deg] [--soft_theta deg] [--theta_slope s] [--turn s] [--outlier s] [--outlier_median | --outlier_quantile q] [--temperature s] [--cell m] [--band s]
-      (the 3 best views blended by range, incidence, angle off the axis and turning speed; exposure levelled
+      (the 3 best views blended by range, incidence, angle off the axis and turning speed; exposure leveled
        against the images within --gain_window s, over cells of --gain_cell m (0.2, rounded to divide 2 m; 0: --cell's); --trajectory: the export step's, beside ImgPose.txt by default;
        points no image sees are dropped; made in squares split while one would take more than --tile_memory
        (0.5) of the memory available, the same result; --tile_memory 0: all at once; the coordinate

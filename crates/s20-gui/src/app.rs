@@ -1393,6 +1393,8 @@ impl App {
     /// ones (those used last), which [`Self::save_work_settings`] then saves in it.
     fn load_work_settings(&mut self) {
         self.work_settings_saved = None;
+        // (a preset asked for in the work before is not applied to this one)
+        self.confirm_preset = None;
         let work = PathBuf::from(self.s.work.trim());
         if self.s.work.trim().is_empty() {
             return;

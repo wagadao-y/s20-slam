@@ -1,4 +1,4 @@
-//! Voxelized GICP linearisation against a Gaussian voxel map (small_gicp `GICPFactor` + `DistanceRejector`).
+//! Voxelized GICP linearization against a Gaussian voxel map (small_gicp `GICPFactor` + `DistanceRejector`).
 //!
 //! The pose T = (R, t) maps source to target. The perturbation is on the right: T * exp([omega, v]),
 //! rotation first. For each source point p with a voxel whose mean is within `max_corr`:

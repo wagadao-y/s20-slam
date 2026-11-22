@@ -37,7 +37,7 @@ pub struct RelPose {
     pub robust: Option<f64>,
 }
 
-/// A linearised relative pose factor on the [theta, p] blocks of two knots.
+/// A linearized relative pose factor on the [theta, p] blocks of two knots.
 pub struct RelTerm {
     pub a: usize,
     pub b: usize,

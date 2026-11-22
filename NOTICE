@@ -34,7 +34,7 @@ part keeps its own license, reproduced at the end of this file.
 2. small_gicp (koide3/small_gicp)
    Copyright (c) 2024 Kenji Koide
    License: MIT (B below)
-   Point preprocessing, the Gaussian voxel map and the VGICP linearisation are
+   Point preprocessing, the Gaussian voxel map and the VGICP linearization are
    ports of its algorithms: crates/s20-geom/src/cloud.rs, voxelmap.rs, vgicp.rs,
    so3.rs.
 

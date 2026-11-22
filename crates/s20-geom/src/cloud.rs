@@ -64,7 +64,7 @@ pub fn voxelgrid_sampling(points: &[V3], leaf: f64) -> Vec<V3> {
     out
 }
 
-/// Covariances from `k` nearest neighbors, regularised to eigenvalues (1e-3, 1, 1) like small_gicp.
+/// Covariances from `k` nearest neighbors, regularized to eigenvalues (1e-3, 1, 1) like small_gicp.
 /// Points with fewer than 5 neighbors get the identity.
 pub fn estimate_covariances(points: &[V3], k: usize) -> Vec<M3> {
     if points.is_empty() {

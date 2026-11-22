@@ -26,7 +26,7 @@ Saving, undo, input errors, and processing finishing or failing are shown at the
 
 ## Processing settings
 
-The GNSS (none / the device's RTK / PPK) is chosen in **Processing settings** in the left panel. Indoor / outdoor, the output format (LAZ / LAS), the gravity correction, the poses for 3DGS (experimental), the detailed parameters and so on are in **Other settings…** (or **Process → Processing settings…**). The settings are saved in the work folder's `settings.json`; a new work folder starts from the last settings used.
+The indoor / outdoor preset and the GNSS (none / the device's RTK / PPK) are chosen in **Processing settings** in the left panel (the preset is in the **Detailed parameters** window too). The output format (LAZ / LAS), the gravity correction, the poses for 3DGS (experimental), the detailed parameters and so on are in **Other settings…** (or **Process → Processing settings…**). The settings are saved in the work folder's `settings.json`; a new work folder starts from the last settings used.
 
 Indoor and outdoor differ only in four LIO values (downsampling, the map's voxel, the minimum range, the LiDAR weight) and the image export's "Add background points" default (on outdoors). The trajectory optimization, PPK, point cloud and coloring use the same settings. Choosing a preset sets the detailed parameters and "Add background points" back to its values.
 

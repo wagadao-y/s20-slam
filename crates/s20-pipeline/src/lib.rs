@@ -32,7 +32,8 @@ pub fn lio(
 ) -> Result<()> {
     let l = s20_io::dataset::LidarData::open(data)?;
     let imu = s20_io::dataset::load_imu(data)?;
-    let (t_first, t_last) = (l.scan_start(0), l.scan_start(l.len().saturating_sub(1)));
+    anyhow::ensure!(!l.is_empty(), "{}: no lidar scans", data.display());
+    let (t_first, t_last) = (l.scan_start(0), l.scan_start(l.len() - 1));
     let abs = |t: f64| if t < 0.0 { t_last + t } else { t_first + t };
     let hold: Vec<(f64, f64)> = hold.iter().map(|&(a, b)| (abs(a), abs(b))).collect();
     job.log(&format!(
@@ -43,9 +44,7 @@ pub fn lio(
     let init = match init_traj {
         Some(f) => {
             let poses = s20_io::dataset::read_tum(f)?;
-            let st = s20_io::dataset::read_table(&PathBuf::from(
-                f.to_string_lossy().replace(".txt", "_state.txt"),
-            ))?;
+            let st = s20_io::dataset::read_table(&beside(f, "_state.txt"))?;
             Some(s20_lio::init_from(
                 &l,
                 p.scans.map_or(0, |s| s.0),
@@ -121,9 +120,7 @@ pub fn opt(
     for (f, sd) in lio_files.iter().zip(&dirs) {
         // the LIO of a session runs on its own clock
         let mut poses = s20_io::dataset::read_tum(f)?;
-        let mut st = s20_io::dataset::read_table(&PathBuf::from(
-            f.to_string_lossy().replace(".txt", "_state.txt"),
-        ))?;
+        let mut st = s20_io::dataset::read_table(&beside(f, "_state.txt"))?;
         for r in &mut poses {
             r[0] += sd.shift;
         }
@@ -379,7 +376,7 @@ pub fn opt(
         );
         s.push('\n');
     }
-    std::fs::write(out.to_string_lossy().replace(".txt", "_knots.txt"), s)?;
+    std::fs::write(beside(out, "_knots.txt"), s)?;
     let mut q = format!("# {}\n", s20_opt::quality::HEADER);
     for r in pr.quality(p) {
         q.push_str(&r.row());
@@ -394,7 +391,15 @@ pub fn opt(
 
 /// Per-knot quality written next to an optimized trajectory.
 pub fn quality_file(traj: &Path) -> PathBuf {
-    PathBuf::from(traj.to_string_lossy().replace(".txt", "_quality.txt"))
+    beside(traj, "_quality.txt")
+}
+
+/// The file beside `f` named as `f` with `ending` in place of its `.txt` (after its name when it
+/// has none): only the file's name changes, not its folders'.
+pub fn beside(f: &Path, ending: &str) -> PathBuf {
+    let name = f.file_name().unwrap_or_default().to_string_lossy();
+    let stem = name.strip_suffix(".txt").unwrap_or(&name);
+    f.with_file_name(format!("{stem}{ending}"))
 }
 
 /// A result written under a temporary name of the same extension (`<stem>.partial.<ext>`), which
@@ -1324,9 +1329,12 @@ impl WorkSettings {
     }
 
     pub fn save(&self, work: &Path) -> Result<()> {
+        // (through a temporary file: a failed write leaves the settings before it)
         let f = Self::file(work);
-        std::fs::write(&f, serde_json::to_string_pretty(self)?)
-            .with_context(|| format!("write {}", f.display()))
+        let temp = f.with_extension("json.tmp");
+        std::fs::write(&temp, serde_json::to_string_pretty(self)?)
+            .with_context(|| format!("write {}", temp.display()))?;
+        std::fs::rename(&temp, &f).with_context(|| format!("write {}", f.display()))
     }
 }
 
@@ -2500,6 +2508,24 @@ impl RunConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn beside_changes_the_file_name_only() {
+        let f = Path::new("survey.txt").join("runs").join("lio.txt");
+        assert_eq!(
+            beside(&f, "_state.txt"),
+            Path::new("survey.txt").join("runs").join("lio_state.txt")
+        );
+        // a name without .txt does not become its companion's
+        assert_eq!(
+            beside(Path::new("runs/traj"), "_knots.txt"),
+            Path::new("runs/traj_knots.txt")
+        );
+        assert_eq!(
+            revisits::default_out(&Path::new("a.txt").join("traj_knots.txt")),
+            Path::new("a.txt").join("traj_revisits.csv")
+        );
+    }
 
     #[test]
     fn pdal_pipeline_takes_the_newest_input_of_its_frame_and_keeps_the_target() {

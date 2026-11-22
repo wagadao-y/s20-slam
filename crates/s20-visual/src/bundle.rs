@@ -781,11 +781,11 @@ impl Problem<'_> {
         tracks + self.prior_cost(rot, shift)
     }
 
-    /// A track linearised: per frame of `fr` (its frames), the frame's block and gradient into `h`
+    /// A track linearized: per frame of `fr` (its frames), the frame's block and gradient into `h`
     /// and the frame-point block into `w`; returned, the inverse of the point's block (damped) and
     /// the point's gradient, or none where the block cannot be inverted.
     #[allow(clippy::too_many_arguments)]
-    fn linearise(
+    fn linearize(
         &self,
         t: &Track,
         pinned: bool,
@@ -918,7 +918,7 @@ pub fn solve(
         iterations += 1;
         let started = std::time::Instant::now();
         let n = pb.tracks.len();
-        // each track linearised and its point eliminated at once, into the frames' system
+        // each track linearized and its point eliminated at once, into the frames' system
         // (H_ff - W H_pp^-1 W^T and g_f - W H_pp^-1 g_p); kept per track only what the
         // back-substitution needs, in buffers of the whole iteration
         let off_acc: Vec<Mutex<Matrix6<f64>>> = (0..pattern.pairs.len())
@@ -938,7 +938,7 @@ pub fn solve(
                 let fr = tf.of(i);
                 h.resize(fr.len(), (Matrix6::zeros(), Vector6::zeros()));
                 let (t, pin) = (&pb.tracks[i], pb.pinned[i]);
-                let Some((hinv, gp)) = pb.linearise(t, pin, &x[i], &rot, &shift, lambda, fr, h, w)
+                let Some((hinv, gp)) = pb.linearize(t, pin, &x[i], &rot, &shift, lambda, fr, h, w)
                 else {
                     w.fill(W::zeros());
                     return;
@@ -1051,7 +1051,7 @@ pub fn solve(
             .iter()
             .map(|d| d.fixed_rows::<3>(0).norm())
             .fold(0f64, f64::max);
-        // where the iteration's time went: the tracks linearised into the frames' system, the
+        // where the iteration's time went: the tracks linearized into the frames' system, the
         // conjugate gradients (their iterations, the frame pairs' blocks), the points back from
         // the frames' step, the trial cost
         let total = started.elapsed().as_secs_f64();

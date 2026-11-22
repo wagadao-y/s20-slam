@@ -18,9 +18,9 @@ s20 run <生データ1>,<生データ2>,... <作業フォルダー> --outdoor   
 |---|---|
 | `--outdoor` | 屋外の設定（既定は屋内） |
 | `--params` | GUI で保存した設定（`settings.json` の詳細パラメータ） |
-| `--no_rtk` | 機体の RTK を使わない（既定では FIX があれば使う） |
+| `--no_rtk` | 機体の RTK を使わない（既定では FIX が 100 件以上あれば使う） |
 | `--ppk` | PPK を計算して使う（[PPK](ppk.md)） |
-| `--no_color` | 着色しない |
+| `--no_color` | 着色しない（`--images` とは併用できない：画像の出力は着色のあとに行うため） |
 | `--las` | 点群を LAS で出力する（既定は LAZ） |
 | `--images` | 着色のあと、姿勢合わせ後の写真を `output/images`（PointClouds Studio と同じ形式）に、COLMAP のモデルを横に出力する。COLMAP のモデルの姿勢は着色と同じ姿勢（点群に合わせた姿勢） |
 | `--3dgs_poses` | 実験的。`--images` で、画像の姿勢合わせで 3DGS 用の姿勢（写真どうしが一番合う姿勢）も求め、COLMAP のモデルに使い、`image_points.txt` も出力する。画像の姿勢合わせが長くなる。`--no_refine` とは併用できない |

@@ -105,9 +105,9 @@ pub struct ColorParams {
     /// Exposure / white balance gain per image and channel.
     pub gain: bool,
     /// Only the gains' differences from the images within this time window (s) are applied: the
-    /// steps between neighboring images and between the two cameras are levelled, while the
+    /// steps between neighboring images and between the two cameras are leveled, while the
     /// exposure the camera chose for a place (darker in the sun, brighter in the shade) stays
-    /// (0: the gains levelled over all images, which washes sunlit images out where most were
+    /// (0: the gains leveled over all images, which washes sunlit images out where most were
     /// taken in the shade; the shrine 2026-10-22).
     pub gain_window: f64,
     /// Only points within this distance (m) of a camera are colored from it.
@@ -2765,6 +2765,6 @@ mod tests {
             (l[15][0] - 1.).abs() < 1e-3 && (l[2][0] - 1.).abs() < 0.2,
             "places keep their exposure: {l:?}"
         );
-        assert!(l[5][0] < 0.6, "the step is levelled: {}", l[5][0]);
+        assert!(l[5][0] < 0.6, "the step is leveled: {}", l[5][0]);
     }
 }

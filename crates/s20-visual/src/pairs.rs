@@ -27,11 +27,13 @@ pub fn features(
     contrast: f32,
     double_first: bool,
 ) -> Result<Features> {
+    anyhow::ensure!(max_size > 0, "the image size for the features is 0 px");
     let full = image::decode(jpeg)?;
     let s = (max_size as f64 / full.w.max(full.h) as f64).min(1.);
+    // (a pixel at least on each side, a narrow image rounded to none otherwise)
     let (w, h) = (
-        ((full.w as f64) * s).round() as usize,
-        ((full.h as f64) * s).round() as usize,
+        (((full.w as f64) * s).round() as usize).max(1),
+        (((full.h as f64) * s).round() as usize).max(1),
     );
     let small = image::resize_area(&full, w, h);
     let (kps, desc) = sift::detect_auto(&small, count, contrast, double_first);

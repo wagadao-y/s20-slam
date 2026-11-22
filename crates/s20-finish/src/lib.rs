@@ -276,8 +276,16 @@ impl FinishParams {
                 && self.free_fine_ratio >= 0.,
             "free_fine_voxel / free_fine_ratio must be nonnegative"
         );
+        // (a ray walked in steps of the voxel: 0 never ends)
         ensure!(
-            (0. ..=5.).contains(&self.transient_angle_deg)
+            self.free_ratio.is_finite()
+                && self.free_ratio >= 0.
+                && (self.free_ratio == 0. || (self.free_voxel.is_finite() && self.free_voxel > 0.)),
+            "free_ratio must be nonnegative, and free_voxel positive when free_ratio is on"
+        );
+        ensure!(
+            // (below 0.1 degrees the direction grids of the scans grow to gigabytes)
+            (self.transient_angle_deg == 0. || (0.1..=5.).contains(&self.transient_angle_deg))
                 && [
                     self.transient_far,
                     self.transient_hit,
@@ -289,7 +297,7 @@ impl FinishParams {
                 .all(|x| x.is_finite() && *x >= 0.)
                 && (0. ..=1.).contains(&self.transient_clean_share)
                 && (self.transient_angle_deg == 0. || self.transient_max_range > 0.),
-            "transient: angle 0 (off) to 5 degrees, the other settings nonnegative"
+            "transient: angle 0 (off) or 0.1 to 5 degrees, the other settings nonnegative"
         );
         ensure!(
             self.free_protect_direction_spread.is_finite()
