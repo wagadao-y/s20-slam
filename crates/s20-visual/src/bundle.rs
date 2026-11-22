@@ -345,11 +345,15 @@ pub fn check(tracks: &[Track], poses: &[Pose]) -> (Vec<f64>, Vec<f64>) {
         .filter(|t| t.held && t.sightings.len() >= 3)
         .filter_map(|t| {
             let x = triangulate(t, poses)?;
+            // (as track_point: none behind a sighting camera, where the residual is small)
             let r = t
                 .sightings
                 .iter()
-                .map(|s| s.residual(&poses[s.image], &x).0.norm())
-                .collect();
+                .map(|s| {
+                    let (r, v) = s.residual(&poses[s.image], &x);
+                    (v.dot(&s.bearing) > 0.).then(|| r.norm())
+                })
+                .collect::<Option<Vec<f64>>>()?;
             Some((r, t.planar().then(|| t.normal.dot(&(x - t.anchor)).abs())))
         })
         .collect();
@@ -741,8 +745,11 @@ impl Problem<'_> {
         let mut dropped = 0;
         for ((mut t, pin), p) in tracks.into_iter().zip(pinned).zip(points) {
             let n = t.sightings.len();
+            // (a point behind the camera misses too: its bearing residual is small, even zero
+            // straight behind)
             t.sightings.retain(|sg| {
-                sg.residual(&self.pose(rot, shift, sg.image), &p).0.norm() <= self.s.outlier
+                let (r, v) = sg.residual(&self.pose(rot, shift, sg.image), &p);
+                v.dot(&sg.bearing) > 0. && r.norm() <= self.s.outlier
             });
             dropped += n - t.sightings.len();
             if usable(&t) {

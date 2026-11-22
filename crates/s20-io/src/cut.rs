@@ -27,35 +27,48 @@ pub fn cut_raw(raw: &Path, out: &Path, from: f64, to: f64, job: &Job) -> Result<
     if out.exists() && fs::read_dir(out)?.next().is_some() {
         bail!("{} is not empty", out.display());
     }
-    fs::create_dir_all(out).with_context(|| format!("create {}", out.display()))?;
     let bag = Bag::open(&src)?;
     let t0 = bag
         .topic_messages("/livox/lidar")
         .first()
         .map(|m| m.time_ns)
         .context("no /livox/lidar messages")?;
-    let at = |s: f64| t0 + (s * 1e9) as u64;
+    // (a time past the recording's end, even infinite, is its end)
+    let at = |s: f64| t0.saturating_add((s * 1e9) as u64);
     let (lo, hi) = (at(from), at(to));
+    // (checked before writing: a span outside the recording leaves the folder as it was)
+    ensure!(
+        bag.messages.iter().any(|m| (lo..=hi).contains(&m.time_ns)),
+        "no messages from {from} to {to} s"
+    );
+    fs::create_dir_all(out).with_context(|| format!("create {}", out.display()))?;
     let name = src.file_name().context("bag without a name")?;
-    let mut w = BagWriter::create(&out.join(name))?;
+    let bag_out = out.join(name);
+    let mut w = BagWriter::create(&bag_out)?;
     let total = bag.messages.len() as u64;
     let (mut messages, mut bytes, mut span) = (0usize, 0u64, [f64::INFINITY, f64::NEG_INFINITY]);
-    for (i, m) in bag.messages.iter().enumerate() {
-        if i % 10_000 == 0 {
-            job.check()?;
-            job.report("cut", i as u64, total);
+    let written = (|| -> Result<()> {
+        for (i, m) in bag.messages.iter().enumerate() {
+            if i % 10_000 == 0 {
+                job.check()?;
+                job.report("cut", i as u64, total);
+            }
+            if m.time_ns < lo || m.time_ns > hi {
+                continue;
+            }
+            w.write(&bag, m)?;
+            let s = (m.time_ns - t0) as f64 * 1e-9;
+            span = [span[0].min(s), span[1].max(s)];
+            messages += 1;
+            bytes += m.len as u64;
         }
-        if m.time_ns < lo || m.time_ns > hi {
-            continue;
-        }
-        w.write(&bag, m)?;
-        let s = (m.time_ns - t0) as f64 * 1e-9;
-        span = [span[0].min(s), span[1].max(s)];
-        messages += 1;
-        bytes += m.len as u64;
+        w.finish()
+    })();
+    // (canceled or failed: the partial bag removed, so the folder can be cut into again)
+    if let Err(e) = written {
+        let _ = fs::remove_file(&bag_out);
+        return Err(e);
     }
-    w.finish()?;
-    ensure!(messages > 0, "no messages from {from} to {to} s");
     // the other files, whole
     for e in fs::read_dir(raw)? {
         let p = e?.path();
