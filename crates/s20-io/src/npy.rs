@@ -34,12 +34,20 @@ pub fn read_f64(path: &Path) -> Result<(Vec<f64>, usize, usize)> {
     if !b.starts_with(b"\x93NUMPY") {
         bail!("{} is not an npy file", path.display());
     }
-    let (hlen, hstart) = match b[6] {
-        1 => (u16::from_le_bytes([b[8], b[9]]) as usize, 10),
-        2 | 3 => (u32::from_le_bytes(b[8..12].try_into()?) as usize, 12),
+    // (a short or damaged file an error, not a panic)
+    let short = || anyhow::anyhow!("{} truncated", path.display());
+    let (hlen, hstart) = match b.get(6).ok_or_else(short)? {
+        1 => (
+            u16::from_le_bytes(b.get(8..10).ok_or_else(short)?.try_into()?) as usize,
+            10,
+        ),
+        2 | 3 => (
+            u32::from_le_bytes(b.get(8..12).ok_or_else(short)?.try_into()?) as usize,
+            12,
+        ),
         v => bail!("unsupported npy version {v}"),
     };
-    let header = std::str::from_utf8(&b[hstart..hstart + hlen])?;
+    let header = std::str::from_utf8(b.get(hstart..hstart + hlen).ok_or_else(short)?)?;
     if !header.contains("'<f8'") || header.contains("'fortran_order': True") {
         bail!(
             "{}: only C-order float64 arrays are supported ({header})",
@@ -65,10 +73,14 @@ pub fn read_f64(path: &Path) -> Result<(Vec<f64>, usize, usize)> {
         _ => bail!("unsupported shape {dims:?}"),
     };
     let body = &b[hstart + hlen..];
-    if body.len() < rows * cols * 8 {
+    let n = rows
+        .checked_mul(cols)
+        .and_then(|n| n.checked_mul(8))
+        .context("shape too large")?;
+    if body.len() < n {
         bail!("{} truncated", path.display());
     }
-    let data = body[..rows * cols * 8]
+    let data = body[..n]
         .as_chunks::<8>()
         .0
         .iter()

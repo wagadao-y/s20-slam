@@ -5,7 +5,7 @@
 
 use crate::msgs::{POINT_SIZE, livox_point};
 use crate::npy;
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, bail, ensure};
 use memmap2::Mmap;
 use std::collections::HashMap;
 use std::fs;
@@ -247,17 +247,29 @@ impl LidarData {
         for (k, sd) in dirs.iter().enumerate() {
             let d = &sd.dir;
             let map = Source::map(d)?;
-            let (a, rows, cols) = npy::read_f64(&d.join("lidar_index.npy"))?;
-            assert_eq!(cols, 4);
+            let f = d.join("lidar_index.npy");
+            let (a, rows, cols) = npy::read_f64(&f)?;
+            ensure!(cols == 4, "{}: {cols} columns, not 4", f.display());
             for r in 0..rows {
+                // (a damaged index: whole, nonnegative and within the bag, or an error)
+                let whole = |x: f64| {
+                    (x.is_finite() && x >= 0. && x.fract() == 0. && x < 2f64.powi(53))
+                        .then_some(x as usize)
+                };
+                let (Some(offset), Some(count)) = (whole(a[r * 4 + 2]), whole(a[r * 4 + 3])) else {
+                    bail!("scan {r} of {}: a bad offset or count", f.display());
+                };
                 let s = ScanInfo {
                     header_stamp: a[r * 4],
                     timebase_ns: a[r * 4 + 1],
-                    offset: a[r * 4 + 2] as usize,
-                    count: a[r * 4 + 3] as usize,
+                    offset,
+                    count,
                     session: k,
                 };
-                if s.offset + s.count * POINT_SIZE > map.len() {
+                let end = count
+                    .checked_mul(POINT_SIZE)
+                    .and_then(|n| n.checked_add(offset));
+                if end.is_none_or(|e| e > map.len()) {
                     bail!("scan {r} of {} lies outside the bag", d.display());
                 }
                 scans.push(s);
@@ -586,7 +598,7 @@ pub fn load_temperature(data: &Path) -> Result<Vec<[f64; 2]>> {
 pub fn load_imu(data: &Path) -> Result<Vec<[f64; 7]>> {
     let p = data.join("imu.npy");
     let (a, rows, cols) = npy::read_f64(&p)?;
-    assert_eq!(cols, 7);
+    ensure!(cols == 7, "{}: {cols} columns, not 7", p.display());
     Ok((0..rows)
         .map(|r| a[r * 7..r * 7 + 7].try_into().unwrap())
         .collect())
@@ -595,9 +607,9 @@ pub fn load_imu(data: &Path) -> Result<Vec<[f64; 7]>> {
 /// GNSS rows (see msgs::pvtsln), 14 columns.
 pub fn load_gnss(data: &Path) -> Result<Vec<[f64; 14]>> {
     let (a, rows, cols) = npy::read_f64(&data.join("gnss.npy"))?;
-    assert_eq!(
-        cols, 14,
-        "gnss.npy must have 14 columns (re-extract with single-point solution)"
+    ensure!(
+        cols == 14,
+        "gnss.npy must have 14 columns, not {cols} (re-extract with single-point solution)"
     );
     Ok((0..rows)
         .map(|r| a[r * 14..r * 14 + 14].try_into().unwrap())
