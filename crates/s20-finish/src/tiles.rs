@@ -136,40 +136,44 @@ struct Tile {
     obs: Rect,
 }
 
-/// Removes the folder of the temporary files when the run ends, also on an error.
-pub(crate) struct TempDir(PathBuf);
+/// The folder of a run's temporary files: made new for it inside `dir` (`<dir>/run-<process>-<n>`,
+/// created exclusively), removed when the run ends (also on an error), then `dir` too when nothing
+/// else is left in it. Only what the run made is removed: files of the user's in `dir` stay.
+pub(crate) struct TempDir {
+    dir: PathBuf,
+    parent: PathBuf,
+}
 impl TempDir {
-    /// Creates the folder `dir`. One already there is taken (and removed at the end) only when it
-    /// holds nothing but temporary files (`<number>.<kind>`, those of a run that stopped): a folder
-    /// of the user's of that name is not removed.
     pub(crate) fn create(dir: &Path) -> Result<Self> {
-        if dir.exists() {
-            let ours = std::fs::read_dir(dir)?.all(|e| {
-                e.is_ok_and(|e| {
-                    let name = e.file_name();
-                    let name = name.to_string_lossy();
-                    e.file_type().is_ok_and(|t| t.is_file())
-                        && name.split_once('.').is_some_and(|(k, kind)| {
-                            !k.is_empty()
-                                && k.bytes().all(|b| b.is_ascii_digit())
-                                && !kind.is_empty()
-                                && kind.bytes().all(|b| b.is_ascii_alphabetic())
-                        })
-                })
-            });
-            anyhow::ensure!(
-                ours,
-                "{} is there and holds other files: move it, it would be removed",
-                dir.display()
-            );
-        }
         std::fs::create_dir_all(dir).with_context(|| format!("create {}", dir.display()))?;
-        Ok(Self(dir.to_path_buf()))
+        for n in 0u32.. {
+            let mine = dir.join(format!("run-{}-{n}", std::process::id()));
+            match std::fs::create_dir(&mine) {
+                Ok(()) => {
+                    return Ok(Self {
+                        dir: mine,
+                        parent: dir.to_path_buf(),
+                    });
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(e) => {
+                    return Err(
+                        anyhow::Error::from(e).context(format!("create {}", mine.display()))
+                    );
+                }
+            }
+        }
+        unreachable!("a free name")
+    }
+    pub(crate) fn path(&self) -> &Path {
+        &self.dir
     }
 }
 impl Drop for TempDir {
     fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
+        let _ = std::fs::remove_dir_all(&self.dir);
+        // (only when empty)
+        let _ = std::fs::remove_dir(&self.parent);
     }
 }
 
@@ -348,8 +352,8 @@ pub fn finish_tiled(
         }
     }
     // 2. each square's observations and rays to its files
-    let _cleanup = TempDir::create(tmp)?;
-    let file = |k: usize, kind: &str| tmp.join(format!("{k}.{kind}"));
+    let temp = TempDir::create(tmp)?;
+    let file = |k: usize, kind: &str| temp.path().join(format!("{k}.{kind}"));
     let mut writers: Vec<(BufWriter<std::fs::File>, BufWriter<std::fs::File>)> = (0..tiles.len())
         .map(|k| -> Result<_> {
             Ok((
@@ -542,19 +546,26 @@ mod tests {
     /// A floor and a wall measured from a walk, finished in two halves (each from its
     /// observations and the rays crossing them), give the points of the whole.
     #[test]
-    fn a_folder_of_other_files_is_not_taken_for_the_temporary_one() {
+    fn a_run_removes_only_its_own_temporary_files() {
         let dir = std::env::temp_dir().join(format!("s20-tempdir-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        // a stopped run's files: taken, and removed at the end
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("3.obs"), "x").unwrap();
-        drop(TempDir::create(&dir).unwrap());
+        // nothing else there: the folder goes at the end
+        let t = TempDir::create(&dir).unwrap();
+        std::fs::write(t.path().join("3.obs"), "x").unwrap();
+        drop(t);
         assert!(!dir.exists());
-        // another file: refused, kept
+        // a file of the user's of a temporary file's shape stays, with the folder
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("notes.txt"), "x").unwrap();
-        assert!(TempDir::create(&dir).is_err());
-        assert!(dir.join("notes.txt").exists());
+        std::fs::write(dir.join("1.jpg"), "photo").unwrap();
+        let (a, b) = (
+            TempDir::create(&dir).unwrap(),
+            TempDir::create(&dir).unwrap(),
+        );
+        assert_ne!(a.path(), b.path());
+        std::fs::write(a.path().join("1.obs"), "x").unwrap();
+        drop((a, b));
+        assert!(dir.join("1.jpg").exists());
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

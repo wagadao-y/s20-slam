@@ -2260,11 +2260,12 @@ pub fn colorize(
     ));
     // 1. the views of each part (kept on disk when there are several) and the gain entries
     let several = rects.len() > 1;
-    let _cleanup = if several {
+    let temp = if several {
         Some(crate::tiles::TempDir::create(tmp)?)
     } else {
         None
     };
+    let tmp = temp.as_ref().map_or(tmp, |t| t.path());
     let mut slot = vec![u32::MAX; p.len()];
     let mut entries: Vec<PartGains> = Vec::new();
     let mut memory: Vec<Kept> = Vec::new();
