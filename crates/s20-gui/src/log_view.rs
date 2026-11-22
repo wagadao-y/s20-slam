@@ -1,4 +1,4 @@
-//! Virtualised log labels with their original wrapping and variable heights.
+//! Virtualized log labels with their original wrapping and variable heights.
 use eframe::egui;
 use std::{ops::Range, sync::Arc};
 
@@ -84,7 +84,7 @@ impl LogView {
                 let height = (self.offsets.last().copied().unwrap_or(0.0) - self.spacing).max(0.0);
                 ui.set_height(height);
                 // egui drops a text selection when a label holding one of its ends is not laid
-                // out, so all labels are shown while there is a selection, as before virtualising.
+                // out, so all labels are shown while there is a selection, as before virtualizing.
                 let range = if ui
                     .ctx()
                     .plugin::<egui::text_selection::LabelSelectionState>()
@@ -167,7 +167,7 @@ mod tests {
     }
 
     #[test]
-    fn virtualised_logs_paint_like_the_original_labels() {
+    fn virtualized_logs_paint_like_the_original_labels() {
         let mut log: Vec<String> = (0..2000)
             .map(|i| {
                 if i % 7 == 0 {

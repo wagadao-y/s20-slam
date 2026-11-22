@@ -419,6 +419,41 @@ pub fn opt(
     Ok(())
 }
 
+/// Writes `bytes` to `f` through a temporary file of this write's own beside it (made new), put in
+/// its place once written: a failed write leaves the file before it, and two writes at once do
+/// not put each other's half.
+pub fn write_replacing(f: &Path, bytes: &[u8]) -> Result<()> {
+    use std::io::Write;
+    let mut n = 0u32;
+    let temp = loop {
+        let name = f.file_name().unwrap_or_default().to_string_lossy();
+        let t = f.with_file_name(format!("{name}.{}-{n}.tmp", std::process::id()));
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&t)
+        {
+            Ok(mut file) => {
+                let written = file.write_all(bytes);
+                drop(file);
+                if let Err(e) = written {
+                    let _ = std::fs::remove_file(&t);
+                    return Err(anyhow::Error::from(e).context(format!("write {}", t.display())));
+                }
+                break t;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => n += 1,
+            Err(e) => {
+                return Err(anyhow::Error::from(e).context(format!("write {}", t.display())));
+            }
+        }
+    };
+    std::fs::rename(&temp, f).map_err(|e| {
+        let _ = std::fs::remove_file(&temp);
+        anyhow::Error::from(e).context(format!("write {}", f.display()))
+    })
+}
+
 /// The trajectory of TUM file `traj`, refused when it has no pose, or a pose not finite or of a
 /// zero quaternion (the interpolation would panic or give NaN to every point after it).
 pub fn read_traj(traj: &Path) -> Result<s20_geom::traj::Traj> {
@@ -1385,40 +1420,10 @@ impl WorkSettings {
     }
 
     pub fn save(&self, work: &Path) -> Result<()> {
-        // (through a temporary file of this save's own, made new: a failed write leaves the
-        // settings before it, and two windows saving at once do not put each other's half)
-        let f = Self::file(work);
-        let text = serde_json::to_string_pretty(self)?;
-        let mut n = 0u32;
-        let temp = loop {
-            let t = f.with_extension(format!("json.{}-{n}.tmp", std::process::id()));
-            match std::fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&t)
-            {
-                Ok(mut file) => {
-                    use std::io::Write;
-                    let written = file.write_all(text.as_bytes());
-                    drop(file);
-                    if let Err(e) = written {
-                        let _ = std::fs::remove_file(&t);
-                        return Err(
-                            anyhow::Error::from(e).context(format!("write {}", t.display()))
-                        );
-                    }
-                    break t;
-                }
-                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => n += 1,
-                Err(e) => {
-                    return Err(anyhow::Error::from(e).context(format!("write {}", t.display())));
-                }
-            }
-        };
-        std::fs::rename(&temp, &f).map_err(|e| {
-            let _ = std::fs::remove_file(&temp);
-            anyhow::Error::from(e).context(format!("write {}", f.display()))
-        })
+        write_replacing(
+            &Self::file(work),
+            serde_json::to_string_pretty(self)?.as_bytes(),
+        )
     }
 }
 
@@ -2235,8 +2240,10 @@ impl RunConfig {
 
     pub fn save_edits(&self, e: &Edits) -> Result<()> {
         std::fs::create_dir_all(&self.work)?;
-        std::fs::write(self.edits_file(), serde_json::to_string_pretty(e)?)?;
-        Ok(())
+        write_replacing(
+            &self.edits_file(),
+            serde_json::to_string_pretty(e)?.as_bytes(),
+        )
     }
 
     pub fn revisions_dir(&self) -> PathBuf {

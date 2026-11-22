@@ -211,8 +211,8 @@ impl App {
             self.notify(
                 Level::Warn,
                 tl(
-                    "点の対応は「スキャン」の表示で、セッションの点をクリックしてください",
-                    "For point matches, click a session's points in the \"Scans\" view",
+                    "点の対応は「スキャン点群（…）」の表示で、セッションの点をクリックしてください",
+                    "For point matches, click a session's points in a \"Scan point cloud (…)\" view",
                 ),
             );
             return true;

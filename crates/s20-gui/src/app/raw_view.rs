@@ -257,9 +257,11 @@ fn matches(pattern: &str, name: &str) -> bool {
     let name = name.replace('\\', "/");
     match pattern.split_once('*') {
         Some((a, b)) => {
-            name.len() >= a.len() + b.len()
-                && name[..a.len()].eq_ignore_ascii_case(a)
-                && name[name.len() - b.len()..].eq_ignore_ascii_case(b)
+            // (as bytes: a name of other characters than ASCII would be cut inside one)
+            let n = name.as_bytes();
+            n.len() >= a.len() + b.len()
+                && n[..a.len()].eq_ignore_ascii_case(a.as_bytes())
+                && n[n.len() - b.len()..].eq_ignore_ascii_case(b.as_bytes())
         }
         None => name.eq_ignore_ascii_case(pattern),
     }
@@ -973,7 +975,7 @@ fn gnss_file_ui(
             if let Some((_, llh)) = s.position {
                 ui.label(tl("基準局の位置", "Base station position"));
                 ui.label(tr!(
-                    "北緯 {:.8}°  東経 {:.8}°  楕円体高 {:.3} m", "Lat {:.8}°  Lon {:.8}°  Ellipsoidal height {:.3} m",
+                    "緯度 {:.8}°  経度 {:.8}°  楕円体高 {:.3} m", "Lat {:.8}°  Lon {:.8}°  Ellipsoidal height {:.3} m",
                     llh[0], llh[1], llh[2]
                 ));
                 ui.end_row();
@@ -1306,6 +1308,9 @@ mod tests {
         assert!(matches("info/info_*.bag", "info\\info_2026-10-03.bag"));
         assert!(matches("BASE.BIN", "base.bin"));
         assert!(!matches("BASE.BIN", "BASE.BIN.bak"));
+        // a name of other characters than ASCII
+        assert!(!matches("all_*.bag", "写真.txt"));
+        assert!(matches("all_*.bag", "all_写真.bag"));
         assert_eq!(format_bytes(3 << 20), "3.0 MB");
     }
 }
