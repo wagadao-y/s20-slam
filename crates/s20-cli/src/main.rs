@@ -272,16 +272,28 @@ fn main() -> Result<()> {
             // was, also when it is the input)
             let ext = out.extension().unwrap_or_default().to_string_lossy();
             let stem = out.file_stem().unwrap_or_default().to_string_lossy();
-            // (a name no file has: a file there is not overwritten nor removed)
-            let tmp = (0u32..)
-                .map(|n| out.with_file_name(format!("{stem}.{}-{n}-tmp.{ext}", std::process::id())))
-                .find(|t| !t.exists())
-                .context("no temporary name")?;
+            // (a name of this run's own, made new: a file there is not overwritten nor removed)
+            let mut n = 0u32;
+            let tmp = loop {
+                let t = out.with_file_name(format!("{stem}.{}-{n}-tmp.{ext}", std::process::id()));
+                match std::fs::File::create_new(&t) {
+                    Ok(_) => break t,
+                    Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => n += 1,
+                    Err(e) => {
+                        return Err(
+                            anyhow::Error::from(e).context(format!("create {}", t.display()))
+                        );
+                    }
+                }
+            };
             if let Err(e) = s20_io::las::write(&tmp, &pts, scale, info.offset) {
                 let _ = std::fs::remove_file(&tmp);
                 return Err(e);
             }
-            std::fs::rename(&tmp, &out).with_context(|| format!("write {}", out.display()))?;
+            if let Err(e) = std::fs::rename(&tmp, &out) {
+                let _ = std::fs::remove_file(&tmp);
+                return Err(anyhow::Error::from(e).context(format!("write {}", out.display())));
+            }
             job.log(&format!("wrote {} ({} points)", out.display(), pts.len()));
         }
         "potree" => {

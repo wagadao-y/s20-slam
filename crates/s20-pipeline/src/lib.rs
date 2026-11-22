@@ -1602,7 +1602,20 @@ impl RunConfig {
         s20_io::extract::find_bag(raw).is_ok_and(|bag| {
             bag.file_name() == src.bag.file_name()
                 && std::fs::metadata(&bag).is_ok_and(|m| m.len() == src.size)
+                && Self::same_fingerprint(data, &src.bag, &bag)
         })
+    }
+
+    /// Whether `bag` is the recording data folder `data` was extracted from (`old`), by their
+    /// fingerprints: the extraction's, else the old bag's when it is still there. Neither known (an
+    /// extraction of an older version whose bag moved), the name and size decide.
+    fn same_fingerprint(data: &Path, old: &Path, bag: &Path) -> bool {
+        let known = s20_io::dataset::extracted_fingerprint(data)
+            .or_else(|| s20_io::dataset::bag_fingerprint(old).ok());
+        match known {
+            Some(f) => s20_io::dataset::bag_fingerprint(bag).is_ok_and(|g| g == f),
+            None => true,
+        }
     }
 
     /// Whether raw folder `raw` holds the recording session `k` was extracted from (it was moved
@@ -2453,7 +2466,9 @@ impl RunConfig {
             self.write_record(step, k, true)?;
         }
         if step == Step::Extract {
-            let shifts = s20_io::dataset::build_set(&self.data(), &self.set_dirs())?;
+            // (the device's GNSS tables needed with its RTK only, not with PPK)
+            let shifts =
+                s20_io::dataset::build_set(&self.data(), &self.set_dirs(), self.rtk && !self.ppk)?;
             if self.multi() {
                 for (s, x) in self.sessions.iter().zip(shifts) {
                     job.log(&format!("session {}: times shifted by {x} s", s.name));
@@ -3016,6 +3031,20 @@ mod tests {
         );
         // the extraction's time kept: the steps after it stay current
         assert_eq!(std::fs::metadata(&f).unwrap().modified().unwrap(), before);
+        // another recording of the same name and size: not taken for this one
+        let other = base.join("other").join("room");
+        std::fs::create_dir_all(&other).unwrap();
+        std::fs::write(other.join("all_0.bag"), "BAG").unwrap();
+        std::fs::write(
+            c.session_data(0).join(s20_io::dataset::FINGERPRINT_FILE),
+            format!(
+                "{:016x}",
+                s20_io::dataset::bag_fingerprint(&new.join("all_0.bag")).unwrap()
+            ),
+        )
+        .unwrap();
+        assert!(RunConfig::holds(&c.session_data(0), &new));
+        assert!(!RunConfig::holds(&c.session_data(0), &other));
         std::fs::remove_dir_all(&base).unwrap();
     }
 

@@ -1,5 +1,5 @@
 //! LAS 1.4 writer, point data format 7 (XYZ, intensity, point source id, GPS time, RGB) with three float
-//! extra bytes NormalX/NormalY/NormalZ: the layout of the maker's `*_uncolorized.las` / Python version.
+//! extra bytes NormalX/NormalY/NormalZ: the layout of PointClouds Studio's `*_uncolorized.las` / Python version.
 //! A `.laz` path is written LASzip-compressed (laz-rs, chunk-parallel); the reader takes both.
 
 use anyhow::Result;
@@ -162,6 +162,11 @@ impl LasWriter {
         offset: [f64; 3],
         extras: &[(&str, ExtraKind)],
     ) -> Result<Self> {
+        // (an infinite or zero scale stores every coordinate as 0, read back as NaN)
+        anyhow::ensure!(
+            scale.is_finite() && scale > 0. && offset.iter().all(|o| o.is_finite()),
+            "a LAS scale {scale} not finite and positive, or an offset not finite"
+        );
         let extra_len: usize = extras.iter().map(|e| e.1.size()).sum();
         let record_len = BASE_LEN + extra_len;
         // (the VLR's and the record's lengths are 16-bit)
@@ -274,6 +279,9 @@ impl LasWriter {
         // rounding, a point at an end lay up to half a step outside them, which PotreeConverter
         // refuses
         let scale = self.scale;
+        // (the bounds taken only once every point of the batch is checked: a refused batch leaves
+        // them as they were)
+        let (mut lo, mut hi) = (self.lo, self.hi);
         for p in pts {
             for (d, (&x, &o)) in p.xyz.iter().zip(&offset).enumerate() {
                 // (a coordinate the 32-bit integer of the scale and offset cannot hold, or not
@@ -288,10 +296,11 @@ impl LasWriter {
                     ["X", "Y", "Z"][d]
                 );
                 let stored = o + q as i32 as f64 * scale;
-                self.lo[d] = self.lo[d].min(stored);
-                self.hi[d] = self.hi[d].max(stored);
+                lo[d] = lo[d].min(stored);
+                hi[d] = hi[d].max(stored);
             }
         }
+        (self.lo, self.hi) = (lo, hi);
         self.n += pts.len() as u64;
         let record = |i: usize, rec: &mut [u8]| {
             let p = &pts[i];

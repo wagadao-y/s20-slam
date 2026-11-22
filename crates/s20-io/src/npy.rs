@@ -48,16 +48,20 @@ pub fn read_f64(path: &Path) -> Result<(Vec<f64>, usize, usize)> {
         v => bail!("unsupported npy version {v}"),
     };
     let header = std::str::from_utf8(b.get(hstart..hstart + hlen).ok_or_else(short)?)?;
-    // (read without the spaces: a Python literal may have them or not)
-    let compact: String = header.chars().filter(|c| !c.is_whitespace()).collect();
-    if !compact.contains("'<f8'") || compact.contains("'fortran_order':True") {
+    // (read without spaces and quotes: a Python literal may have either kind, spaces or not;
+    // a structured array (its descr a list) is refused, not read as plain numbers)
+    let compact: String = header
+        .chars()
+        .filter(|c| !c.is_whitespace() && *c != '\'' && *c != '"')
+        .collect();
+    if !compact.contains("descr:<f8,") || compact.contains("fortran_order:True") {
         bail!(
             "{}: only C-order float64 arrays are supported ({header})",
             path.display()
         );
     }
-    let shape_s = header
-        .split("'shape': (")
+    let shape_s = compact
+        .split("shape:(")
         .nth(1)
         .context("no shape")?
         .split(')')
@@ -89,4 +93,51 @@ pub fn read_f64(path: &Path) -> Result<(Vec<f64>, usize, usize)> {
         .map(|c| f64::from_le_bytes(*c))
         .collect();
     Ok((data, rows, cols))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An npy file of version 1 with header `h` (padded) and `n` zero doubles.
+    fn npy_of(path: &Path, h: &str, n: usize) {
+        let mut h = h.to_string();
+        while !(10 + h.len() + 1).is_multiple_of(64) {
+            h.push(' ');
+        }
+        h.push('\n');
+        let mut b = b"\x93NUMPY\x01\x00".to_vec();
+        b.extend((h.len() as u16).to_le_bytes());
+        b.extend(h.as_bytes());
+        b.extend(vec![0u8; 8 * n]);
+        fs::write(path, b).unwrap();
+    }
+
+    #[test]
+    fn headers_read_whatever_their_quotes_and_spaces() {
+        let f = std::env::temp_dir().join(format!("s20_npy_{}.npy", std::process::id()));
+        npy_of(
+            &f,
+            r#"{"descr":"<f8","fortran_order":False,"shape":(2,3)}"#,
+            6,
+        );
+        assert_eq!(read_f64(&f).unwrap().1..read_f64(&f).unwrap().2, 2..3);
+        // column order, written either way, refused
+        npy_of(
+            &f,
+            r#"{"descr":"<f8","fortran_order":True,"shape":(2,3)}"#,
+            6,
+        );
+        assert!(read_f64(&f).is_err());
+        // a structured array is not plain numbers
+        npy_of(
+            &f,
+            "{'descr': [('t', '<f8'), ('x', '<f8')], 'fortran_order': False, 'shape': (3,), }",
+            6,
+        );
+        assert!(read_f64(&f).is_err());
+        write_f64(&f, &[1., 2., 3., 4.], 2).unwrap();
+        assert_eq!(read_f64(&f).unwrap(), (vec![1., 2., 3., 4.], 2, 2));
+        let _ = fs::remove_file(&f);
+    }
 }

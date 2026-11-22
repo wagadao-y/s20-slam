@@ -580,26 +580,34 @@ fn write_into(
         source.display()
     );
     let keep = |p: &crate::las::LasPoint| opt.skip_class != Some(p.classification);
-    // (a point outside the header's bounds by more than a step refused: moved onto the cube's
-    // side, its count would hide it)
-    // (each axis to its own header bound: the cube is the longest axis')
-    let axis_end: [f64; 3] = std::array::from_fn(|d| {
-        let u = ((hi[d] - offset[d]) / scale).ceil();
-        if u.is_finite() { u + 1.0 } else { cube.size }
-    });
+    // (a point outside its header's bounds by more than half a step (the rounding of the stored
+    // integers) refused: moved onto the cube's side, its count would hide it; each axis to its
+    // own bounds)
+    let tol = 0.5 * scale + 1e-9 * scale.max(1.0);
     let to_int = |p: &crate::las::LasPoint| -> Result<[u32; 3]> {
         let mut out = [0u32; 3];
         for d in 0..3 {
-            let v = ((p.xyz[d] - offset[d]) / scale).round();
+            let x = p.xyz[d];
+            let below = if lo[d].is_finite() {
+                lo[d] - tol - x
+            } else {
+                0.
+            };
+            let above = if hi[d].is_finite() {
+                x - hi[d] - tol
+            } else {
+                0.
+            };
             ensure!(
-                v.is_finite() && v >= -1.0 && v <= axis_end[d],
+                x.is_finite() && below <= 0. && above <= 0.,
                 // (the axis and how far, not the coordinates: the log is shared, they would tell
                 // the place)
                 "{}: a point outside the header's bounds on the {} axis by {:.3} m",
                 source.display(),
                 ["X", "Y", "Z"][d],
-                if v < 0. { -v } else { v - axis_end[d] } * scale
+                below.max(above)
             );
+            let v = ((x - offset[d]) / scale).round();
             out[d] = v.clamp(0.0, cube.size - 1.0) as u32;
         }
         Ok(out)

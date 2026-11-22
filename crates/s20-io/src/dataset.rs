@@ -47,6 +47,40 @@ pub struct Source {
     pub size: u64,
 }
 
+/// A bag's fingerprint: FNV-1a over its size and its first and last MiB (quick on a large bag;
+/// two recordings of the same name and size differ in them).
+pub fn bag_fingerprint(bag: &Path) -> Result<u64> {
+    use std::io::{Read, Seek, SeekFrom};
+    const PART: u64 = 1 << 20;
+    let mut f = fs::File::open(bag).with_context(|| format!("open {}", bag.display()))?;
+    let size = f.metadata()?.len();
+    let mut h: u64 = 0xcbf29ce484222325;
+    let mut eat = |b: &[u8]| {
+        for &x in b {
+            h ^= x as u64;
+            h = h.wrapping_mul(0x100000001b3);
+        }
+    };
+    eat(&size.to_le_bytes());
+    let mut buf = vec![0u8; PART.min(size) as usize];
+    f.read_exact(&mut buf)?;
+    eat(&buf);
+    f.seek(SeekFrom::Start(size.saturating_sub(PART)))?;
+    f.read_exact(&mut buf)?;
+    eat(&buf);
+    Ok(h)
+}
+
+/// The fingerprint of the bag data folder `dir` was extracted from (`bag_fingerprint.txt`), when
+/// the extraction wrote one.
+pub fn extracted_fingerprint(dir: &Path) -> Option<u64> {
+    fs::read_to_string(dir.join(FINGERPRINT_FILE))
+        .ok()
+        .and_then(|s| u64::from_str_radix(s.trim(), 16).ok())
+}
+
+pub const FINGERPRINT_FILE: &str = "bag_fingerprint.txt";
+
 impl Source {
     pub const FILE: &str = "source.txt";
 
@@ -193,7 +227,9 @@ pub fn session_shifts(ranges: &[(f64, f64)]) -> Vec<f64> {
 /// given, relative to `out` or absolute, with their shifts) and the IMU and GNSS tables of all
 /// sessions with shifted times. Preserve the shared ENU frame across session changes, as well as
 /// `origin.txt` needed to display legacy results until they are regenerated. Returns the shifts.
-pub fn build_set(out: &Path, dirs: &[PathBuf]) -> Result<Vec<f64>> {
+/// `gnss`: the device's GNSS tables are used (its RTK): one that cannot be read is an error; else
+/// it is left out.
+pub fn build_set(out: &Path, dirs: &[PathBuf], gnss: bool) -> Result<Vec<f64>> {
     fs::create_dir_all(out)?;
     let full = |d: &PathBuf| {
         if d.is_absolute() {
@@ -226,9 +262,18 @@ pub fn build_set(out: &Path, dirs: &[PathBuf]) -> Result<Vec<f64>> {
             imu_all.extend_from_slice(&r[1..]);
         }
         // a session without GNSS (indoors) may have no table; one that cannot be read is an
-        // error, not a session without fixes
-        if full(d).join("gnss.npy").exists() {
-            for r in load_gnss(&full(d))? {
+        // error when the tables are used, not a session without fixes
+        let table = if full(d).join("gnss.npy").exists() {
+            match load_gnss(&full(d)) {
+                Ok(t) => t,
+                Err(e) if gnss => return Err(e),
+                Err(_) => Vec::new(),
+            }
+        } else {
+            Vec::new()
+        };
+        {
+            for r in table {
                 gnss_all.push(r[0] + shift);
                 gnss_all.extend_from_slice(&r[1..]);
             }

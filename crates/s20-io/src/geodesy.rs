@@ -77,7 +77,7 @@ impl CoordinateFrame {
     /// PDAL (with PROJ_ONLY_BEST_DEFAULT=YES also a transformation whose grid is missing, which
     /// PROJ else replaces silently by a coarser one, such as geoid heights left out). Written as
     /// `<stem>_crs.<ext>` without the extra dimensions (the normals: they are not rotated, and
-    /// QGIS 3.44 does not open LAS 1.4 files with extra bytes; `--writers.las.extra_dims=all`
+    /// QGIS 3.44 has failed to open LAS 1.4 files with extra bytes in some setups; `--writers.las.extra_dims=all`
     /// keeps them). Only for a local ENU frame.
     pub fn pdal_pipeline(&self, cloud: &str, target: Option<&str>) -> Option<String> {
         let Self::LocalEnu {
@@ -335,7 +335,8 @@ mod tests {
         assert_eq!(stages[2]["out_srs"], "EPSG:32654");
         assert_eq!(stages[2]["error_on_failure"], true);
         assert_eq!(stages[3]["filename"], "pointcloud_colorized_crs.laz");
-        // the normals left out by default (QGIS 3.44 opens no LAS 1.4 file with extra bytes)
+        // the normals left out by default (QGIS 3.44 failed to open LAS 1.4 files with extra
+        // bytes in some setups)
         assert!(stages[3].get("extra_dims").is_none());
         assert_eq!(pdal_pipeline_target(&text).as_deref(), Some("EPSG:32654"));
         // a target kept from an earlier pipeline, quoted as JSON

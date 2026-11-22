@@ -15,7 +15,7 @@ use std::{
 
 pub mod inspect;
 
-pub const ENGINE: &str = "rtklib-demo5-75a2e562/s20-16";
+pub const ENGINE: &str = "rtklib-demo5-75a2e562/s20-17";
 pub const LICENSE: &str = include_str!("../vendor/rtklib/license.txt");
 static SOLVER: Mutex<()> = Mutex::new(());
 
@@ -283,7 +283,7 @@ pub fn read(path: &Path) -> Result<ResultFile> {
         .context("read PPK result")
 }
 
-fn write(path: &Path, result: &ResultFile) -> Result<()> {
+fn write(path: &Path, result: &ResultFile, job: &Job) -> Result<()> {
     use std::io::Write;
     if let Some(dir) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
         std::fs::create_dir_all(dir)?;
@@ -308,6 +308,8 @@ fn write(path: &Path, result: &ResultFile) -> Result<()> {
         serde_json::to_writer(&mut w, result)?;
         w.flush()?;
         drop(w);
+        // (canceled while writing: the result before it stays)
+        job.check()?;
         std::fs::rename(&tmp, path)?;
         Ok(())
     })();
@@ -551,6 +553,24 @@ impl Drop for NativeGuard {
 pub fn process(raw: &Path, out: &Path, p: &Params, job: &Job) -> Result<ResultFile> {
     p.validate()?;
     job.check()?;
+    // (a JSON file, and none of the recording's: written over one, it would replace it)
+    ensure!(
+        out.extension()
+            .is_some_and(|x| x.eq_ignore_ascii_case("json")),
+        "the PPK result {} is not a .json file",
+        out.display()
+    );
+    if let Ok(o) = std::fs::canonicalize(out) {
+        for dir in [raw.to_path_buf(), raw.join("info")] {
+            for f in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+                ensure!(
+                    std::fs::canonicalize(f.path()).ok() != Some(o.clone()),
+                    "the PPK result {} is a file of the recording",
+                    out.display()
+                );
+            }
+        }
+    }
     let rover_path = raw.join("ROVER_PPKRAW.bin");
     let base_path = raw.join("BASE.BIN");
     let mut info: Vec<_> = std::fs::read_dir(raw.join("info"))?
@@ -595,7 +615,7 @@ pub fn process(raw: &Path, out: &Path, p: &Params, job: &Job) -> Result<ResultFi
     {
         if r.params != *p {
             r.params = p.clone();
-            write(out, &r)?;
+            write(out, &r, job)?;
         }
         job.log("PPK: using cached solution");
         job.log(&r.summary());
@@ -743,7 +763,7 @@ pub fn process(raw: &Path, out: &Path, p: &Params, job: &Job) -> Result<ResultFi
     };
     // (canceled while solving: the result before it stays)
     job.check()?;
-    write(out, &result)?;
+    write(out, &result, job)?;
     job.log(&result.summary());
     Ok(result)
 }

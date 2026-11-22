@@ -251,6 +251,11 @@ pub fn extract(raw: &Path, out: &Path, job: &crate::job::Job) -> Result<ExtractS
     // (canceled: no source.txt, so the folder does not pass for extracted)
     job.check()?;
 
+    // the bag's fingerprint, by which a moved recording is told from another of its name and size
+    fs::write(
+        out.join(crate::dataset::FINGERPRINT_FILE),
+        format!("{:016x}\n", crate::dataset::bag_fingerprint(&bag_path)?),
+    )?;
     // written last: its presence means the indices above are complete
     let size = fs::metadata(&bag_path)?.len();
     Source {
