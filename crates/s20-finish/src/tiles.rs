@@ -252,7 +252,7 @@ pub fn finish_tiled(
     let mut counts: FxHashMap<[i64; 2], u64> = FxHashMap::default();
     let mut total = 0usize;
     // the progress: reading the scans twice (count, split) about 5% of the time, the squares the
-    // rest, each by its observations (the park 2026-10-07 10-31: 19 of 415 s)
+    // rest, each by its observations
     for_chunks(
         data,
         tr,

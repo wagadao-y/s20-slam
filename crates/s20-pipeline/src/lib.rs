@@ -893,8 +893,7 @@ pub fn colorize(
     let info = rd.info();
     let origin = info.offset;
     let total = rd.len() as u64;
-    // the progress: reading and writing the cloud about 4% and 5% of the time (the park
-    // 2026-10-07 10-31: 16 and 23 of 446 s)
+    // the progress: reading and writing the cloud about 4% and 5% of the time
     let (read, write) = (job.part(0.0, 0.035), job.part(0.95, 1.0));
     let (mut xyz, mut nrm) = (Vec::with_capacity(rd.len()), Vec::with_capacity(rd.len()));
     loop {
@@ -1247,7 +1246,7 @@ impl Default for ProcessParams {
 impl ProcessParams {
     /// Parameters still at a default an earlier version had take today's (for settings carried
     /// over to new work: a work folder's own settings stay, so its results stay current):
-    /// `anchor_grid` 2 cm -> 4 cm (2026-10-29).
+    /// `anchor_grid` 2 cm -> 4 cm.
     pub fn update_old_defaults(&mut self) -> bool {
         let new = s20_finish::FinishParams::default().anchor_grid;
         let old = self.cloud.anchor_grid == 0.02 && new != 0.02;

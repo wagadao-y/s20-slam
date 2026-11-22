@@ -113,9 +113,9 @@ pub struct FinishParams {
     /// is tested against it. A query seen from the other side of a shared plane than the cell's
     /// mean ray is fitted alone; a query the shared fit rejects or leaves without a plane goes to
     /// the smaller-radius retries, fitted for the query alone. 0: every query alone. (2 cm to
-    /// 4 cm, 2026-10-29: the plane classification 220 -> 101 s on the shrine 2026-09-23, 106 ->
-    /// 46 s indoors; the surfaces as thick, 0.3-0.6% of the points over 1 cm away, on
-    /// rough surfaces, none on smooth ones; no difference seen.)
+    /// 4 cm: the plane classification in less than half the time; the surfaces as thick,
+    /// 0.3-0.6% of the points over 1 cm away on rough surfaces, none on smooth ones; no
+    /// difference seen.)
     pub anchor_grid: f64,
     /// A query with fewer raw observations than this within max(`support_radius`,
     /// `support_range` × its range) is not output (0: off).

@@ -1422,7 +1422,7 @@ mod tests {
 
     /// Without a second plane at an edge, the corner rounds a little: one face's 8 cm plane
     /// rejects the other face's points near the line, and the 4 / 2 cm retries lean between the
-    /// faces (2026-10-21: 3.9% of the points within 10 cm beyond 2 mm, at most 6.4 mm).
+    /// faces (3.9% of the points within 10 cm beyond 2 mm, at most 6.4 mm).
     #[test]
     fn corner_rounds_by_a_few_millimeters_at_most() {
         for anchor_grid in ANCHORS {

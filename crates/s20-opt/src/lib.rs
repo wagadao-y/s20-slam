@@ -150,8 +150,8 @@ impl Default for Params {
             ..Default::default()
         };
         Params {
-            // indoors and outdoors: every 4 gave the same clouds (haze, gaps, thickness against the
-            // maker's) indoors and in the park 2026-10-20, in a half to a third of the time
+            // indoors and outdoors: every 4 gave the same clouds (haze, gaps, thickness against
+            // PointClouds Studio's), in a half to a third of the time
             every: 8,
             rmin: 0.5,
             rmax: 60.0,
@@ -665,8 +665,8 @@ impl Problem {
         // yaw are observed, the prior only keeps the system regular.
         // Without RTK the prior only fixes the gauge, loosely: held tight on its one knot, the
         // corrections that turn the whole map (a loop's) bend the first seconds instead, the knot
-        // staying while the rest slides by the turn about the map (13 cm in 2 s on a park's 25-minute
-        // loop, 2026-10-31). `run` puts the first knot back afterwards.
+        // staying while the rest slides by the turn about the map (13 cm in 2 s on a 25-minute
+        // loop). `run` puts the first knot back afterwards.
         let (sy, sp) = if self.rtk.is_empty() {
             (1f64.to_radians(), 0.1f64)
         } else {

@@ -28,8 +28,8 @@ use s20_io::dataset::LidarData;
 
 pub const GRAV: f64 = 9.80665;
 pub const LIDAR_IMU_T: [f64; 3] = [-0.011, -0.02329, 0.04412];
-/// Accelerometer bias of the S20 used so far (m/s^2, body), as the PPK unified optimizations of the
-/// park recordings (three of them) estimated it.
+/// Accelerometer bias of the S20 used so far (m/s^2, body), as the PPK unified optimizations of
+/// three outdoor recordings estimated it.
 pub const S20_BA0: [f64; 3] = [-0.13, 0.0, -0.10];
 
 type M15 = SMatrix<f64, 15, 15>;
@@ -80,7 +80,7 @@ pub struct Params {
     /// consistency gate (0: off): an update whose correction of the IMU prediction exceeds this NIS
     /// (15 dof) is searched again from the prediction with correspondences up to `gate_corr` (m), and that
     /// search is taken when it stays within the gate. Against wrong correspondences that drag the pose
-    /// away while the IMU shows only a turn (2026-10-07 10-31-51, 470 s: 3 m and 0.9 m down)
+    /// away while the IMU shows only a turn (seen dragging it 3 m aside and 0.9 m down)
     pub gate_nis: f64,
     pub gate_corr: f64,
 }
@@ -102,7 +102,7 @@ impl Default for Params {
             lidar_scale: 30.0,
             // Keep short-term rotations closer to the gyro prediction. The old
             // 0.005 setting let scan matching make unnecessarily large corrections.
-            // Validated on the indoor and both park recordings; see the LIO experiments.
+            // Validated indoors and outdoors.
             ng: 0.0002,
             na: 0.05,
             nbg: 1e-4,
@@ -111,17 +111,17 @@ impl Default for Params {
             lidar_imu_t: LIDAR_IMU_T,
             search7: false,
             huber: 0.0,
-            // indoors and outdoors: validated on the 97 min park recording 2026-10-15 (tilt 3.2 -> 0.17
-            // deg mean), on the park recordings with PPK references and indoors (tilt 0.48 ->
-            // 0.19 deg, the optimized trajectory within 6 mm); see docs/processing.md
+            // indoors and outdoors: the tilt 3.2 -> 0.17 deg mean on a long outdoor recording,
+            // 0.48 -> 0.19 deg outdoors with PPK references and indoors (the optimized trajectory
+            // within 6 mm); see docs/processing.md
             grav: true,
             grav_sd: 0.2,
             grav_win: 3.0,
             tilt_lidar: 0.01,
             grav_nba: 1e-5,
             ba0: S20_BA0,
-            // validated on the 10-07 recordings, 10-03 and the 97 min 10-15 park and indoors;
-            // see docs/processing.md
+            // validated indoors and outdoors (long recordings among them); see
+            // docs/processing.md
             gate_nis: 200.0,
             gate_corr: 0.25,
         }

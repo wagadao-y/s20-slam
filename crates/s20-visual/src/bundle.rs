@@ -24,7 +24,7 @@ pub struct Settings {
     pub plane_scale: f64,
     /// a plane-held point's distance along its plane from where the starting poses' rays meet it
     /// (m; soft-L1 with `plane_scale`): the plane alone lets the frames that see one surface slide
-    /// along it with their points (a shrine's door: 5 cm); zero: not held along
+    /// along it with their points (in front of a door: 5 cm); zero: not held along
     pub along_sigma: f64,
     /// prior on each frame's correction (rad, m)
     pub rot_sigma: f64,

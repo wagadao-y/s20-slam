@@ -11,8 +11,8 @@
 //! few do, both lose) lose score; the best `views` are blended for the detail and all kept views
 //! for each cell's color (no seams where the camera's tone or white balance changed); a point
 //! one view sees that is much brighter than its neighbors takes their color; points no image
-//! sees are dropped. (Judged by eye on the four recordings of 2026-10-28, with the refined poses:
-//! a single view or fewer kept views leave seams, the median reference keeps a glare, 10 cm cells
+//! sees are dropped. (Judged by eye, with the refined poses: a single view or fewer kept views
+//! leave seams, the median reference keeps a glare, 10 cm cells
 //! leave the outline of the operator's shadow.)
 //!
 //! Done in squares (the square over all points, split in four while its points would take more
@@ -54,9 +54,9 @@ const SMALL: i64 = 100;
 /// The points around a square whose views it gathers too ([`BASE`] cells): the cells of the
 /// outlier test around its points (2 x `cell`) and the neighbors of the fill.
 const PART_MARGIN: i64 = 15;
-/// The memory of a point of a part while its views are gathered (bytes; the shrine 2026-09-23:
-/// 18.5 GB more for 65 M points more, and 32 for the cells around it), and the points of a part
-/// when the memory available is not known.
+/// The memory of a point of a part while its views are gathered (bytes; measured: about 285 a
+/// point, and 32 for the cells around it), and the points of a part when the memory available is
+/// not known.
 const BYTES_PER_POINT: f64 = 330.;
 const FALLBACK_POINTS: usize = 12_000_000;
 /// The z-buffer is filled where the colored points of an image fall, grown by this many cells:
@@ -108,7 +108,7 @@ pub struct ColorParams {
     /// steps between neighboring images and between the two cameras are leveled, while the
     /// exposure the camera chose for a place (darker in the sun, brighter in the shade) stays
     /// (0: the gains leveled over all images, which washes sunlit images out where most were
-    /// taken in the shade; the shrine 2026-10-22).
+    /// taken in the shade).
     pub gain_window: f64,
     /// Only points within this distance (m) of a camera are colored from it.
     pub max_range: f64,
@@ -118,8 +118,8 @@ pub struct ColorParams {
     pub graze: bool,
     /// The points are colored in squares in xy, split in four while the points of one (with
     /// its margin) would take more than this fraction of the memory available (0: all at once);
-    /// the result is the same. Fewer squares decode each image fewer times (the shrine
-    /// 2026-09-23, 77 M points: 27 squares 534 s and 17 GB, all at once 438 s and 36 GB).
+    /// the result is the same. Fewer squares decode each image fewer times (77 M points: in 27
+    /// squares a fifth longer than all at once, in half the memory).
     pub tile_memory: f64,
 }
 impl Default for ColorParams {
@@ -2240,7 +2240,7 @@ pub fn colorize(
         }
     }
     // the progress: the views about 80% of the time, the gains 3%, the colors the rest, each part
-    // by its points (the park 2026-10-07 10-31: 325, 11 and 70 of 406 s)
+    // by its points
     let all = rects.iter().map(&count_in).sum::<usize>().max(1) as f64;
     let mut before = vec![0.0];
     for r in &rects {
