@@ -17,7 +17,7 @@ s20 run <生データ1>,<生データ2>,... <作業フォルダー> --outdoor   
 | オプション | |
 |---|---|
 | `--outdoor` | 屋外の設定（既定は屋内） |
-| `--params` | GUI で保存した設定（`settings.json` の詳細パラメータ） |
+| `--params` | GUI の「JSON 書き出し…」の出力、または作業フォルダーの `settings.json`（その詳細パラメータを使う） |
 | `--no_rtk` | 機体の RTK を使わない（既定では FIX が 100 件以上あれば使う） |
 | `--ppk` | PPK を計算して使う（[PPK](ppk.md)） |
 | `--no_color` | 着色しない（`--images` とは併用できない：画像の出力は着色のあとに行うため） |
@@ -41,7 +41,7 @@ s20 opt      <data> runs/lio.txt runs/opt.txt [--rtk] [--ppk runs/ppk.json] [--r
 s20 cloud    <data> runs/opt.txt out/cloud.laz [--config params.json]
 s20 export   <data> runs/opt.txt out --calib <生データ>/info/calibration.yaml
 s20 refine-images --data <data> --imgpose runs/ImgPose.txt --calib calibration.yaml --cloud out/cloud.laz runs/ImgPose_refined.txt
-s20 colorize out/cloud.laz out/cloud_col.laz --images <data>/images --imgpose runs/ImgPose.txt --calib calibration.yaml
+s20 colorize out/cloud.laz out/cloud_col.laz --images <data>/images --imgpose runs/ImgPose.txt --calib calibration.yaml --trajectory out/trajectory.txt
 ```
 
 - 時刻は、セッションの最初のスキャンからの秒です。負の値は終わりからの秒です。複数セッションでは `セッション名@秒` か `番号@秒` で指定します。

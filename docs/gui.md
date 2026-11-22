@@ -34,7 +34,7 @@ Indoor and outdoor differ only in four LIO values (downsampling, the map's voxel
 
 | Step | What it does |
 |---|---|
-| Import | The bag's index (where the points and images are), the IMU and GNSS tables |
+| Data import | The bag's index (where the points and images are), the IMU and GNSS tables |
 | Odometry (LIO) | Tightly coupled LiDAR–inertial odometry |
 | Trajectory optimization | The whole trajectory optimized with the IMU, the planes of the point cloud, GNSS and loops |
 | Point cloud | Free-space test, projection onto surfaces, removal of things passing by |
@@ -65,7 +65,7 @@ Mouse: left drag rotates, right drag moves, the wheel zooms, a double click make
 
 The **Display** settings in the right panel:
 
-- **Point colors**: colorized (the camera images' colors), reflectivity, height, session, plain. Remembered separately for the scan and output point clouds. The height range can be changed at the legend's ends; **Fit to view** fits it to the points visible, **Auto** goes back.
+- **Point colors**: colorized (the camera images' colors), reflectivity, height, sessions, plain. Remembered separately for the scan and output point clouds. The height range can be changed at the legend's ends; **Fit to view** fits it to the points visible, **Auto** goes back.
 - **Range**: limits the scan point cloud to some seconds around the time chosen, or from the start to the time chosen.
 - **Adjust the point size automatically**: as Potree's adaptive size, makes the points larger to the spacing of the points drawn. Off by default for the scan point clouds.
 - **Drawn points** (5 million by default): the most points drawn on the whole screen. Coarse points of the whole point cloud always stay; zooming and moving loads the details needed in the background.
@@ -104,9 +104,9 @@ The right panel's **Trajectory** has a list of each kind under **Corrections**. 
 
 Recordings of the same place made in multiple sessions are joined into one trajectory and point cloud by adding their raw folders with **Add session…**. The import and LIO run per session (`sessions/<session name>/`; for an added session, that one only), and the trajectory optimization and the later steps once for all the sessions.
 
-- With GNSS (RTK / PPK), the sessions are placed by it.
+- With GNSS (RTK / PPK), the sessions are placed by it. Each session needs enough fixes within its trajectory (10 or more); one with too few is connected as below, by a loop or point matches.
 - Without GNSS (indoors and so on), the first session is the reference, and the others are connected to it by loops across sessions (two clicks on the trajectory) or point matches (clicks on the same feature in two sessions). Loops are easier when the paths pass the same spot. When they do not come close, use point matches, two pairs or more, far apart.
-- After the first placement, places passed again, within and across sessions, are found and registered by matching their point clouds (revisits: **Processing settings → Trajectory optimization → Revisits**, on by default; see [How it works](processing.md), in Japanese). So loops are needed only for the placement. A loop fits best at times when the two sessions see the same place in the same direction.
+- After the first placement, places passed again, within and across sessions, are found and registered by matching their point clouds (revisits: **Detailed parameters → Trajectory optimization → Revisits (same places found automatically)**, on by default; see [How it works](processing.md), in Japanese). So loops are needed only for the placement. A loop fits best at times when the two sessions see the same place in the same direction.
 - Work folders made by earlier versions open with revisits off (so their results do not change). To use them, turn on **Use revisits** and run the optimization again.
 - While adding point matches, the point a click would pick is shown at the pointer with its session's name and its distance from the camera (the distance tells you when it would pick a point behind). The points placed are marked P1, P2…; click a mark to select it, drag it onto another point of the same session to move it, Delete removes it. The list is by pairs of sessions, with each pair's current gap.
 

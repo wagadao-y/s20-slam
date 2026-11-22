@@ -55,6 +55,9 @@ fn quantile(v: &mut [f64], q: f64) -> f64 {
 pub fn run(est: &Path, reference: &Path, align_s: f64) -> Result<()> {
     let e = load(est)?;
     let rf = load(reference)?;
+    // (the poses looked up in the reference: none would panic)
+    anyhow::ensure!(!rf.is_empty(), "{}: no poses", reference.display());
+    anyhow::ensure!(!e.is_empty(), "{}: no poses", est.display());
     // pair each estimated pose with the reference pose at the same time (both are knots at scan ends)
     let mut pairs: Vec<(&Pose, &Pose)> = Vec::new();
     for x in &e {

@@ -31,7 +31,7 @@ pdal pipeline pdal_to_crs.json
 
 入力には、出力フォルダーの点群のうち、今の座標系で作られたいちばん新しいものを書きます（なければ軌跡 `trajectory.las`）。「点群生成」や「着色」をやり直したときも、それに合わせて書き直します。
 
-法線（と軌跡の向き）などの追加の属性は、既定では書きません。座標系に乗せた点群は GIS で使うことが多いのに、QGIS 3.44 では追加の属性（LAS 1.4 の Extra Bytes）を持つ LAS 1.4 のファイルが開けないためです（[QGIS の Issue #63906](https://github.com/qgis/QGIS/issues/63906)）。残すときは `--writers.las.extra_dims=all` を付けます。
+法線（と軌跡の向き）などの追加の属性は、既定では書きません。座標系に乗せた点群は GIS で使うことが多く、追加の属性（LAS 1.4 の Extra Bytes）を持つ LAS 1.4 のファイルが、QGIS 3.44 の一部の環境で開けない例があるためです（[QGIS の Issue #63906](https://github.com/qgis/QGIS/issues/63906)）。残すときは `--writers.las.extra_dims=all` を付けます。
 
 ## 注意
 

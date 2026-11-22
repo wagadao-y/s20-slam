@@ -31,7 +31,7 @@ This transforms, for example, `pointcloud_colorized.laz` into `pointcloud_colori
 
 The input is the newest point cloud in the output folder made in the current coordinates (else the trajectory, `trajectory.las`). It is written again when **Point cloud** or **Colorization** is redone.
 
-Extra dimensions such as the normals (and the trajectory's heading) are left out by default: point clouds placed in a coordinate system mostly go to GIS, and QGIS 3.44 does not open LAS 1.4 files with extra dimensions (LAS 1.4 Extra Bytes; [QGIS issue #63906](https://github.com/qgis/QGIS/issues/63906)). To keep them, add `--writers.las.extra_dims=all`.
+Extra dimensions such as the normals (and the trajectory's heading) are left out by default: point clouds placed in a coordinate system mostly go to GIS, and LAS 1.4 files with extra dimensions (LAS 1.4 Extra Bytes) have failed to open in QGIS 3.44 in some setups ([QGIS issue #63906](https://github.com/qgis/QGIS/issues/63906)). To keep them, add `--writers.las.extra_dims=all`.
 
 ## Notes
 

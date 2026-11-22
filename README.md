@@ -41,7 +41,7 @@ Processing time, for example: a 19-minute outdoor recording (4650 images) takes 
 ## Quick start
 
 1. Copy the S20's recording folder (the one holding `all_*.bag`) to your PC as a whole. The app reads the points and images from the bag instead of copying them into the work folder, so leave the copy in place while you work on it.
-2. Start `s20-gui.exe`, choose **New work folder…**, then pick the raw folder and an empty folder for the results.
+2. Start `s20-gui.exe`, choose **New work folder…**, then give the raw data folder, the work folder's name and its location.
 3. In **Processing settings** on the left, choose indoor / outdoor and the GNSS (none / the device's RTK / PPK). **Other settings…** has the output format and more.
 4. Press **Run from unfinished or unapplied steps**. The progress and the log are shown, and you can cancel at any time.
 5. When it finishes, the results are in `<work folder>/output/`.
@@ -73,7 +73,7 @@ Once you have processed a few recordings of your device, **Tools → Device cali
 
 To join recordings of the same place made in multiple sessions, add the other raw folders with **Add session…** in the left panel. They are optimized together as one trajectory and point cloud.
 
-- **With RTK or PPK** (outdoors): the sessions are placed by GNSS. Nothing more is needed.
+- **With RTK or PPK** (outdoors): the sessions are placed by GNSS. Each session needs enough fixes within its trajectory (10 or more); join one with too few (going indoors, for example) by a loop or matched points.
 - **Without GNSS** (indoors and so on): the first session is the reference, and each other session needs to be connected to it once. In the right panel's **Trajectory**, add a **loop** at a place both sessions passed (click both trajectories there), or **point matches** on the same features. A session not connected yet shows **Not connected** in the session list. After that, places passed again are found automatically (revisits).
 
 See [Multiple sessions](docs/gui.md#multiple-sessions) in the GUI guide for more.
@@ -97,7 +97,7 @@ s20 help                                                 # every command and opt
 
 ## Feedback
 
-s20-slam was made for my own use and has been tested on one S20 only (see [Known issues](docs/known-issues.md)), so support is best effort. Problems, questions and requests are welcome as [Issues](../../issues), though replies may take time. For a problem, please include the version (**Help → About**) and the log in the work folder's `logs/`.
+s20-slam was made for my own use and has been tested on one S20 only (see [Known issues](docs/known-issues.md)), so support is best effort. Problems, questions and requests are welcome as [Issues](../../issues), though replies may take time. For a problem, please include the version (**Help → About**) and the log in the work folder's `logs/`. The log shows the session names (the raw folders' names by default): hide them before attaching it if they hold place or personal names.
 
 ## Documentation
 

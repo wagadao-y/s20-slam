@@ -1356,8 +1356,15 @@ impl ProcessParams {
         serde_json::to_string_pretty(self).expect("parameters serialize")
     }
 
+    /// The parameters of a JSON export, or of a work folder's `settings.json` (under its
+    /// `params`: read as they are, unknown keys would be left out and the defaults taken).
     pub fn from_json(s: &str) -> Result<Self> {
-        serde_json::from_str(s).context("not a parameter file")
+        let v: serde_json::Value = serde_json::from_str(s).context("not a parameter file")?;
+        let params = match v.get("params") {
+            Some(p) if v.get("lio").is_none() && v.get("opt").is_none() => p.clone(),
+            _ => v,
+        };
+        serde_json::from_value(params).context("not a parameter file")
     }
 }
 
@@ -2692,6 +2699,19 @@ impl RunConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_work_folders_settings_give_their_parameters() {
+        let mut p = ProcessParams::preset(true);
+        p.lio.down = 0.37;
+        let w = WorkSettings {
+            params: p.clone(),
+            ..Default::default()
+        };
+        let from_settings = ProcessParams::from_json(&serde_json::to_string(&w).unwrap()).unwrap();
+        assert_eq!(from_settings, p);
+        assert_eq!(ProcessParams::from_json(&p.to_json()).unwrap(), p);
+    }
 
     #[test]
     fn beside_changes_the_file_name_only() {

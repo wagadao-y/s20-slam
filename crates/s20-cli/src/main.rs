@@ -536,6 +536,8 @@ fn opt(a: &mut Args, job: &Job) -> Result<()> {
         }
         None => Default::default(),
     };
+    // (its GNSS exclusions too, as a run takes them; the heading holds are LIO's)
+    rtk.exclude.extend(edits.rtk_exclude.iter().cloned());
     let mut loops = edits.loops;
     while let Some(e) = a.get_str("--loop")? {
         if e == "start-end" {
@@ -864,7 +866,7 @@ const USAGE: &str = "usage:
   s20 version
   s20 run <raw folder>[,<raw folder>...] <work folder> [--outdoor | --params file.json] [--no_rtk] [--no_color]
       [--redo] [--ppk] [--las] [--images [--3dgs_poses] [--sky_sphere | --no_sky_sphere]] [--no_refine] [--device_calibration file.yaml] [--until step]
-      (extract -> lio -> opt -> cloud -> export -> refine -> colorize; RTK is used when the receiver has 100 fixes or more;
+      (extract -> lio -> opt -> cloud -> export -> refine -> colorize -> images, --until stopping after one; RTK is used when the receiver has 100 fixes or more;
        refine: every image's pose refined against the cloud for the coloring, and the cameras solved from
        the recording, or with --device_calibration (made by calibrate-device) used in place of the maker's;
        extraction and odometry are reused when present and current (LIO redone when its settings changed),
@@ -890,16 +892,17 @@ const USAGE: &str = "usage:
   s20 calib <calibration.yaml>
   s20 eval-revisits <data> <opt_knots.txt> [out.csv] [--pairs pairs.csv] [--revisit_len s] [--revisit_dist m] [--revisit_inliers f] [--revisit_path_sd k] [--revisit_min_weak r]
   s20 eval-traj <estimate.txt> <reference.txt> [--align_s 30]
-      (drift after fitting the first seconds, ATE, relative errors over 1/5/30 s, jump intervals)
+      (drift after fitting the first seconds, ATE, relative errors over 1/5/30 s, jump intervals; both TUM
+       rows `t x y z qx qy qz qw`, as runs/opt.txt or output/trajectory_100hz_tum.txt)
   s20 lio <data folder> <out.txt> [--indoor] [--scans a:b] [--init_traj prev.txt] [--down m] [--map_vox m]
       [--max_corr m] [--rmin m] [--rmax m] [--lidar_scale s] [--lru n] [--iters n] [--min_inlier r] [--imu_shift s]
       [--static_sec s] [--ng x] [--na x] [--nbg x] [--nba x] [--hold a:b] [--search7] [--huber k] [--threads n]
-      [--grav | --no_grav] [--grav_sd deg] [--grav_win s] [--tilt_lidar f] [--grav_nba x] [--ba0 x,y,z]
+      [--grav | --no_grav] [--grav_sd deg] [--grav_win s] [--tilt_lidar f] [--grav_nba x] [--ba0 x,y,z] [--gate_nis x] [--gate_corr m]
       (--grav: correct the tilt with the gravity from the accelerometer; on by default, indoors too)
       (--hold: the heading and gyro bias follow the IMU in that interval, for round hills or featureless slopes; repeatable)
   s20 opt <data folder> <lio.txt>[,<lio.txt>...] <out.txt> [--every n] [--ng x] [--na x] [--nbg x] [--nba x] [--sigma_pt m]
-      [--lidar_w w] [--iters a,b,c] [--rtk [--rtk_sig_h m] [--rtk_sig_v m] [--rtk_c m] [--rtk_exclude a:b]] [--no_fix_check] [--fix_step_h m] [--fix_step_v m] [--loop a:b|start-end] [--loop_half s] [--no_loop_remeasure]
-      [--edits s20_edits.json] [--no_revisits] [--revisit_len s] [--revisit_dist m] [--revisit_inliers f] [--revisit_path_sd k] [--revisit_min_weak r] [--robust sd]
+      [--lidar_w w] [--iters a,b,c] [--rtk [--rtk_sig_h m] [--rtk_sig_v m] [--rtk_c m] [--rtk_exclude a:b]] [--no_fix_check] [--fix_step_h m] [--fix_step_v m] [--loop a:b|start-end] [--loop_half s] [--loop_pre n] [--no_loop_remeasure]
+      [--edits s20_edits.json (its loops, matched points and GNSS exclusions; heading holds are LIO's)] [--no_revisits] [--revisit_len s] [--revisit_dist m] [--revisit_inliers f] [--revisit_path_sd k] [--revisit_min_weak r] [--robust sd]
       [--ppk ppk.json[,ppk.json...]] [--match [session:]x,y,z=[session:]x,y,z]
       (times: seconds from the first scan of a session, [session@]t with the session's name or number; negative: from its end;
        multiple sessions without --rtk / --ppk: the first is the reference, the others are placed by loops between sessions
