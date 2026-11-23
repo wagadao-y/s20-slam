@@ -54,7 +54,13 @@ pub fn read_f64(path: &Path) -> Result<(Vec<f64>, usize, usize)> {
         .chars()
         .filter(|c| !c.is_whitespace() && *c != '\'' && *c != '"')
         .collect();
-    if !compact.contains("descr:<f8,") || compact.contains("fortran_order:True") {
+    // (each key's value up to the next ',' or '}': present, and as read here)
+    let value = |key: &str| {
+        let at = compact.find(&format!("{key}:"))? + key.len() + 1;
+        let rest = &compact[at..];
+        Some(&rest[..rest.find([',', '}']).unwrap_or(rest.len())])
+    };
+    if value("descr") != Some("<f8") || value("fortran_order") != Some("False") {
         bail!(
             "{}: only C-order float64 arrays are supported ({header})",
             path.display()
@@ -128,6 +134,15 @@ mod tests {
             r#"{"descr":"<f8","fortran_order":True,"shape":(2,3)}"#,
             6,
         );
+        assert!(read_f64(&f).is_err());
+        // the keys in another order, the last without a comma; a key missing
+        npy_of(
+            &f,
+            "{'shape': (2, 3), 'fortran_order': False, 'descr': '<f8'}",
+            6,
+        );
+        assert_eq!(read_f64(&f).unwrap().1, 2);
+        npy_of(&f, "{'descr': '<f8', 'shape': (2, 3), }", 6);
         assert!(read_f64(&f).is_err());
         // a structured array is not plain numbers
         npy_of(

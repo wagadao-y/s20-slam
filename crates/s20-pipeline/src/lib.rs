@@ -2247,15 +2247,21 @@ impl RunConfig {
         if !self.rtk || !self.data().join("gnss.npy").exists() {
             return Ok(None);
         }
-        // (each session's table read again: one damaged was left out of the joined table when it
-        // was made for PPK, and would be missed silently now)
+        // (each session's table read again, and the joined one to hold them all: one damaged was
+        // left out of it when it was made for PPK, and would be missed silently now)
+        let mut rows = 0;
         for k in 0..self.sessions.len() {
             let d = self.session_data(k);
             if d.join("gnss.npy").exists() {
-                s20_io::dataset::load_gnss(&d)?;
+                rows += s20_io::dataset::load_gnss(&d)?.len();
             }
         }
         let g = s20_io::dataset::load_gnss(&self.data())?;
+        ensure!(
+            g.len() == rows,
+            "the joined GNSS table does not hold every session's ({} of {rows} rows): redo the data import",
+            g.len()
+        );
         Ok(
             (g.iter().filter(|r| r[1] == s20_io::gnss::FIX).count() >= 100).then_some(RtkOptions {
                 params: self.params.rtk,

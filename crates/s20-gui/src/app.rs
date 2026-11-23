@@ -1026,6 +1026,13 @@ impl App {
                 return;
             }
         }
+        // (the work folder free of another run: else no run, and no revision of one)
+        if let Some(c) = self.config()
+            && let Err(e) = c.lock()
+        {
+            self.notify(Level::Warn, format!("{e:#}"));
+            return;
+        }
         // the corrections the optimization runs with stay as a revision (once the run is sure
         // to start)
         if first <= Step::Opt && last.is_none_or(|l| l >= Step::Opt) {

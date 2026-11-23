@@ -42,11 +42,13 @@ fn publish(from: &Path, to: &Path, made: &mut Vec<std::path::PathBuf>) -> Result
                 Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
                     bail!("{} came there meanwhile", dst.display())
                 }
-                // (no hard links there: moved when the name is free)
-                Err(_) => {
-                    ensure!(!dst.exists(), "{} came there meanwhile", dst.display());
-                    fs::rename(&p, &dst).with_context(|| format!("move {}", p.display()))?;
-                    made.push(dst.clone());
+                // (no hard links there: not moved by a rename, which could replace a file made
+                // meanwhile)
+                Err(e) => {
+                    return Err(anyhow::Error::from(e).context(format!(
+                        "{}: its file system has no hard links; cut into a folder on another drive",
+                        to.display()
+                    )));
                 }
             }
         }

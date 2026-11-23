@@ -189,7 +189,7 @@ extern int s20_ppk_solve(double elevation,double ratio,int estimate_ionosphere,i
     prcopt_t p=prcopt_default;
     solopt_t s=solopt_default;
     rtk_t *r;
-    int i,n=0;
+    int i,n=0,rcv;
     gtime_t start={0},end={0};
     if (!obss.n||!navs.n||norm(base->sta.pos,3)<1E6) return -1;
     if(prefer_base_l2c) match_base_l2();
@@ -205,13 +205,27 @@ extern int s20_ppk_solve(double elevation,double ratio,int estimate_ionosphere,i
     obss.n=n;nepoch=sortobs(&obss);uniqnav(&navs);
     /* An epoch of one receiver holds at most MAXOBS satellites: the base's merged MSM
        fragments could pass it, and RTKLIB's interpolation of the base writes MAXOBS entries. */
-    /* (counted within twice the tolerance of each observation, both ends included: RTKLIB's
-       forward and backward passes group from either end of an epoch) */
-    for(i=0;i<obss.n;i++) {
-        int k,count=0;
-        for(k=i;k<obss.n&&timediff(obss.data[k].time,obss.data[i].time)<=2.0*DTTOL;k++)
-            if(obss.data[k].rcv==obss.data[i].rcv) count++;
-        if(count>MAXOBS) return -3;
+    /* (an epoch of one receiver as RTKLIB's nextobsf/nextobsb take it: that receiver's run of
+       observations within DTTOL of its first (forward) or of its last (backward)) */
+    for(rcv=1;rcv<=2;rcv++) {
+        for(i=0;i<obss.n;) {
+            int m;
+            while(i<obss.n&&obss.data[i].rcv!=rcv) i++;
+            for(m=0;i+m<obss.n&&obss.data[i+m].rcv==rcv&&
+                timediff(obss.data[i+m].time,obss.data[i].time)<=DTTOL;m++) ;
+            if(m>MAXOBS) return -3;
+            if(m==0) break;
+            i+=m;
+        }
+        for(i=obss.n-1;i>=0;) {
+            int m;
+            while(i>=0&&obss.data[i].rcv!=rcv) i--;
+            for(m=0;i-m>=0&&obss.data[i-m].rcv==rcv&&
+                timediff(obss.data[i-m].time,obss.data[i].time)>=-DTTOL;m++) ;
+            if(m>MAXOBS) return -3;
+            if(m==0) break;
+            i-=m;
+        }
     }
     memcpy(navs.glo_fcn,base->nav.glo_fcn,sizeof(navs.glo_fcn));
     p.mode=PMODE_KINEMA;p.soltype=SOLTYPE_COMBINED;p.nf=frequencies;

@@ -200,6 +200,13 @@ fn main() -> Result<()> {
             threads(&mut a)?;
             a.finish()?;
             s20_visual::run::run(&input, &job)?;
+            // the refined poses in the input poses' coordinates, recorded as the full run does
+            // (colorize checks them against the cloud's)
+            if let Some(frame) = s20_pipeline::frames::recorded(&input.data, &input.imgpose)? {
+                let mut written = vec![input.out.as_path()];
+                written.extend(input.tracks.as_deref());
+                s20_pipeline::frames::record(&input.data, &written, Some(frame))?;
+            }
         }
         "calibrate-device" => {
             let out = PathBuf::from(a.get_str("--out")?.context("--out <calibration.yaml>")?);
@@ -909,7 +916,8 @@ const USAGE: &str = "usage:
   s20 eval-revisits <data> <opt_knots.txt> [out.csv] [--pairs pairs.csv] [--revisit_len s] [--revisit_dist m] [--revisit_inliers f] [--revisit_path_sd k] [--revisit_min_weak r]
   s20 eval-traj <estimate.txt> <reference.txt> [--align_s 30]
       (drift after fitting the first seconds, ATE, relative errors over 1/5/30 s, jump intervals; both TUM
-       rows `t x y z qx qy qz qw`, as runs/opt.txt or runs/trajectory_100hz_tum.txt)
+       rows `t x y z qx qy qz qw` of the same clock, in time order: runs/opt.txt of two runs, or
+       runs/trajectory_100hz_tum.txt (the output clock) of two runs; poses matched within 1 ms)
   s20 lio <data folder> <out.txt> [--indoor] [--scans a:b] [--init_traj prev.txt] [--down m] [--map_vox m]
       [--max_corr m] [--rmin m] [--rmax m] [--lidar_scale s] [--lru n] [--iters n] [--min_inlier r] [--imu_shift s]
       [--static_sec s] [--ng x] [--na x] [--nbg x] [--nba x] [--hold a:b] [--search7] [--huber k] [--threads n]

@@ -51,6 +51,11 @@ pub struct Source {
 /// whole, as a part read would miss a chunk replaced; made by the extraction (which reads the bag
 /// anyway) and when a recording moved, not at every run.
 pub fn bag_fingerprint(bag: &Path) -> Result<u64> {
+    bag_fingerprint_checked(bag, &|| Ok(()))
+}
+
+/// [`bag_fingerprint`] that asks `check` between its blocks (a cancellation stops it).
+pub fn bag_fingerprint_checked(bag: &Path, check: &dyn Fn() -> Result<()>) -> Result<u64> {
     use std::io::Read;
     let mut f = fs::File::open(bag).with_context(|| format!("open {}", bag.display()))?;
     let size = f.metadata()?.len();
@@ -62,6 +67,7 @@ pub fn bag_fingerprint(bag: &Path) -> Result<u64> {
     eat(size);
     let mut buf = vec![0u8; 8 << 20];
     loop {
+        check()?;
         let n = f.read(&mut buf)?;
         if n == 0 {
             break;
