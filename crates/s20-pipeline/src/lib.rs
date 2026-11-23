@@ -403,12 +403,12 @@ pub fn opt(
             Ok(CoordinateFrame::LocalSlam | CoordinateFrame::LegacyProjected { .. })
         );
     // (canceled in the last iteration or since: the results before it stay)
-    job.check()?;
-    s20_io::dataset::write_tum(
-        out,
+    let dense = s20_io::dataset::tum_text(
         &dense,
         "t x y z qx qy qz qw (world_T_imu, sensor clock; unified optimization)",
-    )?;
+    );
+    job.check()?;
+    std::fs::write(out, dense)?;
     std::fs::write(beside(out, "_knots.txt"), s)?;
     std::fs::write(quality_file(out), q)?;
     frames::record(data, &[out], Some(frame))?;
@@ -2561,17 +2561,11 @@ impl RunConfig {
                 job,
             )?,
             Step::Opt => {
-                // (the joined data of the sessions as they are now, in their order: the sessions
-                // changed or reordered elsewhere since the import, it is made again, else the
-                // optimization would pair one session's odometry with another's)
-                if !self.set_current() {
-                    job.log("the joined data of the sessions is made again (the sessions changed)");
-                    s20_io::dataset::build_set(
-                        &self.data(),
-                        &self.set_dirs(),
-                        self.rtk && !self.ppk,
-                    )?;
-                }
+                // (the joined data made again from the sessions' tables as they are now, in their
+                // order, at every optimization (quick): sessions reordered elsewhere, or a table
+                // changed since the import, would pair one session's odometry or fixes with
+                // another's)
+                s20_io::dataset::build_set(&self.data(), &self.set_dirs(), self.rtk && !self.ppk)?;
                 if self.ppk {
                     for (j, s) in self.sessions.iter().enumerate() {
                         std::fs::create_dir_all(self.session_runs(j))?;

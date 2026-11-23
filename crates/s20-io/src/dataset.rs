@@ -586,7 +586,10 @@ fn bag_image(path: &Path) -> Result<(Arc<Source>, PathBuf, usize, usize)> {
     static INDICES: OnceLock<Mutex<HashMap<PathBuf, Index>>> = OnceLock::new();
     let idx = {
         let mut all = INDICES.get_or_init(Default::default).lock().unwrap();
-        match all.get(dir) {
+        // (kept while the data folder still points at the same bag: relinked to a moved one, its
+        // index is read again)
+        let now = Source::read(dir).ok();
+        match all.get(dir).filter(|i| now.as_ref() == Some(&*i.0)) {
             Some(i) => i.clone(),
             None => {
                 let refs =
@@ -745,17 +748,24 @@ pub fn img_pose_fields(line: &str) -> Option<Vec<&str>> {
             .count()
             == 11
     };
-    let line = line
-        .char_indices()
-        .find(|&(i, c)| {
-            let before = &line[..i];
-            c == '#'
-                && before.ends_with(char::is_whitespace)
-                && line[i + 1..].chars().next().is_none_or(char::is_whitespace)
-                && ends_in_numbers(before)
-                && !ends_in_numbers(&line[i + 1..])
-        })
-        .map_or(line, |(i, _)| &line[..i]);
+    // (a '#' that could start a comment but has the pose numbers after it too: the line reads two
+    // ways, refused rather than taking one)
+    let mut cut = None;
+    for (i, c) in line.char_indices() {
+        let before = &line[..i];
+        if c == '#'
+            && before.ends_with(char::is_whitespace)
+            && line[i + 1..].chars().next().is_none_or(char::is_whitespace)
+            && ends_in_numbers(before)
+        {
+            if ends_in_numbers(&line[i + 1..]) {
+                return None;
+            }
+            cut = Some(i);
+            break;
+        }
+    }
+    let line = cut.map_or(line, |i| &line[..i]);
     let mut tokens: Vec<(usize, &str)> = Vec::new();
     let mut start = None;
     for (i, c) in line.char_indices() {
@@ -804,6 +814,12 @@ pub fn read_tum(path: &Path) -> Result<Vec<[f64; 8]>> {
 }
 
 pub fn write_tum(path: &Path, rows: &[[f64; 8]], header: &str) -> Result<()> {
+    fs::write(path, tum_text(rows, header))?;
+    Ok(())
+}
+
+/// The text [`write_tum`] writes.
+pub fn tum_text(rows: &[[f64; 8]], header: &str) -> String {
     let mut s = format!("# {header}\n");
     for r in rows {
         s.push_str(&format!(
@@ -811,8 +827,7 @@ pub fn write_tum(path: &Path, rows: &[[f64; 8]], header: &str) -> Result<()> {
             r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7]
         ));
     }
-    fs::write(path, s)?;
-    Ok(())
+    s
 }
 
 /// Whitespace separated numeric table ('#' comments).
@@ -869,9 +884,11 @@ mod tests {
         let line = format!("l_1.jpg {nums} # audit {nums} # end");
         let v = img_pose_fields(&line).unwrap();
         assert_eq!((v[0], v.len(), v[11]), ("l_1.jpg", 12, "12.5"));
+        // read two ways (a comment ending in eleven numbers, or a name of them and a '#'): refused
         let line = format!("C:/Survey 1 2 3 4 5 6 7 8 9 10 11 # East/l_1.jpg {nums}");
-        let v = img_pose_fields(&line).unwrap();
-        assert_eq!(v[0], "C:/Survey 1 2 3 4 5 6 7 8 9 10 11 # East/l_1.jpg");
+        assert!(img_pose_fields(&line).is_none());
+        let line = format!("l_1.jpg {nums} # before {nums}");
+        assert!(img_pose_fields(&line).is_none());
         let line = format!("C:/Survey 1 2 3 4 5 6 7 8 9 10 11 #2/l_1.jpg {nums}");
         let v = img_pose_fields(&line).unwrap();
         assert_eq!(v[0], "C:/Survey 1 2 3 4 5 6 7 8 9 10 11 #2/l_1.jpg");

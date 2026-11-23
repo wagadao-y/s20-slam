@@ -18,7 +18,7 @@ The steps are extract → lio → opt → cloud → export → refine → colori
 |---|---|
 | `--outdoor` | Outdoor settings (indoor by default) |
 | `--params` | The output of the GUI's **Export JSON…**, or a work folder's `settings.json` (its detailed parameters are used) |
-| `--no_rtk` | Do not use the device's RTK (by default it is used when there are 100 fixes or more) |
+| `--no_rtk` | Do not use the device's RTK (by default it is used with 100 fixes or more over all sessions) |
 | `--ppk` | Compute and use PPK ([PPK](ppk.md), in Japanese) |
 | `--no_color` | Do not color (not with `--images`: the image export follows the coloring) |
 | `--las` | Write the point clouds as LAS (LAZ by default) |

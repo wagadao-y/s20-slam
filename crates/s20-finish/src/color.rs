@@ -178,6 +178,20 @@ fn load_poses(imgpose: &Path) -> Result<Vec<Pose>> {
             f[i].parse::<f64>()
                 .with_context(|| format!("ImgPose.txt: line {}, field {}", row + 1, i + 1))
         };
+        // (finite, its quaternion not zero: else NaN in every point it colors)
+        for i in 1..12 {
+            ensure!(
+                x(i)?.is_finite(),
+                "ImgPose.txt: line {}, field {} not finite",
+                row + 1,
+                i + 1
+            );
+        }
+        ensure!(
+            [7, 8, 9, 10].iter().any(|&i| x(i).is_ok_and(|v| v != 0.)),
+            "ImgPose.txt: line {}, a zero quaternion",
+            row + 1
+        );
         let q = UnitQuaternion::from_quaternion(Quaternion::new(x(10)?, x(7)?, x(8)?, x(9)?));
         let base = Path::new(f[0])
             .file_name()

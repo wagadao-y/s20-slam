@@ -213,6 +213,14 @@ fn main() -> Result<()> {
             let mut ledger = None;
             for d in std::iter::once(input.data.clone()).chain(work_data) {
                 if let Some(frame) = s20_pipeline::frames::recorded(&d, &input.imgpose)? {
+                    // (the cloud in the same coordinates, when they are known: else the poses
+                    // would be fitted to a cloud elsewhere)
+                    if let Some(cloud) = s20_pipeline::frames::recorded(&d, &input.cloud)? {
+                        anyhow::ensure!(
+                            cloud == frame,
+                            "the image poses and the cloud are in different coordinates; make them by the same run"
+                        );
+                    }
                     ledger = Some((d, frame));
                     break;
                 }
@@ -905,7 +913,7 @@ const USAGE: &str = "usage:
   s20 version
   s20 run <raw folder>[,<raw folder>...] <work folder> [--outdoor | --params file.json] [--no_rtk] [--no_color]
       [--redo] [--ppk] [--las] [--images [--3dgs_poses] [--sky_sphere | --no_sky_sphere]] [--no_refine] [--device_calibration file.yaml] [--until step]
-      (extract -> lio -> opt -> cloud -> export -> refine -> colorize -> images, --until stopping after one; RTK is used when the receiver has 100 fixes or more;
+      (extract -> lio -> opt -> cloud -> export -> refine -> colorize -> images, --until stopping after one; RTK is used with 100 fixes or more over all sessions;
        refine: every image's pose refined against the cloud for the coloring, and the cameras solved from
        the recording, or with --device_calibration (made by calibrate-device) used in place of the maker's;
        extraction and odometry are reused when present and current (LIO redone when its settings changed),

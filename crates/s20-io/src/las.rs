@@ -289,10 +289,8 @@ impl LasWriter {
                 let q = ((x - o) * inv).round();
                 anyhow::ensure!(
                     q.is_finite() && q >= i32::MIN as f64 && q <= i32::MAX as f64,
-                    // (how far from the offset, not the coordinates: the log is shared)
-                    "a coordinate {:.0} m from the offset on the {} axis, more than the scale \
-                     {scale} holds",
-                    x - o,
+                    // (the axis and the scale, no value of the point: the log is shared)
+                    "a coordinate on the {} axis the scale {scale} cannot hold from the offset",
                     ["X", "Y", "Z"][d]
                 );
                 let stored = o + q as i32 as f64 * scale;

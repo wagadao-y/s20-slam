@@ -476,6 +476,14 @@ pub fn read_image_poses(path: &Path) -> Result<ImagePoses> {
             .map(str::to_string)
             .collect();
         let f = |k: usize| -> Result<f64> { Ok(v[k].parse::<f64>()?) };
+        // (finite, its quaternion not zero: else NaN in the refinement and the COLMAP model)
+        anyhow::ensure!(
+            (1..12).all(|k| f(k).is_ok_and(f64::is_finite))
+                && [7, 8, 9, 10].iter().any(|&k| f(k).is_ok_and(|x| x != 0.)),
+            "{}: line {} is not a finite pose",
+            path.display(),
+            row + 1
+        );
         let q = UnitQuaternion::from_quaternion(Quaternion::new(f(10)?, f(7)?, f(8)?, f(9)?));
         out.names.push(v[0].clone());
         out.poses.push(Pose {
