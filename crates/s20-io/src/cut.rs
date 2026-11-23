@@ -21,6 +21,39 @@ pub struct CutStats {
 /// into `out` (a new or empty folder), under the same name, and copies the other files: those at
 /// the top of `raw` and the `info` folder. The LiDAR odometry starts from the first seconds being
 /// still, so `from` should fall a few seconds before the device starts moving.
+/// Puts the files and folders of `from` into `to` without replacing anything there: a file by a
+/// hard link made new (refused when the name is taken), then the original gone; a folder made
+/// new. What it made is appended to `made`.
+fn publish(from: &Path, to: &Path, made: &mut Vec<std::path::PathBuf>) -> Result<()> {
+    for e in fs::read_dir(from)? {
+        let p = e?.path();
+        let dst = to.join(p.file_name().context("no name")?);
+        if p.is_dir() {
+            fs::create_dir(&dst).with_context(|| format!("{} is there already", dst.display()))?;
+            made.push(dst.clone());
+            publish(&p, &dst, made)?;
+        } else {
+            // (a link made new fails when the name is taken, where a rename would replace)
+            match fs::hard_link(&p, &dst) {
+                Ok(()) => {
+                    made.push(dst.clone());
+                    fs::remove_file(&p)?;
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                    bail!("{} came there meanwhile", dst.display())
+                }
+                // (no hard links there: moved when the name is free)
+                Err(_) => {
+                    ensure!(!dst.exists(), "{} came there meanwhile", dst.display());
+                    fs::rename(&p, &dst).with_context(|| format!("move {}", p.display()))?;
+                    made.push(dst.clone());
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 pub fn cut_raw(raw: &Path, out: &Path, from: f64, to: f64, job: &Job) -> Result<CutStats> {
     ensure!(from >= 0.0 && to > from, "the span {from}..{to} s is empty");
     let src = find_bag(raw)?;
@@ -117,21 +150,15 @@ pub fn cut_raw(raw: &Path, out: &Path, from: f64, to: f64, job: &Job) -> Result<
             .filter_map(|e| e.ok())
             .any(|e| e.path() != stage);
         ensure!(!others, "{} is no longer empty", out.display());
-        for e in fs::read_dir(&stage)? {
-            let p = e?.path();
-            let to = out.join(p.file_name().context("no name")?);
-            // (a file come there meanwhile is not replaced: the rename would)
-            ensure!(!to.exists(), "{} came there meanwhile", to.display());
-            fs::rename(&p, &to).with_context(|| format!("move {}", p.display()))?;
-            moved.push(to);
-        }
-        fs::remove_dir(&stage).with_context(|| format!("remove {}", stage.display()))
+        publish(&stage, out, &mut moved)?;
+        fs::remove_dir_all(&stage).with_context(|| format!("remove {}", stage.display()))
     })();
     if let Err(e) = written {
         let _ = fs::remove_dir_all(&stage);
-        for p in &moved {
+        // (only what this run made: its files first, then its folders when left empty)
+        for p in moved.iter().rev() {
             let _ = if p.is_dir() {
-                fs::remove_dir_all(p)
+                fs::remove_dir(p)
             } else {
                 fs::remove_file(p)
             };

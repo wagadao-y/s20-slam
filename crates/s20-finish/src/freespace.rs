@@ -290,7 +290,7 @@ impl FreeSpace {
                 ) {
                     Ok(p) => Some(p),
                     // canceled: not again on the CPU (the caller's next check stops the run)
-                    Err(e) if s20_io::job::is_canceled(&e) => {
+                    Err(e) if s20_io::job::is_canceled(&e) || job.check().is_err() => {
                         Some((vec![0; keys.len()], Default::default()))
                     }
                     Err(e) => {

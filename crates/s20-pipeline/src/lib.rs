@@ -1610,6 +1610,14 @@ impl RunConfig {
     /// fingerprints: the extraction's, else the old bag's when it is still there. Neither known (an
     /// extraction of an older version whose bag moved), the name and size decide.
     fn same_fingerprint(data: &Path, old: &Path, bag: &Path) -> bool {
+        // (the same file: nothing to compare, nor a whole bag to read)
+        if old
+            .canonicalize()
+            .ok()
+            .is_some_and(|o| bag.canonicalize().ok() == Some(o))
+        {
+            return true;
+        }
         let known = s20_io::dataset::extracted_fingerprint(data)
             .or_else(|| s20_io::dataset::bag_fingerprint(old).ok());
         match known {
@@ -2239,6 +2247,14 @@ impl RunConfig {
         if !self.rtk || !self.data().join("gnss.npy").exists() {
             return Ok(None);
         }
+        // (each session's table read again: one damaged was left out of the joined table when it
+        // was made for PPK, and would be missed silently now)
+        for k in 0..self.sessions.len() {
+            let d = self.session_data(k);
+            if d.join("gnss.npy").exists() {
+                s20_io::dataset::load_gnss(&d)?;
+            }
+        }
         let g = s20_io::dataset::load_gnss(&self.data())?;
         Ok(
             (g.iter().filter(|r| r[1] == s20_io::gnss::FIX).count() >= 100).then_some(RtkOptions {
@@ -2369,7 +2385,7 @@ impl RunConfig {
     fn begin(&self) -> Result<WorkLock> {
         let lock = self.lock()?;
         if self.from_project
-            && Self::project_sessions(&self.work).is_some_and(|now| now != self.sessions)
+            && Self::project_sessions(&self.work).is_none_or(|now| now != self.sessions)
         {
             bail!(
                 "the sessions of {} changed meanwhile (another window or the CLI): open it again",

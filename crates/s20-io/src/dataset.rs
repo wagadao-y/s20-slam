@@ -47,27 +47,33 @@ pub struct Source {
     pub size: u64,
 }
 
-/// A bag's fingerprint: FNV-1a over its size and its first and last MiB (quick on a large bag;
-/// two recordings of the same name and size differ in them).
+/// A bag's fingerprint: FNV-1a (64-bit, 8 bytes at a time) over its size and all its bytes. Read
+/// whole, as a part read would miss a chunk replaced; made by the extraction (which reads the bag
+/// anyway) and when a recording moved, not at every run.
 pub fn bag_fingerprint(bag: &Path) -> Result<u64> {
-    use std::io::{Read, Seek, SeekFrom};
-    const PART: u64 = 1 << 20;
+    use std::io::Read;
     let mut f = fs::File::open(bag).with_context(|| format!("open {}", bag.display()))?;
     let size = f.metadata()?.len();
     let mut h: u64 = 0xcbf29ce484222325;
-    let mut eat = |b: &[u8]| {
-        for &x in b {
-            h ^= x as u64;
-            h = h.wrapping_mul(0x100000001b3);
-        }
+    let mut eat = |x: u64| {
+        h ^= x;
+        h = h.wrapping_mul(0x100000001b3);
     };
-    eat(&size.to_le_bytes());
-    let mut buf = vec![0u8; PART.min(size) as usize];
-    f.read_exact(&mut buf)?;
-    eat(&buf);
-    f.seek(SeekFrom::Start(size.saturating_sub(PART)))?;
-    f.read_exact(&mut buf)?;
-    eat(&buf);
+    eat(size);
+    let mut buf = vec![0u8; 8 << 20];
+    loop {
+        let n = f.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        let (words, rest) = buf[..n].as_chunks::<8>();
+        for w in words {
+            eat(u64::from_le_bytes(*w));
+        }
+        for &b in rest {
+            eat(b as u64);
+        }
+    }
     Ok(h)
 }
 
@@ -713,15 +719,16 @@ pub fn output_offsets(data: &Path) -> Result<Vec<f64>> {
 /// may hold spaces (the absolute path of a session's image). None without eleven numbers after a
 /// name.
 pub fn img_pose_fields(line: &str) -> Option<Vec<&str>> {
-    // (a comment after the numbers left out: from the last '#' after a space that follows eleven
-    // numbers, not one in the name)
+    // (a comment after the numbers left out: from the first '#' standing alone (a space before
+    // it, a space or the end after it) that follows eleven numbers; one in a name ("#2") is the
+    // name's)
     let line = line
         .char_indices()
-        .rev()
         .find(|&(i, c)| {
             let before = &line[..i];
             c == '#'
                 && before.ends_with(char::is_whitespace)
+                && line[i + 1..].chars().next().is_none_or(char::is_whitespace)
                 && before
                     .split_whitespace()
                     .rev()
@@ -809,6 +816,21 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_bag_differing_in_its_middle_has_another_fingerprint() {
+        let dir = std::env::temp_dir().join(format!("s20_fp_{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let mut a = vec![7u8; 5 << 20];
+        let (fa, fb) = (dir.join("a.bag"), dir.join("b.bag"));
+        fs::write(&fa, &a).unwrap();
+        // the first and last MiB the same, a byte in the middle not
+        a[(5 << 20) / 2] = 8;
+        fs::write(&fb, &a).unwrap();
+        assert_ne!(bag_fingerprint(&fa).unwrap(), bag_fingerprint(&fb).unwrap());
+        assert_eq!(bag_fingerprint(&fa).unwrap(), bag_fingerprint(&fa).unwrap());
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
     fn an_image_name_with_spaces_stays_whole() {
         let nums = "1 2 3 0.1 0.2 0.3 0 0 0 1 12.5";
         let line = format!("C:/My work/A b/images/left/l_1.jpg {nums}");
@@ -825,6 +847,13 @@ mod tests {
         let line = format!("C:/My work/l_1.jpg {nums}  # refined");
         let v = img_pose_fields(&line).unwrap();
         assert_eq!((v[0], v.len(), v[11]), ("C:/My work/l_1.jpg", 12, "12.5"));
+        // a comment with numbers of its own, and a name of numbers and a '#'
+        let line = format!("l_1.jpg {nums} # audit {nums} # end");
+        let v = img_pose_fields(&line).unwrap();
+        assert_eq!((v[0], v.len(), v[11]), ("l_1.jpg", 12, "12.5"));
+        let line = format!("C:/Survey 1 2 3 4 5 6 7 8 9 10 11 #2/l_1.jpg {nums}");
+        let v = img_pose_fields(&line).unwrap();
+        assert_eq!(v[0], "C:/Survey 1 2 3 4 5 6 7 8 9 10 11 #2/l_1.jpg");
         // a '#' after a space in the name is the name's
         let line = format!("C:/Survey #2/l_1.jpg {nums} # refined");
         let v = img_pose_fields(&line).unwrap();

@@ -982,6 +982,12 @@ pub fn run(input: &Input, job: &Job) -> Result<serde_json::Value> {
         .map(|(h, (o, k))| !h && for_refinement(o, *k))
         .collect();
     let fit = input.calib_out.is_some();
+    // (cameras solved from no observation are the prior, not a calibration: refused before any
+    // output)
+    anyhow::ensure!(
+        !fit || train.iter().any(|t| *t),
+        "no observations to solve the cameras from (no matches between the images on the cloud)"
+    );
     job.log(if fit {
         "refining the image poses and the cameras"
     } else {
@@ -1091,10 +1097,9 @@ pub fn run(input: &Input, job: &Job) -> Result<serde_json::Value> {
             onto.scale_hold * 100.
         ));
         let solved = onto.poses;
-        // (canceled while adjusting: the poses before it stay)
-        job.check()?;
-        write_poses(tracks_out, &poses.rows, &solved)?;
-        if let Some(points_out) = &input.track_points {
+        // (the epipolar search first, the poses and the points written after it: canceled while
+        // adjusting or searching, the outputs before it stay together)
+        let points = if input.track_points.is_some() {
             let started = std::time::Instant::now();
             let loose = match &free {
                 Some(f) => free_tracks(
@@ -1113,6 +1118,13 @@ pub fn run(input: &Input, job: &Job) -> Result<serde_json::Value> {
                 started.elapsed().as_secs_f64(),
                 crate::memory::note()
             ));
+            Some(loose)
+        } else {
+            None
+        };
+        job.check()?;
+        write_poses(tracks_out, &poses.rows, &solved)?;
+        if let (Some(points_out), Some(loose)) = (&input.track_points, points) {
             let cloud = free.as_ref().map(|f| &f.cloud);
             let (n, off) =
                 write_track_points(points_out, &[&tracks, &loose], &solved, &poses.times, cloud)?;

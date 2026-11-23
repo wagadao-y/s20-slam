@@ -592,7 +592,13 @@ impl ZBuffer {
 /// The most points whose results and gain entries the read-back buffer of `max` bytes holds: it
 /// takes `16 + (points + points / 20 + 1) * 20` bytes, as allocated.
 fn readback_most(max: u64) -> u64 {
-    (max.saturating_sub(16) / 20).saturating_sub(1) * 20 / 21
+    let bytes = |p: u64| 16 + (p + p / 20 + 1) * 20;
+    // (from below, then up to the last that fits: the floor of the estimate may leave one)
+    let mut p = (max.saturating_sub(16) / 20).saturating_sub(1) * 20 / 21;
+    while bytes(p + 1) <= max {
+        p += 1;
+    }
+    p
 }
 
 #[cfg(test)]
@@ -609,6 +615,8 @@ mod readback_tests {
                 "{max}: {m} points take {}",
                 bytes(m)
             );
+            // the most: one more does not fit
+            assert!(bytes(m + 1) > max, "{max}: {} points fit too", m + 1);
         }
     }
 }
