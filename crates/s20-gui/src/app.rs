@@ -2583,6 +2583,20 @@ impl App {
                 return;
             }
         };
+        // (the sessions the change was made from still those of the work folder: another window
+        // or the CLI changed them meanwhile, the change would put them back)
+        if RunConfig::project_sessions(&cfg.work).is_some_and(|now| now != cfg.sessions) {
+            self.notify(
+                Level::Warn,
+                tl(
+                    "セッションが別の場所で変わりました。もう一度やり直してください",
+                    "The sessions changed elsewhere meanwhile: do it again",
+                ),
+            );
+            self.refresh_steps();
+            self.load_scene(ctx);
+            return;
+        }
         if let Some(first) = cfg.sessions.first() {
             Self::name_first(&mut self.edits, &first.name);
         }

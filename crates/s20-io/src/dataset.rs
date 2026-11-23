@@ -68,7 +68,16 @@ pub fn bag_fingerprint_checked(bag: &Path, check: &dyn Fn() -> Result<()>) -> Re
     let mut buf = vec![0u8; 8 << 20];
     loop {
         check()?;
-        let n = f.read(&mut buf)?;
+        // (the block filled whole, so that only the last has bytes past whole words: the value
+        // does not depend on how the reads split the file)
+        let mut n = 0;
+        while n < buf.len() {
+            let m = f.read(&mut buf[n..])?;
+            if m == 0 {
+                break;
+            }
+            n += m;
+        }
         if n == 0 {
             break;
         }
@@ -726,8 +735,16 @@ pub fn output_offsets(data: &Path) -> Result<Vec<f64>> {
 /// name.
 pub fn img_pose_fields(line: &str) -> Option<Vec<&str>> {
     // (a comment after the numbers left out: from the first '#' standing alone (a space before
-    // it, a space or the end after it) that follows eleven numbers; one in a name ("#2") is the
-    // name's)
+    // it, a space or the end after it) that follows eleven numbers and is not followed by eleven
+    // at the end (then it was a name's, the pose after it); one in a name ("#2") is the name's)
+    let ends_in_numbers = |t: &str| {
+        t.split_whitespace()
+            .rev()
+            .take(11)
+            .filter(|t| t.parse::<f64>().is_ok())
+            .count()
+            == 11
+    };
     let line = line
         .char_indices()
         .find(|&(i, c)| {
@@ -735,13 +752,8 @@ pub fn img_pose_fields(line: &str) -> Option<Vec<&str>> {
             c == '#'
                 && before.ends_with(char::is_whitespace)
                 && line[i + 1..].chars().next().is_none_or(char::is_whitespace)
-                && before
-                    .split_whitespace()
-                    .rev()
-                    .take(11)
-                    .filter(|t| t.parse::<f64>().is_ok())
-                    .count()
-                    == 11
+                && ends_in_numbers(before)
+                && !ends_in_numbers(&line[i + 1..])
         })
         .map_or(line, |(i, _)| &line[..i]);
     let mut tokens: Vec<(usize, &str)> = Vec::new();
@@ -857,6 +869,9 @@ mod tests {
         let line = format!("l_1.jpg {nums} # audit {nums} # end");
         let v = img_pose_fields(&line).unwrap();
         assert_eq!((v[0], v.len(), v[11]), ("l_1.jpg", 12, "12.5"));
+        let line = format!("C:/Survey 1 2 3 4 5 6 7 8 9 10 11 # East/l_1.jpg {nums}");
+        let v = img_pose_fields(&line).unwrap();
+        assert_eq!(v[0], "C:/Survey 1 2 3 4 5 6 7 8 9 10 11 # East/l_1.jpg");
         let line = format!("C:/Survey 1 2 3 4 5 6 7 8 9 10 11 #2/l_1.jpg {nums}");
         let v = img_pose_fields(&line).unwrap();
         assert_eq!(v[0], "C:/Survey 1 2 3 4 5 6 7 8 9 10 11 #2/l_1.jpg");

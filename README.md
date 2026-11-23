@@ -73,7 +73,7 @@ Once you have processed a few recordings of your device, **Tools → Device cali
 
 To join recordings of the same place made in multiple sessions, add the other raw folders with **Add session…** in the left panel. They are optimized together as one trajectory and point cloud.
 
-- **With RTK or PPK** (outdoors): the sessions are placed by GNSS. Each session needs enough fixes within its trajectory (10 or more); join one with too few (going indoors, for example) by a loop or matched points.
+- **With RTK or PPK** (outdoors): the sessions are placed by GNSS. The device's RTK is used with 100 fixes or more over all sessions; then each session needs enough fixes within its trajectory (10 or more); join one with too few (going indoors, for example) by a loop or matched points.
 - **Without GNSS** (indoors and so on): the first session is the reference, and each other session needs to be connected to it once. In the right panel's **Trajectory**, add a **loop** at a place both sessions passed (click both trajectories there), or **point matches** on the same features. A session not connected yet shows **Not connected** in the session list. After that, places passed again are found automatically (revisits).
 
 See [Multiple sessions](docs/gui.md#multiple-sessions) in the GUI guide for more.

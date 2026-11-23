@@ -2244,7 +2244,7 @@ impl RunConfig {
                     .collect(),
             }));
         }
-        if !self.rtk || !self.data().join("gnss.npy").exists() {
+        if !self.rtk {
             return Ok(None);
         }
         // (each session's table read again, and the joined one to hold them all: one damaged was
@@ -2256,9 +2256,13 @@ impl RunConfig {
                 rows += s20_io::dataset::load_gnss(&d)?.len();
             }
         }
-        let g = s20_io::dataset::load_gnss(&self.data())?;
+        if rows == 0 && !self.data().join("gnss.npy").exists() {
+            return Ok(None);
+        }
+        // (the sessions have rows: the joined table is needed, missing or not)
+        let g = s20_io::dataset::load_gnss(&self.data()).context("redo the data import")?;
         ensure!(
-            g.len() == rows,
+            rows == 0 || g.len() == rows,
             "the joined GNSS table does not hold every session's ({} of {rows} rows): redo the data import",
             g.len()
         );
@@ -2557,6 +2561,17 @@ impl RunConfig {
                 job,
             )?,
             Step::Opt => {
+                // (the joined data of the sessions as they are now, in their order: the sessions
+                // changed or reordered elsewhere since the import, it is made again, else the
+                // optimization would pair one session's odometry with another's)
+                if !self.set_current() {
+                    job.log("the joined data of the sessions is made again (the sessions changed)");
+                    s20_io::dataset::build_set(
+                        &self.data(),
+                        &self.set_dirs(),
+                        self.rtk && !self.ppk,
+                    )?;
+                }
                 if self.ppk {
                     for (j, s) in self.sessions.iter().enumerate() {
                         std::fs::create_dir_all(self.session_runs(j))?;

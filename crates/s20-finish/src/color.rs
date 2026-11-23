@@ -166,16 +166,17 @@ fn load_poses(imgpose: &Path) -> Result<Vec<Pose>> {
     let text =
         std::fs::read_to_string(imgpose).with_context(|| format!("read {}", imgpose.display()))?;
     let mut out = Vec::new();
-    for line in text.lines() {
+    // (an error tells the line's number, not the line: it holds a camera's position)
+    for (row, line) in text.lines().enumerate() {
         if line.starts_with("index") || line.trim().is_empty() {
             continue;
         }
         // (a name may hold spaces)
         let f = s20_io::dataset::img_pose_fields(line)
-            .with_context(|| format!("ImgPose.txt: short line {line}"))?;
+            .with_context(|| format!("ImgPose.txt: line {} is short", row + 1))?;
         let x = |i: usize| {
             f[i].parse::<f64>()
-                .with_context(|| format!("ImgPose.txt: {line}"))
+                .with_context(|| format!("ImgPose.txt: line {}, field {}", row + 1, i + 1))
         };
         let q = UnitQuaternion::from_quaternion(Quaternion::new(x(10)?, x(7)?, x(8)?, x(9)?));
         let base = Path::new(f[0])

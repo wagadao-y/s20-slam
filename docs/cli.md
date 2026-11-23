@@ -65,7 +65,7 @@ s20 licenses                                                    # show the licen
 s20 version                                                     # show the version (also --version)
 ```
 
-`cut-raw`'s times are seconds from the bag's first scan. Only `all_*.bag` is cut; the other files (`info/`, `frame_pose.txt`, `BASE.BIN` and so on) are copied as they are. LIO initializes assuming the first 2 seconds are still, so put `--from` a few seconds before the device starts moving. The device's own trajectory (`frame_pose.txt`) may start earlier than the bag, so its times are no guide; check when the motion starts in the imported IMU.
+`cut-raw`'s times are seconds from the bag's first scan. Only `all_*.bag` is cut; the other files (`info/`, `frame_pose.txt`, `BASE.BIN` and so on) are copied as they are. The output must be on a drive with hard links (NTFS and so on, not exFAT or FAT32). LIO initializes assuming the first 2 seconds are still, so put `--from` a few seconds before the device starts moving. The device's own trajectory (`frame_pose.txt`) may start earlier than the bag, so its times are no guide; check when the motion starts in the imported IMU.
 
 Point cloud files are LAS or LAZ by their extension (`.laz` is compressed). Both are read.
 

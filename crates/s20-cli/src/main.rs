@@ -199,13 +199,29 @@ fn main() -> Result<()> {
             }
             threads(&mut a)?;
             a.finish()?;
-            s20_visual::run::run(&input, &job)?;
             // the refined poses in the input poses' coordinates, recorded as the full run does
-            // (colorize checks them against the cloud's)
-            if let Some(frame) = s20_pipeline::frames::recorded(&input.data, &input.imgpose)? {
+            // (colorize checks them against the cloud's): read before the run (the output may
+            // be the input), in the ledger of --data or of the work folder's data/ (--data a
+            // session's, sessions/<name>/data)
+            let work_data = input
+                .data
+                .parent()
+                .and_then(Path::parent)
+                .filter(|s| s.file_name().is_some_and(|n| n == "sessions"))
+                .and_then(Path::parent)
+                .map(|w| w.join("data"));
+            let mut ledger = None;
+            for d in std::iter::once(input.data.clone()).chain(work_data) {
+                if let Some(frame) = s20_pipeline::frames::recorded(&d, &input.imgpose)? {
+                    ledger = Some((d, frame));
+                    break;
+                }
+            }
+            s20_visual::run::run(&input, &job)?;
+            if let Some((d, frame)) = ledger {
                 let mut written = vec![input.out.as_path()];
                 written.extend(input.tracks.as_deref());
-                s20_pipeline::frames::record(&input.data, &written, Some(frame))?;
+                s20_pipeline::frames::record(&d, &written, Some(frame))?;
             }
         }
         "calibrate-device" => {

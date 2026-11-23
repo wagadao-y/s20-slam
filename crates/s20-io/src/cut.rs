@@ -95,6 +95,18 @@ pub fn cut_raw(raw: &Path, out: &Path, from: f64, to: f64, job: &Job) -> Result<
             }
         }
     };
+    // (hard links tried first, before the long cut: the publishing needs them)
+    let probe = stage.join("probe");
+    let linked =
+        fs::write(&probe, b"").and_then(|()| fs::hard_link(&probe, stage.join("probe-link")));
+    let _ = fs::remove_dir_all(&stage);
+    if let Err(e) = linked {
+        return Err(anyhow::Error::from(e).context(format!(
+            "{}: its file system has no hard links; cut into a folder on another drive",
+            out.display()
+        )));
+    }
+    fs::create_dir(&stage).with_context(|| format!("create {}", stage.display()))?;
     let (mut messages, mut bytes, mut span) = (0usize, 0u64, [f64::INFINITY, f64::NEG_INFINITY]);
     // what this run moved into `out`: removed again when the rest fails
     let mut moved: Vec<std::path::PathBuf> = Vec::new();

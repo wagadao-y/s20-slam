@@ -560,15 +560,19 @@ pub fn process(raw: &Path, out: &Path, p: &Params, job: &Job) -> Result<ResultFi
         "the PPK result {} is not a .json file",
         out.display()
     );
-    if let Ok(o) = std::fs::canonicalize(out) {
+    // (nor in the recording's folders: a result there would be taken for one of its files the
+    // next time, and a mistaken name could replace one)
+    let parent = out
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    if let Ok(o) = std::fs::canonicalize(parent) {
         for dir in [raw.to_path_buf(), raw.join("info")] {
-            for f in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
-                ensure!(
-                    std::fs::canonicalize(f.path()).ok() != Some(o.clone()),
-                    "the PPK result {} is a file of the recording",
-                    out.display()
-                );
-            }
+            ensure!(
+                std::fs::canonicalize(&dir).ok() != Some(o.clone()),
+                "the PPK result {} is in the recording's folder: write it elsewhere",
+                out.display()
+            );
         }
     }
     let rover_path = raw.join("ROVER_PPKRAW.bin");

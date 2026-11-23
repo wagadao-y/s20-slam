@@ -463,13 +463,15 @@ pub fn read_image_poses(path: &Path) -> Result<ImagePoses> {
         times: Vec::new(),
         rows: Vec::new(),
     };
-    for line in text
+    // (an error tells the line's number, not the line: it holds a camera's position)
+    for (row, line) in text
         .lines()
-        .filter(|l| !l.trim().is_empty() && !l.starts_with("index") && !l.starts_with('#'))
+        .enumerate()
+        .filter(|(_, l)| !l.trim().is_empty() && !l.starts_with("index") && !l.starts_with('#'))
     {
         // (a name may hold spaces)
         let v: Vec<String> = s20_io::dataset::img_pose_fields(line)
-            .with_context(|| format!("{}: bad line {line:?}", path.display()))?
+            .with_context(|| format!("{}: line {} is not a pose", path.display(), row + 1))?
             .into_iter()
             .map(str::to_string)
             .collect();

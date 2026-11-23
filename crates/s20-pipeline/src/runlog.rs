@@ -34,16 +34,25 @@ impl PathMask {
     }
 
     /// The paths in `dir` written as `<label>\...`, or relative to `dir` when `label` is empty.
+    /// A relative `dir` is masked as given and as its absolute path (which the steps record).
     pub fn with(mut self, dir: &Path, label: &str) -> Self {
-        let d: Vec<char> = dir
-            .to_string_lossy()
-            .trim_end_matches(['\\', '/'])
-            .chars()
-            .collect();
-        if !d.is_empty() {
-            self.rules.push((d, label.to_string()));
-            self.rules.sort_by_key(|r| std::cmp::Reverse(r.0.len()));
+        let mut forms = vec![dir.to_path_buf()];
+        if dir.is_relative()
+            && let Ok(a) = std::path::absolute(dir)
+        {
+            forms.push(a);
         }
+        for f in forms {
+            let d: Vec<char> = f
+                .to_string_lossy()
+                .trim_end_matches(['\\', '/'])
+                .chars()
+                .collect();
+            if !d.is_empty() {
+                self.rules.push((d, label.to_string()));
+            }
+        }
+        self.rules.sort_by_key(|r| std::cmp::Reverse(r.0.len()));
         self
     }
 
