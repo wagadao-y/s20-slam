@@ -192,7 +192,11 @@ fn load_poses(imgpose: &Path) -> Result<Vec<Pose>> {
             "ImgPose.txt: line {}, a zero quaternion",
             row + 1
         );
-        let q = UnitQuaternion::from_quaternion(Quaternion::new(x(10)?, x(7)?, x(8)?, x(9)?));
+        let (qx, qy, qz, qw) = (x(7)?, x(8)?, x(9)?, x(10)?);
+        // (scaled by its largest component first: a very large or small one would overflow the
+        // norm, or round it to zero)
+        let m = [qx, qy, qz, qw].iter().fold(0f64, |m, v| m.max(v.abs()));
+        let q = UnitQuaternion::from_quaternion(Quaternion::new(qw / m, qx / m, qy / m, qz / m));
         let base = Path::new(f[0])
             .file_name()
             .and_then(|s| s.to_str())

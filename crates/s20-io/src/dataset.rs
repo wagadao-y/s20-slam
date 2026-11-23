@@ -300,9 +300,17 @@ pub fn build_set(out: &Path, dirs: &[PathBuf], gnss: bool) -> Result<Vec<f64>> {
             }
         }
     }
-    npy::write_f64(&out.join("imu.npy"), &imu_all, 7)?;
-    npy::write_f64(&out.join("gnss.npy"), &gnss_all, 14)?;
-    fs::write(out.join("sessions.txt"), list)?;
+    // (a file of the same contents left as it is, its time with it: made again at every
+    // optimization, the steps after the import stay current when nothing changed)
+    let same_or_write = |f: PathBuf, b: &[u8]| -> Result<()> {
+        if fs::read(&f).is_ok_and(|old| old == b) {
+            return Ok(());
+        }
+        fs::write(&f, b).with_context(|| format!("write {}", f.display()))
+    };
+    same_or_write(out.join("imu.npy"), &npy::to_bytes(&imu_all, 7)?)?;
+    same_or_write(out.join("gnss.npy"), &npy::to_bytes(&gnss_all, 14)?)?;
+    same_or_write(out.join("sessions.txt"), list.as_bytes())?;
     Ok(shifts)
 }
 
@@ -748,9 +756,13 @@ pub fn img_pose_fields(line: &str) -> Option<Vec<&str>> {
             .count()
             == 11
     };
-    // (a '#' that could start a comment but has the pose numbers after it too: the line reads two
-    // ways, refused rather than taking one)
-    let mut cut = None;
+    // (every way to read it: no comment (the line ends in the numbers), or a comment from a
+    // standalone '#' the numbers come before; read more than one way, or none, it is refused
+    // rather than one taken)
+    let mut readings: Vec<&str> = Vec::new();
+    if ends_in_numbers(line) {
+        readings.push(line);
+    }
     for (i, c) in line.char_indices() {
         let before = &line[..i];
         if c == '#'
@@ -758,14 +770,12 @@ pub fn img_pose_fields(line: &str) -> Option<Vec<&str>> {
             && line[i + 1..].chars().next().is_none_or(char::is_whitespace)
             && ends_in_numbers(before)
         {
-            if ends_in_numbers(&line[i + 1..]) {
-                return None;
-            }
-            cut = Some(i);
-            break;
+            readings.push(before);
         }
     }
-    let line = cut.map_or(line, |i| &line[..i]);
+    let [line] = readings[..] else {
+        return None;
+    };
     let mut tokens: Vec<(usize, &str)> = Vec::new();
     let mut start = None;
     for (i, c) in line.char_indices() {
@@ -880,10 +890,12 @@ mod tests {
         let line = format!("C:/My work/l_1.jpg {nums}  # refined");
         let v = img_pose_fields(&line).unwrap();
         assert_eq!((v[0], v.len(), v[11]), ("C:/My work/l_1.jpg", 12, "12.5"));
-        // a comment with numbers of its own, and a name of numbers and a '#'
+        // a comment with numbers of its own: read two ways (the pose, or the comment's numbers)
         let line = format!("l_1.jpg {nums} # audit {nums} # end");
-        let v = img_pose_fields(&line).unwrap();
-        assert_eq!((v[0], v.len(), v[11]), ("l_1.jpg", 12, "12.5"));
+        assert!(img_pose_fields(&line).is_none());
+        // a name's '#' and a comment: read two ways too
+        let line = format!("C:/Survey 1 2 3 4 5 6 7 8 9 10 11 # East/l_1.jpg {nums} # refined");
+        assert!(img_pose_fields(&line).is_none());
         // read two ways (a comment ending in eleven numbers, or a name of them and a '#'): refused
         let line = format!("C:/Survey 1 2 3 4 5 6 7 8 9 10 11 # East/l_1.jpg {nums}");
         assert!(img_pose_fields(&line).is_none());

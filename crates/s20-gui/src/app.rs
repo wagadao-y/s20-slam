@@ -2206,6 +2206,20 @@ impl App {
                     return;
                 }
             };
+            // (the sessions still as read: changed elsewhere meanwhile, writing them back would
+            // undo that)
+            if RunConfig::project_sessions(&cfg.work).is_none_or(|now| now != cfg.sessions) {
+                self.notify(
+                    Level::Warn,
+                    tl(
+                        "セッションが別の場所で変わりました。もう一度やり直してください",
+                        "The sessions changed elsewhere meanwhile: do it again",
+                    ),
+                );
+                self.refresh_steps();
+                self.load_scene(ctx);
+                return;
+            }
             let mut c = cfg.clone();
             let name = c.sessions[k].name.clone();
             match c.move_raw(k, raw.clone()) {

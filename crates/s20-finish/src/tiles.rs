@@ -451,11 +451,10 @@ pub fn finish_tiled(
             continue;
         }
         job.log(&format!(
-            "square {} of {}: ({:.1}, {:.1}) m, {} observations, {} rays",
+            // (its number, not its coordinates: the log is shared)
+            "square {} of {}: {} observations, {} rays",
             k + 1,
             tiles.len(),
-            t.part.out.lo[0] as f64 * BASE,
-            t.part.out.lo[1] as f64 * BASE,
             obs.len(),
             rays.len()
         ));

@@ -210,20 +210,26 @@ fn main() -> Result<()> {
                 .filter(|s| s.file_name().is_some_and(|n| n == "sessions"))
                 .and_then(Path::parent)
                 .map(|w| w.join("data"));
-            let mut ledger = None;
-            for d in std::iter::once(input.data.clone()).chain(work_data) {
-                if let Some(frame) = s20_pipeline::frames::recorded(&d, &input.imgpose)? {
-                    // (the cloud in the same coordinates, when they are known: else the poses
-                    // would be fitted to a cloud elsewhere)
-                    if let Some(cloud) = s20_pipeline::frames::recorded(&d, &input.cloud)? {
-                        anyhow::ensure!(
-                            cloud == frame,
-                            "the image poses and the cloud are in different coordinates; make them by the same run"
-                        );
+            // (the poses' and the cloud's each looked up in every ledger: they may be in two)
+            let ledgers: Vec<PathBuf> = std::iter::once(input.data.clone())
+                .chain(work_data)
+                .collect();
+            let find = |f: &Path| -> Result<Option<(PathBuf, s20_io::geodesy::CoordinateFrame)>> {
+                for d in &ledgers {
+                    if let Some(frame) = s20_pipeline::frames::recorded(d, f)? {
+                        return Ok(Some((d.clone(), frame)));
                     }
-                    ledger = Some((d, frame));
-                    break;
                 }
+                Ok(None)
+            };
+            let ledger = find(&input.imgpose)?;
+            // (the cloud in the same coordinates, when both are known: else the poses would be
+            // fitted to a cloud elsewhere)
+            if let (Some((_, poses)), Some((_, cloud))) = (&ledger, find(&input.cloud)?) {
+                anyhow::ensure!(
+                    cloud == *poses,
+                    "the image poses and the cloud are in different coordinates; make them by the same run"
+                );
             }
             s20_visual::run::run(&input, &job)?;
             if let Some((d, frame)) = ledger {

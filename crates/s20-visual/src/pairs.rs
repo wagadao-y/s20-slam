@@ -484,7 +484,11 @@ pub fn read_image_poses(path: &Path) -> Result<ImagePoses> {
             path.display(),
             row + 1
         );
-        let q = UnitQuaternion::from_quaternion(Quaternion::new(f(10)?, f(7)?, f(8)?, f(9)?));
+        let (qx, qy, qz, qw) = (f(7)?, f(8)?, f(9)?, f(10)?);
+        // (scaled by its largest component first: a very large or small one would overflow the
+        // norm, or round it to zero)
+        let m = [qx, qy, qz, qw].iter().fold(0f64, |m, v| m.max(v.abs()));
+        let q = UnitQuaternion::from_quaternion(Quaternion::new(qw / m, qx / m, qy / m, qz / m));
         out.names.push(v[0].clone());
         out.poses.push(Pose {
             r: *q.to_rotation_matrix().matrix(),

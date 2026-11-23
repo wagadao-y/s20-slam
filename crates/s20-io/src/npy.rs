@@ -6,6 +6,14 @@ use std::io::Write;
 use std::path::Path;
 
 pub fn write_f64(path: &Path, data: &[f64], cols: usize) -> Result<()> {
+    let b = to_bytes(data, cols)?;
+    let mut f = fs::File::create(path).with_context(|| format!("create {}", path.display()))?;
+    f.write_all(&b)?;
+    Ok(())
+}
+
+/// The bytes of [`write_f64`]'s file.
+pub fn to_bytes(data: &[f64], cols: usize) -> Result<Vec<u8>> {
     if cols == 0 || !data.len().is_multiple_of(cols) {
         bail!("data length {} is not a multiple of {cols}", data.len());
     }
@@ -16,16 +24,14 @@ pub fn write_f64(path: &Path, data: &[f64], cols: usize) -> Result<()> {
     let total = 10 + header.len() + 1;
     header.push_str(&" ".repeat((64 - total % 64) % 64));
     header.push('\n');
-    let mut f = fs::File::create(path).with_context(|| format!("create {}", path.display()))?;
-    f.write_all(b"\x93NUMPY\x01\x00")?;
-    f.write_all(&(header.len() as u16).to_le_bytes())?;
-    f.write_all(header.as_bytes())?;
-    let mut buf = Vec::with_capacity(data.len() * 8);
+    let mut b = Vec::with_capacity(10 + header.len() + data.len() * 8);
+    b.extend_from_slice(b"\x93NUMPY\x01\x00");
+    b.extend_from_slice(&(header.len() as u16).to_le_bytes());
+    b.extend_from_slice(header.as_bytes());
     for v in data {
-        buf.extend_from_slice(&v.to_le_bytes());
+        b.extend_from_slice(&v.to_le_bytes());
     }
-    f.write_all(&buf)?;
-    Ok(())
+    Ok(b)
 }
 
 /// Returns (data row-major, rows, cols).
@@ -54,21 +60,27 @@ pub fn read_f64(path: &Path) -> Result<(Vec<f64>, usize, usize)> {
         .chars()
         .filter(|c| !c.is_whitespace() && *c != '\'' && *c != '"')
         .collect();
-    // (each key's value up to the next ',' or '}': present, and as read here)
+    // (each key's value up to the next ',' or '}': the key itself, after '{' or ',', not one
+    // ending in its name; present, and as read here)
     let value = |key: &str| {
-        let at = compact.find(&format!("{key}:"))? + key.len() + 1;
+        let at = ["{", ","]
+            .iter()
+            .find_map(|p| compact.find(&format!("{p}{key}:")).map(|i| i + p.len()))?
+            + key.len()
+            + 1;
         let rest = &compact[at..];
         Some(&rest[..rest.find([',', '}']).unwrap_or(rest.len())])
     };
     if value("descr") != Some("<f8") || value("fortran_order") != Some("False") {
+        // (not the header itself: names in it could tell a place)
         bail!(
-            "{}: only C-order float64 arrays are supported ({header})",
+            "{}: only C-order float64 arrays are supported",
             path.display()
         );
     }
-    let shape_s = compact
-        .split("shape:(")
-        .nth(1)
+    let shape_s = [",shape:(", "{shape:("]
+        .iter()
+        .find_map(|k| compact.split_once(k).map(|(_, r)| r))
         .context("no shape")?
         .split(')')
         .next()
@@ -143,6 +155,13 @@ mod tests {
         );
         assert_eq!(read_f64(&f).unwrap().1, 2);
         npy_of(&f, "{'descr': '<f8', 'shape': (2, 3), }", 6);
+        assert!(read_f64(&f).is_err());
+        // a key that only ends in a name read is not that key
+        npy_of(
+            &f,
+            "{'not_descr': '<f8', 'fortran_order': False, 'shape': (2, 3), }",
+            6,
+        );
         assert!(read_f64(&f).is_err());
         // a structured array is not plain numbers
         npy_of(

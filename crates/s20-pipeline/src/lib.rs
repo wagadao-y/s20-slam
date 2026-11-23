@@ -1596,34 +1596,52 @@ impl RunConfig {
     /// Whether data folder `data` was extracted from the recording in raw folder `raw` (a bag of
     /// the same name and size), or not extracted at all.
     fn holds(data: &Path, raw: &Path) -> bool {
+        Self::holds_checked(data, raw, &|| Ok(())).unwrap_or(false)
+    }
+
+    /// [`RunConfig::holds`], the fingerprints read with `check` between their blocks: a
+    /// cancellation is its error.
+    fn holds_checked(data: &Path, raw: &Path, check: &dyn Fn() -> Result<()>) -> Result<bool> {
         let Ok(src) = s20_io::dataset::Source::read(data) else {
-            return true;
+            return Ok(true);
         };
-        s20_io::extract::find_bag(raw).is_ok_and(|bag| {
-            bag.file_name() == src.bag.file_name()
-                && std::fs::metadata(&bag).is_ok_and(|m| m.len() == src.size)
-                && Self::same_fingerprint(data, &src.bag, &bag)
-        })
+        let Ok(bag) = s20_io::extract::find_bag(raw) else {
+            return Ok(false);
+        };
+        if bag.file_name() != src.bag.file_name()
+            || !std::fs::metadata(&bag).is_ok_and(|m| m.len() == src.size)
+        {
+            return Ok(false);
+        }
+        Self::same_fingerprint(data, &src.bag, &bag, check)
     }
 
     /// Whether `bag` is the recording data folder `data` was extracted from (`old`), by their
     /// fingerprints: the extraction's, else the old bag's when it is still there. Neither known (an
     /// extraction of an older version whose bag moved), the name and size decide.
-    fn same_fingerprint(data: &Path, old: &Path, bag: &Path) -> bool {
+    fn same_fingerprint(
+        data: &Path,
+        old: &Path,
+        bag: &Path,
+        check: &dyn Fn() -> Result<()>,
+    ) -> Result<bool> {
         // (the same file: nothing to compare, nor a whole bag to read)
         if old
             .canonicalize()
             .ok()
             .is_some_and(|o| bag.canonicalize().ok() == Some(o))
         {
-            return true;
+            return Ok(true);
         }
-        let known = s20_io::dataset::extracted_fingerprint(data)
-            .or_else(|| s20_io::dataset::bag_fingerprint(old).ok());
-        match known {
-            Some(f) => s20_io::dataset::bag_fingerprint(bag).is_ok_and(|g| g == f),
+        let known = match s20_io::dataset::extracted_fingerprint(data) {
+            Some(f) => Some(f),
+            None if old.exists() => Some(s20_io::dataset::bag_fingerprint_checked(old, check)?),
+            None => None,
+        };
+        Ok(match known {
+            Some(f) => s20_io::dataset::bag_fingerprint_checked(bag, check)? == f,
             None => true,
-        }
+        })
     }
 
     /// Whether raw folder `raw` holds the recording session `k` was extracted from (it was moved
@@ -2383,7 +2401,7 @@ impl RunConfig {
     /// until the step finishes, so a run that is canceled or fails is not taken for a finished one
     /// even when it left files behind.
     pub fn run_step(&self, step: Step, job: &Job) -> Result<()> {
-        let _lock = self.begin()?;
+        let _lock = self.begin(job)?;
         self.run_step_for(step, false, job)
     }
 
@@ -2392,7 +2410,7 @@ impl RunConfig {
     /// the lock is dropped; the system lets it go when the process ends.
     /// Takes the work folder for a run (its lock), and makes it ready: the sessions as read, the
     /// extractions pointed at their raw folders.
-    fn begin(&self) -> Result<WorkLock> {
+    fn begin(&self, job: &Job) -> Result<WorkLock> {
         let lock = self.lock()?;
         if self.from_project
             && Self::project_sessions(&self.work).is_none_or(|now| now != self.sessions)
@@ -2402,14 +2420,14 @@ impl RunConfig {
                 self.work.display()
             );
         }
-        self.relink_sources()?;
+        self.relink_sources(job)?;
         Ok(lock)
     }
 
     /// Points each session's extraction at its raw folder's bag when it holds the same recording
     /// (a bag of the same name and size) somewhere else: the raw folder moved, or given anew to
     /// `s20 run`. The extraction read the old place otherwise, gone or another recording's.
-    fn relink_sources(&self) -> Result<()> {
+    fn relink_sources(&self, job: &Job) -> Result<()> {
         for (k, s) in self.sessions.iter().enumerate() {
             let data = self.session_data(k);
             let (Ok(src), Ok(bag)) = (
@@ -2423,7 +2441,10 @@ impl RunConfig {
                 (Ok(a), Ok(b)) => a == b,
                 _ => a == b,
             };
-            if !same_place(&src.bag, &bag) && Self::holds(&data, &s.raw) {
+            // (a moved bag compared whole, a cancellation asked between its blocks, and once more
+            // before the extraction is pointed at it)
+            if !same_place(&src.bag, &bag) && Self::holds_checked(&data, &s.raw, &|| job.check())? {
+                job.check()?;
                 relink(&data, bag, src.size)?;
             }
         }
@@ -2733,7 +2754,7 @@ impl RunConfig {
 
     /// Runs the steps `first..=last` in order.
     pub fn run_range(&self, first: Step, last: Step, job: &Job) -> Result<()> {
-        let _lock = self.begin()?;
+        let _lock = self.begin(job)?;
         for step in Step::ALL.into_iter().filter(|&s| {
             (first..=last).contains(&s)
                 && (s != Step::Refine || self.refine)
@@ -2769,7 +2790,7 @@ impl RunConfig {
 
     /// As [`RunConfig::run_from`], stopping after `last`.
     pub fn run_until(&self, first: Step, last: Step, job: &Job) -> Result<()> {
-        let _lock = self.begin()?;
+        let _lock = self.begin(job)?;
         for step in Step::ALL.into_iter().filter(|&s| s <= last) {
             // (a refinement without the tracks does not serve the images: again when they are
             // asked for)
@@ -3054,7 +3075,7 @@ mod tests {
         let f = c.session_data(0).join(s20_io::dataset::Source::FILE);
         let before = std::fs::metadata(&f).unwrap().modified().unwrap();
         std::thread::sleep(std::time::Duration::from_millis(20));
-        c.relink_sources().unwrap();
+        c.relink_sources(&Job::new(|_, _, _| {}, |_| {})).unwrap();
         let src = s20_io::dataset::Source::read(&c.session_data(0)).unwrap();
         assert_eq!(
             src.bag.canonicalize().unwrap(),
