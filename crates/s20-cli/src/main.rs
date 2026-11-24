@@ -202,26 +202,10 @@ fn main() -> Result<()> {
             // the refined poses in the input poses' coordinates, recorded as the full run does
             // (colorize checks them against the cloud's): read before the run (the output may
             // be the input), in the ledger of --data or of the work folder's data/ (--data a
-            // session's, sessions/<name>/data)
-            let work_data = input
-                .data
-                .parent()
-                .and_then(Path::parent)
-                .filter(|s| s.file_name().is_some_and(|n| n == "sessions"))
-                .and_then(Path::parent)
-                .map(|w| w.join("data"));
-            // (the poses' and the cloud's each looked up in every ledger: they may be in two)
-            let ledgers: Vec<PathBuf> = std::iter::once(input.data.clone())
-                .chain(work_data)
-                .collect();
-            let find = |f: &Path| -> Result<Option<(PathBuf, s20_io::geodesy::CoordinateFrame)>> {
-                for d in &ledgers {
-                    if let Some(frame) = s20_pipeline::frames::recorded(d, f)? {
-                        return Ok(Some((d.clone(), frame)));
-                    }
-                }
-                Ok(None)
-            };
+            // session's, sessions/<name>/data); the poses' and the cloud's each looked up in
+            // every ledger, they may be in two
+            let ledgers = s20_pipeline::frames::ledgers(&input.data);
+            let find = |f: &Path| s20_pipeline::frames::find(&ledgers, f);
             let ledger = find(&input.imgpose)?;
             let cloud_ledger = find(&input.cloud)?;
             // (the cloud in the same coordinates, when both are known: else the poses would be
@@ -233,19 +217,13 @@ fn main() -> Result<()> {
                 );
             }
             s20_visual::run::run(&input, &job)?;
-            // (recorded in the poses' ledger and the cloud's, so colorize finds them with
-            // either --data)
-            if let Some((d, frame)) = ledger {
+            // (recorded in every ledger, so colorize finds them with either --data, and an old
+            // sidecar's frame is not left in one ledger only)
+            if let Some((_, frame)) = ledger {
                 let mut written = vec![input.out.as_path()];
                 written.extend(input.tracks.as_deref());
-                let mut dirs = vec![d];
-                if let Some((c, _)) = cloud_ledger
-                    && !dirs.contains(&c)
-                {
-                    dirs.push(c);
-                }
-                for d in dirs {
-                    s20_pipeline::frames::record(&d, &written, Some(frame))?;
+                for d in &ledgers {
+                    s20_pipeline::frames::record(d, &written, Some(frame))?;
                 }
             }
         }

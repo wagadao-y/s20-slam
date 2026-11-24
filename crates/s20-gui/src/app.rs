@@ -2189,9 +2189,9 @@ impl App {
             self.notify(
                 Level::Warn,
                 tr!(
-                    "生データフォルダー（all_*.bag がある）ではありません: {}",
-                    "Not a raw data folder (with all_*.bag): {}",
-                    folder_name(&raw)
+                    "「{}」の参照先に選んだフォルダーは、生データフォルダー（all_*.bag がある）ではありません",
+                    "The folder chosen as the source of \"{}\" is not a raw data folder (with all_*.bag)",
+                    cfg.sessions[k].name
                 ),
             );
         } else if cfg
@@ -2236,8 +2236,7 @@ impl App {
             let name = c.sessions[k].name.clone();
             match c.move_raw(k, raw.clone()) {
                 Ok(()) => self.notify(Level::Info, tr!(
-                    "「{name}」の参照先を {} に変えました（同じ記録なので結果はそのまま使えます）", "Changed the source of \"{name}\" to {} (the same recording, so the results stay usable)",
-                    folder_name(&raw)
+                    "「{name}」の参照先を変えました（同じ記録なので結果はそのまま使えます）", "Changed the source of \"{name}\" (the same recording, so the results stay usable)"
                 )),
                 Err(e) => self
                     .notify(Level::Error, tr!("参照先を変えられませんでした: {e:#}", "Could not change the source: {e:#}")),
@@ -4182,6 +4181,14 @@ impl eframe::App for App {
         self.confirm_replace_modal(&ctx);
         self.confirm_remove_modal(&ctx);
         self.rename_session_modal(&ctx);
+        // (the sessions remembered for a confirmation only while it is open: canceled, a later
+        // change is compared with the sessions it is made from)
+        if self.confirm_replace.is_none()
+            && self.confirm_remove.is_none()
+            && self.rename_session.is_none()
+        {
+            self.confirm_sessions = None;
+        }
         self.confirm_exit_modal(&ctx);
         if ctx.input(|i| !i.raw.hovered_files.is_empty()) {
             let rect = ctx.content_rect();
@@ -4288,13 +4295,6 @@ impl App {
         }
         ctx.request_repaint_after(std::time::Duration::from_millis(100));
     }
-}
-
-/// A folder's own name, for messages (its place not told: the log is shared).
-fn folder_name(p: &Path) -> String {
-    p.file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "?".into())
 }
 
 #[cfg(test)]

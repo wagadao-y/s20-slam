@@ -64,25 +64,34 @@ fn top_items(h: &str) -> Option<Vec<(String, String)>> {
         }
     }
     items.push(cur);
-    let clean = |s: &str| {
+    // (the spaces between a value's tokens left out, those in its strings kept)
+    let unspaced = |s: &str| {
+        let mut quote = None;
         s.chars()
-            .filter(|c| !c.is_whitespace() && *c != '\'' && *c != '"')
+            .filter(|&c| {
+                match (quote, c) {
+                    (None, '\'' | '"') => quote = Some(c),
+                    (Some(q), c) if c == q => quote = None,
+                    _ => {}
+                }
+                quote.is_some() || !c.is_whitespace()
+            })
             .collect::<String>()
     };
     let mut out = Vec::new();
     for item in items.iter().filter(|i| !i.trim().is_empty()) {
         // the key is quoted (an ASCII quote, so a byte): its colon is the first outside it; the
-        // value kept as written (a string quoted, False bare), without its spaces
+        // key as written inside its quotes; the value as written (a string quoted, False bare),
+        // without the spaces outside its strings
         let item = item.trim();
         let q = item.chars().next()?;
         if q != '\'' && q != '"' {
             return None;
         }
         let end = item[1..].find(q)? + 1;
-        let (k, rest) = item.split_at(end + 1);
+        let (k, rest) = (&item[1..end], &item[end + 1..]);
         let v = rest.trim_start().strip_prefix(':')?;
-        let v: String = v.chars().filter(|c| !c.is_whitespace()).collect();
-        out.push((clean(k), v));
+        out.push((k.to_string(), unspaced(v)));
     }
     Some(out)
 }
@@ -108,7 +117,7 @@ pub fn read_f64(path: &Path) -> Result<(Vec<f64>, usize, usize)> {
     };
     let header = std::str::from_utf8(b.get(hstart..hstart + hlen).ok_or_else(short)?)?;
     // (the dictionary's own items: split at its commas outside quotes and brackets, each key
-    // and value read without quotes and spaces; a key once only; a structured array (its descr
+    // read without its quotes, a value without the spaces outside its strings; a key once only; a structured array (its descr
     // a list) refused, not read as plain numbers)
     let items = top_items(header).context("not a dictionary")?;
     let mut map = std::collections::HashMap::new();
@@ -209,6 +218,19 @@ mod tests {
         npy_of(
             &f,
             "{'descr': '<f8', 'note': ',fortran_order:False,', 'fortran_order': True, 'shape': (2, 3), }",
+            6,
+        );
+        assert!(read_f64(&f).is_err());
+        // spaces inside a key or a string are kept: no key "descr", no type '<f8'
+        npy_of(
+            &f,
+            "{'de scr': '<f8', 'fortran_order': False, 'shape': (2, 3), }",
+            6,
+        );
+        assert!(read_f64(&f).is_err());
+        npy_of(
+            &f,
+            "{'descr': '< f8', 'fortran_order': False, 'shape': (2, 3), }",
             6,
         );
         assert!(read_f64(&f).is_err());

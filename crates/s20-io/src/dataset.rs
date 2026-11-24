@@ -733,6 +733,13 @@ pub fn output_offsets(data: &Path) -> Result<Vec<f64>> {
         .collect())
 }
 
+/// A line of `ImgPose.txt` that is no row: blank, the header (`index ...`) or a comment (`#`).
+/// The same for every reader, so a file read by one is read by all.
+pub fn img_pose_skipped(line: &str) -> bool {
+    let l = line.trim_start();
+    l.is_empty() || l.starts_with("index") || l.starts_with('#')
+}
+
 /// The fields of a row of `ImgPose.txt` (`name x y z roll pitch yaw qx qy qz qw timestamp`): the
 /// name first, then the numbers. The name is all before the numbers at the end of the row, so it
 /// may hold spaces (the absolute path of a session's image). None without eleven numbers after a

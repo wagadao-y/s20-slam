@@ -963,8 +963,10 @@ pub fn colorize(
     job: &Job,
 ) -> Result<()> {
     job.log(&format!("{p:?}"));
-    let cloud_frame = frames::recorded(data, inp)?;
-    let poses_frame = frames::recorded(data, imgpose)?;
+    // (looked up as s20 refine-images records them: a session's data, the work folder's too)
+    let ledgers = frames::ledgers(data);
+    let cloud_frame = frames::find(&ledgers, inp)?.map(|(_, f)| f);
+    let poses_frame = frames::find(&ledgers, imgpose)?.map(|(_, f)| f);
     if cloud_frame.is_some() || poses_frame.is_some() {
         ensure!(
             cloud_frame.is_some() && poses_frame.is_some(),
@@ -2430,6 +2432,9 @@ impl RunConfig {
     /// (a bag of the same name and size) somewhere else: the raw folder moved, or given anew to
     /// `s20 run`. The extraction read the old place otherwise, gone or another recording's.
     fn relink_sources(&self, job: &Job, importing: bool) -> Result<()> {
+        // (the imports to be made again: their marks removed once every session is checked, so a
+        // later session's error leaves them as they were)
+        let mut redo = Vec::new();
         for (k, s) in self.sessions.iter().enumerate() {
             let data = self.session_data(k);
             let Ok(src) = s20_io::dataset::Source::read(&data) else {
@@ -2465,13 +2470,7 @@ impl RunConfig {
             if same {
                 relink(&data, bag, src.size)?;
             } else if importing {
-                // (the import to be made again: its mark removed, so this session's is redone
-                // and the steps after it follow)
-                std::fs::remove_file(data.join(s20_io::dataset::Source::FILE))?;
-                job.log(&format!(
-                    "session {}: its import was of another recording, made again",
-                    k + 1
-                ));
+                redo.push((k, data));
             } else {
                 // (another recording than the one imported: not gone on with, the session's
                 // odometry would be of the one and its fixes of the other)
@@ -2480,6 +2479,14 @@ impl RunConfig {
                     k + 1
                 );
             }
+        }
+        // (the mark removed, so this session's import is redone and the steps after it follow)
+        for (k, data) in redo {
+            std::fs::remove_file(data.join(s20_io::dataset::Source::FILE))?;
+            job.log(&format!(
+                "session {}: its import was of another recording, made again",
+                k + 1
+            ));
         }
         Ok(())
     }
@@ -3140,6 +3147,28 @@ mod tests {
         );
         let job = Job::new(|_, _, _| {}, |_| {});
         assert!(o.relink_sources(&job, false).is_err());
+        // a later session's error (its raw folder without a bag): the first's import kept
+        let empty = base.join("empty").join("hall");
+        std::fs::create_dir_all(&empty).unwrap();
+        let two = RunConfig::of_sessions(
+            vec![
+                o.sessions[0].clone(),
+                SessionCfg {
+                    name: "hall".into(),
+                    raw: empty,
+                },
+            ],
+            base.join("work"),
+        );
+        std::fs::create_dir_all(two.session_data(1)).unwrap();
+        s20_io::dataset::Source {
+            bag: std::path::absolute(old.join("all_0.bag")).unwrap(),
+            size: 3,
+        }
+        .write(&two.session_data(1))
+        .unwrap();
+        assert!(two.relink_sources(&job, true).is_err());
+        assert!(f.exists());
         o.relink_sources(&job, true).unwrap();
         assert!(
             !o.session_data(0)

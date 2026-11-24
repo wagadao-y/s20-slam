@@ -1098,7 +1098,9 @@ pub fn run(input: &Input, job: &Job) -> Result<serde_json::Value> {
         ));
         let solved = onto.poses;
         // (the epipolar search first, the poses and the points written after it: canceled while
-        // adjusting or searching, the outputs before it stay together)
+        // adjusting or searching, the outputs before it stay together; canceled while
+        // adjusting, the search not started)
+        job.check()?;
         let points = if input.track_points.is_some() {
             let started = std::time::Instant::now();
             let loose = match &free {

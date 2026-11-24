@@ -74,6 +74,29 @@ pub fn recorded(data: &Path, result: &Path) -> Result<Option<CoordinateFrame>> {
     Ok(None)
 }
 
+/// The ledgers a result made with data folder `data` may be in: its own, and when it is a
+/// session's (`sessions/<name>/data`) the work folder's `data/` too.
+pub fn ledgers(data: &Path) -> Vec<PathBuf> {
+    let work = data
+        .parent()
+        .and_then(Path::parent)
+        .filter(|s| s.file_name().is_some_and(|n| n == "sessions"))
+        .and_then(Path::parent)
+        .map(|w| w.join("data"));
+    std::iter::once(data.to_path_buf()).chain(work).collect()
+}
+
+/// The frame of `result` as [`recorded`] in the first of `ledgers` that has it, with that
+/// ledger.
+pub fn find(ledgers: &[PathBuf], result: &Path) -> Result<Option<(PathBuf, CoordinateFrame)>> {
+    for d in ledgers {
+        if let Some(frame) = recorded(d, result)? {
+            return Ok(Some((d.clone(), frame)));
+        }
+    }
+    Ok(None)
+}
+
 /// The frame of `result`: as [`recorded`], else the legacy projected frame of `data`.
 pub fn result_frame(data: &Path, result: &Path) -> Result<CoordinateFrame> {
     Ok(match recorded(data, result)? {

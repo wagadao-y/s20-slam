@@ -168,7 +168,7 @@ fn load_poses(imgpose: &Path) -> Result<Vec<Pose>> {
     let mut out = Vec::new();
     // (an error tells the line's number, not the line: it holds a camera's position)
     for (row, line) in text.lines().enumerate() {
-        if line.starts_with("index") || line.trim().is_empty() {
+        if s20_io::dataset::img_pose_skipped(line) {
             continue;
         }
         // (a name may hold spaces)
@@ -2529,6 +2529,27 @@ mod tests {
             }
         }
         g.iter().map(|gk| gk.map(|x| x.exp() as f32)).collect()
+    }
+
+    #[test]
+    fn image_pose_comment_lines_are_skipped_as_in_the_refinement() {
+        let dir = std::env::temp_dir().join(format!("s20-color-poses-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("ImgPose.txt");
+        std::fs::write(
+            &f,
+            "index x y z roll pitch yaw qx qy qz qw timestamp
+# refined
+  # note
+
+l_1.jpg 1 2 3 0 0 0 0 0 0 1 5.0
+",
+        )
+        .unwrap();
+        let p = load_poses(&f).unwrap();
+        assert_eq!(p.len(), 1);
+        assert_eq!(p[0].time, 5.0);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

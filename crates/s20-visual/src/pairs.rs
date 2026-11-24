@@ -467,7 +467,7 @@ pub fn read_image_poses(path: &Path) -> Result<ImagePoses> {
     for (row, line) in text
         .lines()
         .enumerate()
-        .filter(|(_, l)| !l.trim().is_empty() && !l.starts_with("index") && !l.starts_with('#'))
+        .filter(|(_, l)| !s20_io::dataset::img_pose_skipped(l))
     {
         // (a name may hold spaces)
         let v: Vec<String> = s20_io::dataset::img_pose_fields(line)
