@@ -223,19 +223,30 @@ fn main() -> Result<()> {
                 Ok(None)
             };
             let ledger = find(&input.imgpose)?;
+            let cloud_ledger = find(&input.cloud)?;
             // (the cloud in the same coordinates, when both are known: else the poses would be
             // fitted to a cloud elsewhere)
-            if let (Some((_, poses)), Some((_, cloud))) = (&ledger, find(&input.cloud)?) {
+            if let (Some((_, poses)), Some((_, cloud))) = (&ledger, &cloud_ledger) {
                 anyhow::ensure!(
-                    cloud == *poses,
+                    *cloud == *poses,
                     "the image poses and the cloud are in different coordinates; make them by the same run"
                 );
             }
             s20_visual::run::run(&input, &job)?;
+            // (recorded in the poses' ledger and the cloud's, so colorize finds them with
+            // either --data)
             if let Some((d, frame)) = ledger {
                 let mut written = vec![input.out.as_path()];
                 written.extend(input.tracks.as_deref());
-                s20_pipeline::frames::record(&d, &written, Some(frame))?;
+                let mut dirs = vec![d];
+                if let Some((c, _)) = cloud_ledger
+                    && !dirs.contains(&c)
+                {
+                    dirs.push(c);
+                }
+                for d in dirs {
+                    s20_pipeline::frames::record(&d, &written, Some(frame))?;
+                }
             }
         }
         "calibrate-device" => {

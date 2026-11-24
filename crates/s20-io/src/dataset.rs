@@ -680,8 +680,12 @@ pub fn load_imu(data: &Path) -> Result<Vec<[f64; 7]>> {
     let mut v: Vec<[f64; 7]> = (0..rows)
         .map(|r| a[r * 7..r * 7 + 7].try_into().unwrap())
         .collect();
-    // (in time order, for every step that integrates it: the bag holds the samples by their
-    // record times, which may swap two)
+    // (finite, then in time order, for every step that integrates it: the bag holds the samples
+    // by their record times, which may swap two; a NaN would be sorted to an end and taken for
+    // the session's span)
+    if let Some(k) = v.iter().position(|r| !r.iter().all(|x| x.is_finite())) {
+        bail!("{}: sample {k} not finite", p.display());
+    }
     v.sort_by(|a, b| a[0].total_cmp(&b[0]));
     Ok(v)
 }
@@ -765,11 +769,8 @@ pub fn img_pose_fields(line: &str) -> Option<Vec<&str>> {
     }
     for (i, c) in line.char_indices() {
         let before = &line[..i];
-        if c == '#'
-            && before.ends_with(char::is_whitespace)
-            && line[i + 1..].chars().next().is_none_or(char::is_whitespace)
-            && ends_in_numbers(before)
-        {
+        // (a space before it, whatever after: "# refined" and "#refined" both)
+        if c == '#' && before.ends_with(char::is_whitespace) && ends_in_numbers(before) {
             readings.push(before);
         }
     }
@@ -901,9 +902,12 @@ mod tests {
         assert!(img_pose_fields(&line).is_none());
         let line = format!("l_1.jpg {nums} # before {nums}");
         assert!(img_pose_fields(&line).is_none());
+        // a comment written without a space after its '#'
+        let line = format!("l_1.jpg {nums} #refined");
+        assert_eq!(img_pose_fields(&line).unwrap()[0], "l_1.jpg");
+        // a name's "#2" after eleven numbers reads two ways too
         let line = format!("C:/Survey 1 2 3 4 5 6 7 8 9 10 11 #2/l_1.jpg {nums}");
-        let v = img_pose_fields(&line).unwrap();
-        assert_eq!(v[0], "C:/Survey 1 2 3 4 5 6 7 8 9 10 11 #2/l_1.jpg");
+        assert!(img_pose_fields(&line).is_none());
         // a '#' after a space in the name is the name's
         let line = format!("C:/Survey #2/l_1.jpg {nums} # refined");
         let v = img_pose_fields(&line).unwrap();

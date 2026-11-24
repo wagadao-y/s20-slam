@@ -40,8 +40,8 @@ s20 lio      <data> runs/lio.txt [--indoor] [--hold a:b]        # オドメト�
 s20 opt      <data> runs/lio.txt runs/opt.txt [--rtk] [--ppk runs/ppk.json] [--rtk_exclude a:b] [--loop a:b|start-end]
 s20 cloud    <data> runs/opt.txt out/cloud.laz [--config params.json]
 s20 export   <data> runs/opt.txt out --calib <生データ>/info/calibration.yaml
-s20 refine-images --data <data> --imgpose runs/ImgPose.txt --calib calibration.yaml --cloud out/cloud.laz runs/ImgPose_refined.txt
-s20 colorize out/cloud.laz out/cloud_col.laz --images <data>/images --imgpose runs/ImgPose_refined.txt --calib calibration.yaml --trajectory out/trajectory.txt
+s20 refine-images --data <data> --imgpose runs/ImgPose.txt --calib <生データ>/info/calibration.yaml --cloud out/cloud.laz runs/ImgPose_refined.txt
+s20 colorize out/cloud.laz out/cloud_col.laz --images <data>/images --imgpose runs/ImgPose_refined.txt --calib <生データ>/info/calibration.yaml --trajectory out/trajectory.txt
 ```
 
 - 時刻は、セッションの最初のスキャンからの秒です。負の値は終わりからの秒です。複数セッションでは `セッション名@秒` か `番号@秒` で指定します。

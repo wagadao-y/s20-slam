@@ -144,7 +144,8 @@ pub fn header(cfg: &RunConfig, what: &str) -> Vec<String> {
     };
     let on = |b: bool| if b { "オン" } else { "オフ" };
     let device = match &cfg.device_calib {
-        Some(d) => format!("{} ({})", d.display(), file_digest(d)),
+        // (its digest, not its place: outside the folders masked, a path would be shared)
+        Some(d) => format!("指定の機体校正（{}）", file_digest(d)),
         None => "なし（姿勢合わせで撮影ごとにカメラを求める）".to_string(),
     };
     let maker = if cfg.sessions.is_empty() {

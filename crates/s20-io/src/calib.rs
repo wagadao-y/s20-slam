@@ -98,7 +98,8 @@ fn fisheye(b: &str) -> Result<FisheyeIntrinsics> {
 fn size(b: &str, key: &str) -> Result<u32> {
     let v = scalar(b, key)?;
     anyhow::ensure!(
-        v.fract() == 0. && (16.0..=65_536.0).contains(&v),
+        // (16384 at most: a mistaken side would make the coloring's depth grids gigabytes)
+        v.fract() == 0. && (16.0..=16_384.0).contains(&v),
         "{key} {v} is not an image side"
     );
     Ok(v as u32)

@@ -818,11 +818,9 @@ pub fn run(
         });
         if n_ % 1000 == 0 {
             log(&format!(
-                "{n_}/{} pos [{:.2} {:.2} {:.2}] |v| {:.2} bg [{:.3} {:.3} {:.3}] ba [{:.3} {:.3} {:.3}] sd(yaw) {:.3} deg  skipped {n_skip}  map {} voxels  {:.0}s",
+                // (no position: the log is shared, its rows would draw the path)
+                "{n_}/{} |v| {:.2} bg [{:.3} {:.3} {:.3}] ba [{:.3} {:.3} {:.3}] sd(yaw) {:.3} deg  skipped {n_skip}  map {} voxels  {:.0}s",
                 ids.len(),
-                p.x,
-                p.y,
-                p.z,
                 v.norm(),
                 bg.x.to_degrees(),
                 bg.y.to_degrees(),
@@ -886,6 +884,16 @@ pub fn init_from(
 
 /// Write `<out>.txt`, `<out>_scans.txt`, `<out>_state.txt` (same formats as the Python version).
 pub fn save(out: &std::path::Path, res: &Output) -> Result<()> {
+    save_checked(out, res, &|| Ok(()))
+}
+
+/// [`save`], `check` asked once the texts are made, before anything is written (a cancellation
+/// leaves the files before it).
+pub fn save_checked(
+    out: &std::path::Path,
+    res: &Output,
+    check: &dyn Fn() -> Result<()>,
+) -> Result<()> {
     use std::fmt::Write;
     let stem = out.with_extension("");
     let stem = stem.to_string_lossy();
@@ -940,6 +948,7 @@ pub fn save(out: &std::path::Path, res: &Output) -> Result<()> {
             s.t, s.v.x, s.v.y, s.v.z, s.bg.x, s.bg.y, s.bg.z, s.ba.x, s.ba.y, s.ba.z
         )?;
     }
+    check()?;
     std::fs::write(out, a)?;
     std::fs::write(format!("{stem}_scans.txt"), b)?;
     std::fs::write(format!("{stem}_state.txt"), c)?;

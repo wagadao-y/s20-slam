@@ -1,6 +1,6 @@
 //! Minimal .npy (version 1.0) reader/writer for little-endian float64 2-D arrays.
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, bail, ensure};
 use std::fs;
 use std::io::Write;
 use std::path::Path;
@@ -34,6 +34,54 @@ pub fn to_bytes(data: &[f64], cols: usize) -> Result<Vec<u8>> {
     Ok(b)
 }
 
+/// The items of a Python dictionary literal `{key: value, ...}` (a top level one), keys and
+/// values without their quotes and spaces; None when it is not one.
+fn top_items(h: &str) -> Option<Vec<(String, String)>> {
+    let h = h.trim();
+    let body = h.strip_prefix('{')?.strip_suffix('}')?;
+    let (mut items, mut cur, mut depth, mut quote) = (Vec::new(), String::new(), 0i32, None);
+    for c in body.chars() {
+        match (quote, c) {
+            (Some(q), c) if c == q => {
+                quote = None;
+                cur.push(c);
+            }
+            (Some(_), c) => cur.push(c),
+            (None, '\'' | '"') => {
+                quote = Some(c);
+                cur.push(c);
+            }
+            (None, '(' | '[' | '{') => {
+                depth += 1;
+                cur.push(c);
+            }
+            (None, ')' | ']' | '}') => {
+                depth -= 1;
+                cur.push(c);
+            }
+            (None, ',') if depth == 0 => items.push(std::mem::take(&mut cur)),
+            (None, c) => cur.push(c),
+        }
+    }
+    items.push(cur);
+    let clean = |s: &str| {
+        s.chars()
+            .filter(|c| !c.is_whitespace() && *c != '\'' && *c != '"')
+            .collect::<String>()
+    };
+    let mut out = Vec::new();
+    for item in items.iter().filter(|i| !i.trim().is_empty()) {
+        // the key is quoted: its colon is the first outside the key
+        let item = item.trim();
+        let q = item.chars().next()?;
+        let end = item[1..].find(q)? + 1;
+        let (k, rest) = item.split_at(end + 1);
+        let v = rest.trim_start().strip_prefix(':')?;
+        out.push((clean(k), clean(v)));
+    }
+    Some(out)
+}
+
 /// Returns (data row-major, rows, cols).
 pub fn read_f64(path: &Path) -> Result<(Vec<f64>, usize, usize)> {
     let b = fs::read(path).with_context(|| format!("read {}", path.display()))?;
@@ -54,23 +102,19 @@ pub fn read_f64(path: &Path) -> Result<(Vec<f64>, usize, usize)> {
         v => bail!("unsupported npy version {v}"),
     };
     let header = std::str::from_utf8(b.get(hstart..hstart + hlen).ok_or_else(short)?)?;
-    // (read without spaces and quotes: a Python literal may have either kind, spaces or not;
-    // a structured array (its descr a list) is refused, not read as plain numbers)
-    let compact: String = header
-        .chars()
-        .filter(|c| !c.is_whitespace() && *c != '\'' && *c != '"')
-        .collect();
-    // (each key's value up to the next ',' or '}': the key itself, after '{' or ',', not one
-    // ending in its name; present, and as read here)
-    let value = |key: &str| {
-        let at = ["{", ","]
-            .iter()
-            .find_map(|p| compact.find(&format!("{p}{key}:")).map(|i| i + p.len()))?
-            + key.len()
-            + 1;
-        let rest = &compact[at..];
-        Some(&rest[..rest.find([',', '}']).unwrap_or(rest.len())])
-    };
+    // (the dictionary's own items: split at its commas outside quotes and brackets, each key
+    // and value read without quotes and spaces; a key once only; a structured array (its descr
+    // a list) refused, not read as plain numbers)
+    let items = top_items(header).context("not a dictionary")?;
+    let mut map = std::collections::HashMap::new();
+    for (k, v) in items {
+        ensure!(
+            map.insert(k.clone(), v).is_none(),
+            "{}: a key twice in the header",
+            path.display()
+        );
+    }
+    let value = |key: &str| map.get(key).map(String::as_str);
     if value("descr") != Some("<f8") || value("fortran_order") != Some("False") {
         // (not the header itself: names in it could tell a place)
         bail!(
@@ -78,13 +122,10 @@ pub fn read_f64(path: &Path) -> Result<(Vec<f64>, usize, usize)> {
             path.display()
         );
     }
-    let shape_s = [",shape:(", "{shape:("]
-        .iter()
-        .find_map(|k| compact.split_once(k).map(|(_, r)| r))
-        .context("no shape")?
-        .split(')')
-        .next()
-        .context("bad shape")?;
+    let shape_s = value("shape")
+        .and_then(|v| v.strip_prefix('('))
+        .and_then(|v| v.strip_suffix(')'))
+        .context("no shape")?;
     let dims: Vec<usize> = shape_s
         .split(',')
         .map(|s| s.trim())
@@ -155,6 +196,13 @@ mod tests {
         );
         assert_eq!(read_f64(&f).unwrap().1, 2);
         npy_of(&f, "{'descr': '<f8', 'shape': (2, 3), }", 6);
+        assert!(read_f64(&f).is_err());
+        // a key in a value's text is not that key
+        npy_of(
+            &f,
+            "{'descr': '<f8', 'note': ',fortran_order:False,', 'fortran_order': True, 'shape': (2, 3), }",
+            6,
+        );
         assert!(read_f64(&f).is_err());
         // a key that only ends in a name read is not that key
         npy_of(

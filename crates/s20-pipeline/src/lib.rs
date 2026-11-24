@@ -63,9 +63,9 @@ pub fn lio(
         None => None,
     };
     let res = s20_lio::run(&l, &imu, p, init, &hold, job)?;
-    // (canceled after the last check of the scans: the trajectory before it stays)
-    job.check()?;
-    s20_lio::save(out, &res)?;
+    // (canceled after the last check of the scans, or while the files' texts are made: the
+    // trajectory before it stays)
+    s20_lio::save_checked(out, &res, &|| job.check())?;
     job.log(&format!(
         "saved {} scans {} imu-only updates {} heading held {} taken from the gate's second search {}",
         out.display(),
