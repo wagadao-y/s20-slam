@@ -902,7 +902,7 @@ const USAGE: &str = "usage:
       [--float_check_sd_h 0.10] [--float_check_sd_v 0.20]
       [--systems gps,glo,gal,bds,qzs] [--frequencies 3] [--estimate_ionosphere] [--estimate_troposphere]
       [--phase_snr_error 0] [--prefer_base_l2c]
-      (the output a .json file, not in the raw folder itself nor in its info/)
+      (the output a .json file, not directly in the raw folder nor directly in its info/)
   s20 licenses
   s20 version
   s20 run <raw folder>[,<raw folder>...] <work folder> [--outdoor | --params file.json] [--no_rtk] [--no_color]

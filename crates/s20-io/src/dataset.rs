@@ -239,8 +239,9 @@ pub fn session_shifts(ranges: &[(f64, f64)]) -> Vec<f64> {
 /// `origin.txt` needed to display legacy results until they are regenerated. Returns the shifts.
 /// `gnss`: the device's GNSS tables are used (its RTK): one that cannot be read is an error; else
 /// it is left out.
-/// Returns the sessions' time shifts, and whether a file was written (its contents changed).
-pub fn build_set(out: &Path, dirs: &[PathBuf], gnss: bool) -> Result<(Vec<f64>, bool)> {
+/// Returns the sessions' time shifts. `changed` is set once a file is written (its contents
+/// changed), also when a later one fails.
+pub fn build_set(out: &Path, dirs: &[PathBuf], gnss: bool, changed: &mut bool) -> Result<Vec<f64>> {
     fs::create_dir_all(out)?;
     let full = |d: &PathBuf| {
         if d.is_absolute() {
@@ -292,17 +293,19 @@ pub fn build_set(out: &Path, dirs: &[PathBuf], gnss: bool) -> Result<(Vec<f64>, 
     }
     // (a file of the same contents left as it is, its time with it: made again at every
     // optimization, the steps after the import stay current when nothing changed)
-    let same_or_write = |f: PathBuf, b: &[u8]| -> Result<bool> {
+    let (imu_b, gnss_b) = (npy::to_bytes(&imu_all, 7)?, npy::to_bytes(&gnss_all, 14)?);
+    let mut same_or_write = |f: PathBuf, b: &[u8]| -> Result<()> {
         if fs::read(&f).is_ok_and(|old| old == b) {
-            return Ok(false);
+            return Ok(());
         }
-        fs::write(&f, b).with_context(|| format!("write {}", f.display()))?;
-        Ok(true)
+        // (told before the write: a write that fails may have left the file half made)
+        *changed = true;
+        fs::write(&f, b).with_context(|| format!("write {}", f.display()))
     };
-    let mut changed = same_or_write(out.join("imu.npy"), &npy::to_bytes(&imu_all, 7)?)?;
-    changed |= same_or_write(out.join("gnss.npy"), &npy::to_bytes(&gnss_all, 14)?)?;
-    changed |= same_or_write(out.join("sessions.txt"), list.as_bytes())?;
-    Ok((shifts, changed))
+    same_or_write(out.join("imu.npy"), &imu_b)?;
+    same_or_write(out.join("gnss.npy"), &gnss_b)?;
+    same_or_write(out.join("sessions.txt"), list.as_bytes())?;
+    Ok(shifts)
 }
 
 impl LidarData {

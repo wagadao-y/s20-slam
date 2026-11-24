@@ -10,6 +10,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 pub const FILE: &str = "result_frames.json";
+const LOCK: &str = "result_frames.lock";
 
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 struct Entry {
@@ -49,7 +50,7 @@ fn load(data: &Path) -> Result<Ledger> {
 
 fn save(data: &Path, ledger: &Ledger) -> Result<()> {
     let path = data.join(FILE);
-    let tmp = path.with_extension("json.tmp");
+    let tmp = path.with_extension(format!("json.{}.tmp", std::process::id()));
     fs::create_dir_all(data)?;
     fs::write(&tmp, serde_json::to_vec_pretty(ledger)?)?;
     fs::rename(&tmp, &path).with_context(|| format!("write {}", path.display()))
@@ -77,6 +78,21 @@ pub fn recorded(data: &Path, result: &Path) -> Result<Option<CoordinateFrame>> {
 /// The ledgers a result made with data folder `data` may be in: its own, and when it is a
 /// session's (`sessions/<name>/data`) the work folder's `data/` too.
 pub fn ledgers(data: &Path) -> Vec<PathBuf> {
+    // (written with `..` or `.`, the same folder: its parents read from the folder named)
+    let mut normal = PathBuf::new();
+    for c in std::path::absolute(data)
+        .unwrap_or_else(|_| data.to_path_buf())
+        .components()
+    {
+        match c {
+            std::path::Component::ParentDir => {
+                normal.pop();
+            }
+            std::path::Component::CurDir => {}
+            c => normal.push(c),
+        }
+    }
+    let data = normal.as_path();
     let work = data
         .parent()
         .and_then(Path::parent)
@@ -128,6 +144,15 @@ pub fn result_frame(data: &Path, result: &Path) -> Result<CoordinateFrame> {
 
 /// Records `results` as they are now in `frame`, or forgets them (`None`); their old sidecars go.
 pub fn record(data: &Path, results: &[&Path], frame: Option<CoordinateFrame>) -> Result<()> {
+    // (read and replaced by one at a time: two runs of s20 refine-images of two sessions record
+    // in the work folder's ledger both)
+    fs::create_dir_all(data)?;
+    let lock = fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(data.join(LOCK))?;
+    lock.lock()?;
     let mut ledger = load(data)?;
     for &r in results {
         let k = key(data, r)?;
@@ -170,6 +195,15 @@ mod tests {
         assert!(ensure_together(l, p).is_err());
         assert!(ensure_together(l, None).is_err());
         assert!(ensure_together(None, l).is_err());
+        // a folder written with `..`: the work folder's ledger found all the same
+        let w = std::env::temp_dir().join("s20_ledgers").join("work");
+        let session = w.join("sessions").join("A").join("data");
+        let odd = session.join("..").join("data");
+        assert_eq!(ledgers(&odd), ledgers(&session));
+        assert_eq!(
+            ledgers(&session)[1],
+            std::path::absolute(w.join("data")).unwrap()
+        );
     }
 
     #[test]

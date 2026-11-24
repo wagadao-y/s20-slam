@@ -1650,11 +1650,18 @@ impl RunConfig {
     /// ([`RunConfig::same_recording`]): the extraction keeps, reading the bag there.
     pub fn move_raw(&mut self, k: usize, raw: PathBuf) -> Result<()> {
         let data = self.session_data(k);
-        if let Ok(src) = s20_io::dataset::Source::read(&data) {
-            relink(&data, s20_io::extract::find_bag(&raw)?, src.size)?;
+        let bag = s20_io::extract::find_bag(&raw)?;
+        // (the project first: its saving failing leaves both as they were; the relink failing
+        // after it, the next run relinks the extraction, the recording the same)
+        let old = std::mem::replace(&mut self.sessions[k].raw, raw);
+        if let Err(e) = self.write_project() {
+            self.sessions[k].raw = old;
+            return Err(e);
         }
-        self.sessions[k].raw = raw;
-        self.write_project()
+        if let Ok(src) = s20_io::dataset::Source::read(&data) {
+            relink(&data, bag, src.size)?;
+        }
+        Ok(())
     }
 
     /// Why session `k` cannot be named `name`, if it cannot.
@@ -2545,19 +2552,20 @@ impl RunConfig {
             // changed since the import, would pair one session's odometry or fixes with
             // another's. Changed, the previous trajectory is of the old data: not kept as
             // finished when this run stops)
+            let mut changed = false;
             let set = match step {
                 Step::Opt => s20_io::dataset::build_set(
                     &self.data(),
                     &self.set_dirs(),
                     self.rtk && !self.ppk,
+                    &mut changed,
                 )
-                .map(|(_, changed)| {
-                    if changed {
-                        previous = None;
-                    }
-                }),
+                .map(|_| ()),
                 _ => Ok(()),
             };
+            if changed {
+                previous = None;
+            }
             if let Err(e) = set.and_then(|()| self.run_step_inner(step, k.unwrap_or(0), &part)) {
                 self.restore_result(step, k, previous, job);
                 return Err(e);
@@ -2566,8 +2574,12 @@ impl RunConfig {
         }
         if step == Step::Extract {
             // (the device's GNSS tables needed with its RTK only, not with PPK)
-            let (shifts, _) =
-                s20_io::dataset::build_set(&self.data(), &self.set_dirs(), self.rtk && !self.ppk)?;
+            let shifts = s20_io::dataset::build_set(
+                &self.data(),
+                &self.set_dirs(),
+                self.rtk && !self.ppk,
+                &mut false,
+            )?;
             if self.multi() {
                 for (s, x) in self.sessions.iter().zip(shifts) {
                     job.log(&format!("session {}: times shifted by {x} s", s.name));
@@ -3343,7 +3355,7 @@ mod tests {
         let gnss =
             |x: f64| -> Vec<f64> { (0..14).map(|i| if i == 1 { x } else { i as f64 }).collect() };
         s20_io::npy::write_f64(&d.join("gnss.npy"), &gnss(1.), 14).unwrap();
-        s20_io::dataset::build_set(&c.data(), &c.set_dirs(), true).unwrap();
+        s20_io::dataset::build_set(&c.data(), &c.set_dirs(), true, &mut false).unwrap();
         std::fs::create_dir_all(c.runs()).unwrap();
         std::fs::write(c.opt_file(), "x").unwrap();
         c.write_record(Step::Opt, None, true).unwrap();
@@ -3355,6 +3367,18 @@ mod tests {
         assert!(c.done(Step::Opt));
         // a fix's value changed, the rows as many: the old trajectory not finished any more
         s20_io::npy::write_f64(&d.join("gnss.npy"), &gnss(2.), 14).unwrap();
+        assert!(
+            c.run_step(Step::Opt, &Job::new(|_, _, _| {}, |_| {}))
+                .is_err()
+        );
+        assert!(!c.done(Step::Opt));
+        // the joined IMU written, the joined GNSS failing (a folder in its place): not finished
+        // either
+        c.write_record(Step::Opt, None, true).unwrap();
+        let imu2: Vec<f64> = (0..14).map(|i| i as f64 + 0.5).collect();
+        s20_io::npy::write_f64(&d.join("imu.npy"), &imu2, 7).unwrap();
+        std::fs::remove_file(c.data().join("gnss.npy")).unwrap();
+        std::fs::create_dir_all(c.data().join("gnss.npy")).unwrap();
         assert!(
             c.run_step(Step::Opt, &Job::new(|_, _, _| {}, |_| {}))
                 .is_err()
