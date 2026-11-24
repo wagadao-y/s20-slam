@@ -967,16 +967,7 @@ pub fn colorize(
     let ledgers = frames::ledgers(data);
     let cloud_frame = frames::find(&ledgers, inp)?.map(|(_, f)| f);
     let poses_frame = frames::find(&ledgers, imgpose)?.map(|(_, f)| f);
-    if cloud_frame.is_some() || poses_frame.is_some() {
-        ensure!(
-            cloud_frame.is_some() && poses_frame.is_some(),
-            "cloud and image poses must have coordinate metadata; re-run cloud generation and export"
-        );
-        ensure!(
-            cloud_frame == poses_frame,
-            "cloud and image poses use different coordinate frames; re-run cloud generation and export"
-        );
-    }
+    frames::ensure_together(cloud_frame, poses_frame)?;
     const CHUNK: usize = 1 << 20;
     let mut rd = s20_io::las::LasReader::open(inp)?;
     let info = rd.info();
@@ -1638,6 +1629,9 @@ impl RunConfig {
         let known = match s20_io::dataset::extracted_fingerprint(data) {
             Some(f) => Some(f),
             None if old.exists() => Some(s20_io::dataset::bag_fingerprint_checked(old, check)?),
+            // (a fingerprint of another kind, of a build before, its bag gone: not compared, so
+            // not taken for the same recording)
+            None if data.join(s20_io::dataset::FINGERPRINT_FILE).exists() => return Ok(false),
             None => None,
         };
         Ok(match known {
@@ -2544,9 +2538,27 @@ impl RunConfig {
             } else {
                 job.clone()
             };
-            let previous = self.previous_result(step, k);
+            let mut previous = self.previous_result(step, k);
             self.write_record(step, k, false)?;
-            if let Err(e) = self.run_step_inner(step, k.unwrap_or(0), &part) {
+            // (the joined data made again from the sessions' tables as they are now, in their
+            // order, at every optimization (quick): sessions reordered elsewhere, or a table
+            // changed since the import, would pair one session's odometry or fixes with
+            // another's. Changed, the previous trajectory is of the old data: not kept as
+            // finished when this run stops)
+            let set = match step {
+                Step::Opt => s20_io::dataset::build_set(
+                    &self.data(),
+                    &self.set_dirs(),
+                    self.rtk && !self.ppk,
+                )
+                .map(|(_, changed)| {
+                    if changed {
+                        previous = None;
+                    }
+                }),
+                _ => Ok(()),
+            };
+            if let Err(e) = set.and_then(|()| self.run_step_inner(step, k.unwrap_or(0), &part)) {
                 self.restore_result(step, k, previous, job);
                 return Err(e);
             }
@@ -2554,7 +2566,7 @@ impl RunConfig {
         }
         if step == Step::Extract {
             // (the device's GNSS tables needed with its RTK only, not with PPK)
-            let shifts =
+            let (shifts, _) =
                 s20_io::dataset::build_set(&self.data(), &self.set_dirs(), self.rtk && !self.ppk)?;
             if self.multi() {
                 for (s, x) in self.sessions.iter().zip(shifts) {
@@ -2622,11 +2634,7 @@ impl RunConfig {
                 job,
             )?,
             Step::Opt => {
-                // (the joined data made again from the sessions' tables as they are now, in their
-                // order, at every optimization (quick): sessions reordered elsewhere, or a table
-                // changed since the import, would pair one session's odometry or fixes with
-                // another's)
-                s20_io::dataset::build_set(&self.data(), &self.set_dirs(), self.rtk && !self.ppk)?;
+                // (the joined data made again before: run_step)
                 if self.ppk {
                     for (j, s) in self.sessions.iter().enumerate() {
                         std::fs::create_dir_all(self.session_runs(j))?;
@@ -3135,6 +3143,20 @@ mod tests {
         .unwrap();
         assert!(RunConfig::holds(&c.session_data(0), &new));
         assert!(!RunConfig::holds(&c.session_data(0), &other));
+        // a fingerprint of an older kind and the old bag gone: not taken for the same one
+        let fp = c.session_data(0).join(s20_io::dataset::FINGERPRINT_FILE);
+        let kept = std::fs::read(&fp).unwrap();
+        std::fs::write(&fp, "0123456789abcdef").unwrap();
+        std::fs::remove_file(old.join("all_0.bag")).unwrap();
+        let same = RunConfig::same_fingerprint(
+            &c.session_data(0),
+            &old.join("all_0.bag"),
+            &new.join("all_0.bag"),
+            &|| Ok(()),
+        );
+        assert!(!same.unwrap());
+        std::fs::write(&fp, kept).unwrap();
+        std::fs::write(old.join("all_0.bag"), "bag").unwrap();
         // the session given that other recording: a run stops, one from the import makes the
         // session's import again
         // (named as the first: a new session would take another name, room_2)
@@ -3305,6 +3327,38 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(20));
         std::fs::write(c.opt_file(), "y").unwrap();
         c.restore_result(Step::Opt, None, previous, &Job::new(|_, _, _| {}, |_| {}));
+        assert!(!c.done(Step::Opt));
+        std::fs::remove_dir_all(&work).unwrap();
+    }
+
+    #[test]
+    fn a_stopped_optimization_of_changed_joined_data_is_not_kept_as_finished() {
+        let work = std::env::temp_dir().join(format!("s20_keep_set_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&work);
+        let c = RunConfig::new(PathBuf::from("raw"), work.clone());
+        let d = c.session_data(0);
+        std::fs::create_dir_all(&d).unwrap();
+        let imu: Vec<f64> = (0..14).map(|i| i as f64).collect();
+        s20_io::npy::write_f64(&d.join("imu.npy"), &imu, 7).unwrap();
+        let gnss =
+            |x: f64| -> Vec<f64> { (0..14).map(|i| if i == 1 { x } else { i as f64 }).collect() };
+        s20_io::npy::write_f64(&d.join("gnss.npy"), &gnss(1.), 14).unwrap();
+        s20_io::dataset::build_set(&c.data(), &c.set_dirs(), true).unwrap();
+        std::fs::create_dir_all(c.runs()).unwrap();
+        std::fs::write(c.opt_file(), "x").unwrap();
+        c.write_record(Step::Opt, None, true).unwrap();
+        // the joined data as before: the optimization stopping (no odometry) keeps the result
+        assert!(
+            c.run_step(Step::Opt, &Job::new(|_, _, _| {}, |_| {}))
+                .is_err()
+        );
+        assert!(c.done(Step::Opt));
+        // a fix's value changed, the rows as many: the old trajectory not finished any more
+        s20_io::npy::write_f64(&d.join("gnss.npy"), &gnss(2.), 14).unwrap();
+        assert!(
+            c.run_step(Step::Opt, &Job::new(|_, _, _| {}, |_| {}))
+                .is_err()
+        );
         assert!(!c.done(Step::Opt));
         std::fs::remove_dir_all(&work).unwrap();
     }

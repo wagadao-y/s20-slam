@@ -208,14 +208,12 @@ fn main() -> Result<()> {
             let find = |f: &Path| s20_pipeline::frames::find(&ledgers, f);
             let ledger = find(&input.imgpose)?;
             let cloud_ledger = find(&input.cloud)?;
-            // (the cloud in the same coordinates, when both are known: else the poses would be
-            // fitted to a cloud elsewhere)
-            if let (Some((_, poses)), Some((_, cloud))) = (&ledger, &cloud_ledger) {
-                anyhow::ensure!(
-                    *cloud == *poses,
-                    "the image poses and the cloud are in different coordinates; make them by the same run"
-                );
-            }
+            // (the cloud in the same coordinates, checked as colorize does: else the poses
+            // would be fitted to a cloud elsewhere, and recorded in their own coordinates)
+            s20_pipeline::frames::ensure_together(
+                cloud_ledger.as_ref().map(|(_, f)| *f),
+                ledger.as_ref().map(|(_, f)| *f),
+            )?;
             s20_visual::run::run(&input, &job)?;
             // (recorded in every ledger, so colorize finds them with either --data, and an old
             // sidecar's frame is not left in one ledger only)
@@ -904,6 +902,7 @@ const USAGE: &str = "usage:
       [--float_check_sd_h 0.10] [--float_check_sd_v 0.20]
       [--systems gps,glo,gal,bds,qzs] [--frequencies 3] [--estimate_ionosphere] [--estimate_troposphere]
       [--phase_snr_error 0] [--prefer_base_l2c]
+      (the output a .json file, not in the raw folder itself nor in its info/)
   s20 licenses
   s20 version
   s20 run <raw folder>[,<raw folder>...] <work folder> [--outdoor | --params file.json] [--no_rtk] [--no_color]
@@ -930,7 +929,8 @@ const USAGE: &str = "usage:
   s20 cut-raw <raw folder> <output raw folder> [--from s] --to s
       (the bag's messages from --from to --to seconds after its first scan, as a raw folder of its own with
        the other files copied, for short test recordings; start a few seconds before the device moves:
-       the odometry starts from the first seconds being still)
+       the odometry starts from the first seconds being still; the output on a drive with hard links,
+       such as NTFS, not FAT32 or exFAT)
   s20 calib <calibration.yaml>
   s20 eval-revisits <data> <opt_knots.txt> [out.csv] [--pairs pairs.csv] [--revisit_len s] [--revisit_dist m] [--revisit_inliers f] [--revisit_path_sd k] [--revisit_min_weak r]
   s20 eval-traj <estimate.txt> <reference.txt> [--align_s 30]

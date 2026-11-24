@@ -239,7 +239,8 @@ pub fn session_shifts(ranges: &[(f64, f64)]) -> Vec<f64> {
 /// `origin.txt` needed to display legacy results until they are regenerated. Returns the shifts.
 /// `gnss`: the device's GNSS tables are used (its RTK): one that cannot be read is an error; else
 /// it is left out.
-pub fn build_set(out: &Path, dirs: &[PathBuf], gnss: bool) -> Result<Vec<f64>> {
+/// Returns the sessions' time shifts, and whether a file was written (its contents changed).
+pub fn build_set(out: &Path, dirs: &[PathBuf], gnss: bool) -> Result<(Vec<f64>, bool)> {
     fs::create_dir_all(out)?;
     let full = |d: &PathBuf| {
         if d.is_absolute() {
@@ -291,16 +292,17 @@ pub fn build_set(out: &Path, dirs: &[PathBuf], gnss: bool) -> Result<Vec<f64>> {
     }
     // (a file of the same contents left as it is, its time with it: made again at every
     // optimization, the steps after the import stay current when nothing changed)
-    let same_or_write = |f: PathBuf, b: &[u8]| -> Result<()> {
+    let same_or_write = |f: PathBuf, b: &[u8]| -> Result<bool> {
         if fs::read(&f).is_ok_and(|old| old == b) {
-            return Ok(());
+            return Ok(false);
         }
-        fs::write(&f, b).with_context(|| format!("write {}", f.display()))
+        fs::write(&f, b).with_context(|| format!("write {}", f.display()))?;
+        Ok(true)
     };
-    same_or_write(out.join("imu.npy"), &npy::to_bytes(&imu_all, 7)?)?;
-    same_or_write(out.join("gnss.npy"), &npy::to_bytes(&gnss_all, 14)?)?;
-    same_or_write(out.join("sessions.txt"), list.as_bytes())?;
-    Ok(shifts)
+    let mut changed = same_or_write(out.join("imu.npy"), &npy::to_bytes(&imu_all, 7)?)?;
+    changed |= same_or_write(out.join("gnss.npy"), &npy::to_bytes(&gnss_all, 14)?)?;
+    changed |= same_or_write(out.join("sessions.txt"), list.as_bytes())?;
+    Ok((shifts, changed))
 }
 
 impl LidarData {

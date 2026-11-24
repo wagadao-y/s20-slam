@@ -2238,8 +2238,17 @@ impl App {
                 Ok(()) => self.notify(Level::Info, tr!(
                     "「{name}」の参照先を変えました（同じ記録なので結果はそのまま使えます）", "Changed the source of \"{name}\" (the same recording, so the results stay usable)"
                 )),
-                Err(e) => self
-                    .notify(Level::Error, tr!("参照先を変えられませんでした: {e:#}", "Could not change the source: {e:#}")),
+                Err(e) => {
+                    // (the folder chosen is no session's yet: masked here, the log is shared)
+                    let e = cfg
+                        .path_mask()
+                        .with(&raw, &format!("<raw:{name}>"))
+                        .apply(&format!("{e:#}"));
+                    self.notify(
+                        Level::Error,
+                        tr!("参照先を変えられませんでした: {e}", "Could not change the source: {e}"),
+                    )
+                }
             }
             self.refresh_steps();
             self.load_scene(ctx);

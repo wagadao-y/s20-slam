@@ -97,6 +97,25 @@ pub fn find(ledgers: &[PathBuf], result: &Path) -> Result<Option<(PathBuf, Coord
     Ok(None)
 }
 
+/// A cloud and image poses used together: in the same frame, or both of results without one
+/// (older versions'); one known only, the other may be of anywhere.
+pub fn ensure_together(
+    cloud: Option<CoordinateFrame>,
+    poses: Option<CoordinateFrame>,
+) -> Result<()> {
+    if cloud.is_some() || poses.is_some() {
+        anyhow::ensure!(
+            cloud.is_some() && poses.is_some(),
+            "cloud and image poses must have coordinate metadata; re-run cloud generation and export"
+        );
+        anyhow::ensure!(
+            cloud == poses,
+            "cloud and image poses use different coordinate frames; re-run cloud generation and export"
+        );
+    }
+    Ok(())
+}
+
 /// The frame of `result`: as [`recorded`], else the legacy projected frame of `data`.
 pub fn result_frame(data: &Path, result: &Path) -> Result<CoordinateFrame> {
     Ok(match recorded(data, result)? {
@@ -139,6 +158,19 @@ pub fn record(data: &Path, results: &[&Path], frame: Option<CoordinateFrame>) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_cloud_and_poses_go_together_in_one_frame_or_both_without() {
+        let (l, p) = (
+            Some(CoordinateFrame::LocalSlam),
+            Some(CoordinateFrame::LegacyProjected { origin: [0.; 3] }),
+        );
+        assert!(ensure_together(l, l).is_ok());
+        assert!(ensure_together(None, None).is_ok());
+        assert!(ensure_together(l, p).is_err());
+        assert!(ensure_together(l, None).is_err());
+        assert!(ensure_together(None, l).is_err());
+    }
 
     #[test]
     fn entries_hold_while_the_file_is_unchanged_and_sidecars_are_migrated() {
