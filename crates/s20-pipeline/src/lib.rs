@@ -2401,7 +2401,7 @@ impl RunConfig {
     /// until the step finishes, so a run that is canceled or fails is not taken for a finished one
     /// even when it left files behind.
     pub fn run_step(&self, step: Step, job: &Job) -> Result<()> {
-        let _lock = self.begin(job)?;
+        let _lock = self.begin(job, step == Step::Extract)?;
         self.run_step_for(step, false, job)
     }
 
@@ -2410,7 +2410,9 @@ impl RunConfig {
     /// the lock is dropped; the system lets it go when the process ends.
     /// Takes the work folder for a run (its lock), and makes it ready: the sessions as read, the
     /// extractions pointed at their raw folders.
-    fn begin(&self, job: &Job) -> Result<WorkLock> {
+    /// `importing`: the run starts with the data import, which makes a session's import of
+    /// another recording again (else such a session stops the run).
+    fn begin(&self, job: &Job, importing: bool) -> Result<WorkLock> {
         let lock = self.lock()?;
         if self.from_project
             && Self::project_sessions(&self.work).is_none_or(|now| now != self.sessions)
@@ -2420,39 +2422,63 @@ impl RunConfig {
                 self.work.display()
             );
         }
-        self.relink_sources(job)?;
+        self.relink_sources(job, importing)?;
         Ok(lock)
     }
 
     /// Points each session's extraction at its raw folder's bag when it holds the same recording
     /// (a bag of the same name and size) somewhere else: the raw folder moved, or given anew to
     /// `s20 run`. The extraction read the old place otherwise, gone or another recording's.
-    fn relink_sources(&self, job: &Job) -> Result<()> {
+    fn relink_sources(&self, job: &Job, importing: bool) -> Result<()> {
         for (k, s) in self.sessions.iter().enumerate() {
             let data = self.session_data(k);
-            let (Ok(src), Ok(bag)) = (
-                s20_io::dataset::Source::read(&data),
-                s20_io::extract::find_bag(&s.raw),
-            ) else {
+            let Ok(src) = s20_io::dataset::Source::read(&data) else {
                 continue;
+            };
+            // (an import there, a raw folder without its bag: not gone on with, the import's
+            // recording cannot be told the raw folder's)
+            let Ok(bag) = s20_io::extract::find_bag(&s.raw) else {
+                bail!(
+                    "session {}: its raw folder has no recording (all_*.bag)",
+                    k + 1
+                );
             };
             let bag = std::path::absolute(&bag)?;
             let same_place = |a: &Path, b: &Path| match (a.canonicalize(), b.canonicalize()) {
                 (Ok(a), Ok(b)) => a == b,
                 _ => a == b,
             };
-            // (a moved bag compared whole, a cancellation asked between its blocks, and once more
-            // before the extraction is pointed at it)
-            if !same_place(&src.bag, &bag) {
-                // (another recording than the one extracted: not gone on with, the session's
+            if same_place(&src.bag, &bag) {
+                continue;
+            }
+            // (a moved bag compared whole, a cancellation asked between its blocks; a reading
+            // error told without the old bag's place, which the shared log would keep)
+            let same = match Self::holds_checked(&data, &s.raw, &|| job.check()) {
+                Ok(same) => same,
+                Err(e) if s20_io::job::is_canceled(&e) => return Err(e),
+                Err(_) => bail!(
+                    "session {}: its imported recording could not be compared with its raw folder's",
+                    k + 1
+                ),
+            };
+            job.check()?;
+            if same {
+                relink(&data, bag, src.size)?;
+            } else if importing {
+                // (the import to be made again: its mark removed, so this session's is redone
+                // and the steps after it follow)
+                std::fs::remove_file(data.join(s20_io::dataset::Source::FILE))?;
+                job.log(&format!(
+                    "session {}: its import was of another recording, made again",
+                    k + 1
+                ));
+            } else {
+                // (another recording than the one imported: not gone on with, the session's
                 // odometry would be of the one and its fixes of the other)
-                ensure!(
-                    Self::holds_checked(&data, &s.raw, &|| job.check())?,
+                bail!(
                     "session {}: its data import is of another recording than its raw folder's: redo the data import",
                     k + 1
                 );
-                job.check()?;
-                relink(&data, bag, src.size)?;
             }
         }
         Ok(())
@@ -2761,7 +2787,7 @@ impl RunConfig {
 
     /// Runs the steps `first..=last` in order.
     pub fn run_range(&self, first: Step, last: Step, job: &Job) -> Result<()> {
-        let _lock = self.begin(job)?;
+        let _lock = self.begin(job, first == Step::Extract)?;
         for step in Step::ALL.into_iter().filter(|&s| {
             (first..=last).contains(&s)
                 && (s != Step::Refine || self.refine)
@@ -2797,7 +2823,7 @@ impl RunConfig {
 
     /// As [`RunConfig::run_from`], stopping after `last`.
     pub fn run_until(&self, first: Step, last: Step, job: &Job) -> Result<()> {
-        let _lock = self.begin(job)?;
+        let _lock = self.begin(job, first == Step::Extract)?;
         for step in Step::ALL.into_iter().filter(|&s| s <= last) {
             // (a refinement without the tracks does not serve the images: again when they are
             // asked for)
@@ -3082,7 +3108,8 @@ mod tests {
         let f = c.session_data(0).join(s20_io::dataset::Source::FILE);
         let before = std::fs::metadata(&f).unwrap().modified().unwrap();
         std::thread::sleep(std::time::Duration::from_millis(20));
-        c.relink_sources(&Job::new(|_, _, _| {}, |_| {})).unwrap();
+        c.relink_sources(&Job::new(|_, _, _| {}, |_| {}), false)
+            .unwrap();
         let src = s20_io::dataset::Source::read(&c.session_data(0)).unwrap();
         assert_eq!(
             src.bag.canonicalize().unwrap(),
@@ -3101,6 +3128,24 @@ mod tests {
         .unwrap();
         assert!(RunConfig::holds(&c.session_data(0), &new));
         assert!(!RunConfig::holds(&c.session_data(0), &other));
+        // the session given that other recording: a run stops, one from the import makes the
+        // session's import again
+        // (named as the first: a new session would take another name, room_2)
+        let o = RunConfig::of_sessions(
+            vec![SessionCfg {
+                name: "room".into(),
+                raw: other.clone(),
+            }],
+            base.join("work"),
+        );
+        let job = Job::new(|_, _, _| {}, |_| {});
+        assert!(o.relink_sources(&job, false).is_err());
+        o.relink_sources(&job, true).unwrap();
+        assert!(
+            !o.session_data(0)
+                .join(s20_io::dataset::Source::FILE)
+                .exists()
+        );
         std::fs::remove_dir_all(&base).unwrap();
     }
 

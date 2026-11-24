@@ -2008,7 +2008,7 @@ impl App {
                             .clicked()
                         {
                             self.rename_session = Some((k, sc.name.clone()));
-            self.confirm_sessions = self.project().map(|c| c.sessions);
+            self.confirm_sessions = Some(cfg.sessions.clone());
                         }
                         if k > 0
                             && ui
@@ -2047,7 +2047,7 @@ impl App {
                             .clicked()
                         {
                             self.confirm_remove = Some(k);
-            self.confirm_sessions = self.project().map(|c| c.sessions);
+            self.confirm_sessions = Some(cfg.sessions.clone());
                         }
                     })
                     .response
@@ -2191,7 +2191,7 @@ impl App {
                 tr!(
                     "生データフォルダー（all_*.bag がある）ではありません: {}",
                     "Not a raw data folder (with all_*.bag): {}",
-                    raw.display()
+                    folder_name(&raw)
                 ),
             );
         } else if cfg
@@ -2218,11 +2218,9 @@ impl App {
             };
             // (the sessions still as read: changed elsewhere meanwhile, writing them back would
             // undo that)
-            let base = self
-                .confirm_sessions
-                .take()
-                .unwrap_or_else(|| cfg.sessions.clone());
-            if RunConfig::project_sessions(&cfg.work).is_none_or(|now| now != base) {
+            // (cfg as when the folder was asked for: no confirmation in between)
+            self.confirm_sessions = None;
+            if RunConfig::project_sessions(&cfg.work).is_none_or(|now| now != cfg.sessions) {
                 self.notify(
                     Level::Warn,
                     tl(
@@ -2239,7 +2237,7 @@ impl App {
             match c.move_raw(k, raw.clone()) {
                 Ok(()) => self.notify(Level::Info, tr!(
                     "「{name}」の参照先を {} に変えました（同じ記録なので結果はそのまま使えます）", "Changed the source of \"{name}\" to {} (the same recording, so the results stay usable)",
-                    raw.display()
+                    folder_name(&raw)
                 )),
                 Err(e) => self
                     .notify(Level::Error, tr!("参照先を変えられませんでした: {e:#}", "Could not change the source: {e:#}")),
@@ -2248,7 +2246,7 @@ impl App {
             self.load_scene(ctx);
         } else {
             self.confirm_replace = Some((k, raw));
-            self.confirm_sessions = self.project().map(|c| c.sessions);
+            self.confirm_sessions = Some(cfg.sessions.clone());
         }
     }
 
@@ -4290,6 +4288,13 @@ impl App {
         }
         ctx.request_repaint_after(std::time::Duration::from_millis(100));
     }
+}
+
+/// A folder's own name, for messages (its place not told: the log is shared).
+fn folder_name(p: &Path) -> String {
+    p.file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "?".into())
 }
 
 #[cfg(test)]
