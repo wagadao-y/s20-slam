@@ -2526,6 +2526,7 @@ version = "0.1.8"
 dependencies = [
  "anyhow",
  "brotli",
+ "crc32fast",
  "laz",
  "memmap2",
  "rayon",

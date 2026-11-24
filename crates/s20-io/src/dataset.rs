@@ -47,57 +47,46 @@ pub struct Source {
     pub size: u64,
 }
 
-/// A bag's fingerprint: FNV-1a (64-bit, 8 bytes at a time) over its size and all its bytes. Read
-/// whole, as a part read would miss a chunk replaced; made by the extraction (which reads the bag
-/// anyway) and when a recording moved, not at every run.
-pub fn bag_fingerprint(bag: &Path) -> Result<u64> {
+/// A bag's fingerprint (`v2-<FNV-1a 64>-<CRC-32>`): FNV-1a over its size and every byte, one at
+/// a time as the method is, and a CRC-32 of its bytes. Read whole, as a part read would miss a
+/// chunk replaced; made by the extraction (which reads the bag anyway) and when a recording
+/// moved, not at every run.
+pub fn bag_fingerprint(bag: &Path) -> Result<String> {
     bag_fingerprint_checked(bag, &|| Ok(()))
 }
 
 /// [`bag_fingerprint`] that asks `check` between its blocks (a cancellation stops it).
-pub fn bag_fingerprint_checked(bag: &Path, check: &dyn Fn() -> Result<()>) -> Result<u64> {
+pub fn bag_fingerprint_checked(bag: &Path, check: &dyn Fn() -> Result<()>) -> Result<String> {
     use std::io::Read;
     let mut f = fs::File::open(bag).with_context(|| format!("open {}", bag.display()))?;
     let size = f.metadata()?.len();
     let mut h: u64 = 0xcbf29ce484222325;
-    let mut eat = |x: u64| {
-        h ^= x;
-        h = h.wrapping_mul(0x100000001b3);
-    };
-    eat(size);
+    let mut crc = crc32fast::Hasher::new();
+    for b in size.to_le_bytes() {
+        h = (h ^ b as u64).wrapping_mul(0x100000001b3);
+    }
     let mut buf = vec![0u8; 8 << 20];
     loop {
         check()?;
-        // (the block filled whole, so that only the last has bytes past whole words: the value
-        // does not depend on how the reads split the file)
-        let mut n = 0;
-        while n < buf.len() {
-            let m = f.read(&mut buf[n..])?;
-            if m == 0 {
-                break;
-            }
-            n += m;
-        }
+        let n = f.read(&mut buf)?;
         if n == 0 {
             break;
         }
-        let (words, rest) = buf[..n].as_chunks::<8>();
-        for w in words {
-            eat(u64::from_le_bytes(*w));
+        for &b in &buf[..n] {
+            h = (h ^ b as u64).wrapping_mul(0x100000001b3);
         }
-        for &b in rest {
-            eat(b as u64);
-        }
+        crc.update(&buf[..n]);
     }
-    Ok(h)
+    Ok(format!("v2-{h:016x}-{:08x}", crc.finalize()))
 }
 
 /// The fingerprint of the bag data folder `dir` was extracted from (`bag_fingerprint.txt`), when
-/// the extraction wrote one.
-pub fn extracted_fingerprint(dir: &Path) -> Option<u64> {
+/// the extraction wrote one of this kind.
+pub fn extracted_fingerprint(dir: &Path) -> Option<String> {
     fs::read_to_string(dir.join(FINGERPRINT_FILE))
         .ok()
-        .and_then(|s| u64::from_str_radix(s.trim(), 16).ok())
+        .map(|s| s.trim().to_string())
+        .filter(|s| s.starts_with("v2-"))
 }
 
 pub const FINGERPRINT_FILE: &str = "bag_fingerprint.txt";

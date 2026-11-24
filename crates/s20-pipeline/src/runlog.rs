@@ -194,11 +194,17 @@ impl RunConfig {
     /// The paths of a run's log: relative to the work folder, the raw folders as
     /// `<raw:session name>`, the rest of the user's folder as `~`.
     pub fn path_mask(&self) -> PathMask {
-        self.sessions
+        let m = self
+            .sessions
             .iter()
             .fold(PathMask::home().with(&self.work, ""), |m, s| {
                 m.with(&s.raw, &format!("<raw:{}>", s.name))
-            })
+            });
+        // (the device calibration too, wherever it is: an error reading it names it)
+        match &self.device_calib {
+            Some(d) => m.with(d, "<device calibration>"),
+            None => m,
+        }
     }
 }
 

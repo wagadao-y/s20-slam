@@ -2443,7 +2443,14 @@ impl RunConfig {
             };
             // (a moved bag compared whole, a cancellation asked between its blocks, and once more
             // before the extraction is pointed at it)
-            if !same_place(&src.bag, &bag) && Self::holds_checked(&data, &s.raw, &|| job.check())? {
+            if !same_place(&src.bag, &bag) {
+                // (another recording than the one extracted: not gone on with, the session's
+                // odometry would be of the one and its fixes of the other)
+                ensure!(
+                    Self::holds_checked(&data, &s.raw, &|| job.check())?,
+                    "session {}: its data import is of another recording than its raw folder's: redo the data import",
+                    k + 1
+                );
                 job.check()?;
                 relink(&data, bag, src.size)?;
             }
@@ -3089,10 +3096,7 @@ mod tests {
         std::fs::write(other.join("all_0.bag"), "BAG").unwrap();
         std::fs::write(
             c.session_data(0).join(s20_io::dataset::FINGERPRINT_FILE),
-            format!(
-                "{:016x}",
-                s20_io::dataset::bag_fingerprint(&new.join("all_0.bag")).unwrap()
-            ),
+            s20_io::dataset::bag_fingerprint(&new.join("all_0.bag")).unwrap(),
         )
         .unwrap();
         assert!(RunConfig::holds(&c.session_data(0), &new));

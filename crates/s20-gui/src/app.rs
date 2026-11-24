@@ -488,6 +488,9 @@ pub struct App {
     confirm_remove: Option<usize>,
     /// a session being renamed, and the name typed
     rename_session: Option<(usize, String)>,
+    /// the sessions as they were when a session's removal, replacement or rename was asked for
+    /// (by its index): the change is refused when they changed since
+    confirm_sessions: Option<Vec<s20_pipeline::SessionCfg>>,
     /// closing the window while processing, waiting for confirmation; and once confirmed
     confirm_exit: bool,
     exit_confirmed: bool,
@@ -803,6 +806,7 @@ impl App {
             confirm_replace: None,
             confirm_remove: None,
             rename_session: None,
+            confirm_sessions: None,
             confirm_exit: false,
             exit_confirmed: false,
             window_place: crate::window_place::WindowPlace::load(cc.storage),
@@ -1082,6 +1086,8 @@ impl App {
         let (cp, cl) = (ctx.clone(), ctx.clone());
         let t0 = Instant::now();
         let lf = log_file.clone();
+        // (the lines masked also without a log file: they are copied from the log view)
+        let mask = cfg.path_mask();
         let job = Job::new(
             move |stage, done, total| {
                 let _ = tp.send(Event::Progress(stage.to_string(), done, total));
@@ -1089,9 +1095,10 @@ impl App {
             },
             move |s| {
                 let mut line = format!("[{:7.1}s] {s}", t0.elapsed().as_secs_f64());
-                if let Some(f) = &lf {
-                    line = f.line(&line);
-                }
+                line = match &lf {
+                    Some(f) => f.line(&line),
+                    None => mask.apply(&line),
+                };
                 let _ = tl.send(Event::Log(line));
                 cl.request_repaint();
             },
@@ -1422,6 +1429,7 @@ impl App {
         self.confirm_replace = None;
         self.confirm_remove = None;
         self.rename_session = None;
+        self.confirm_sessions = None;
         self.confirm_run = None;
         self.confirm_preset = None;
         self.edit_history.reset(self.edits.clone());
@@ -2000,6 +2008,7 @@ impl App {
                             .clicked()
                         {
                             self.rename_session = Some((k, sc.name.clone()));
+            self.confirm_sessions = self.project().map(|c| c.sessions);
                         }
                         if k > 0
                             && ui
@@ -2038,6 +2047,7 @@ impl App {
                             .clicked()
                         {
                             self.confirm_remove = Some(k);
+            self.confirm_sessions = self.project().map(|c| c.sessions);
                         }
                     })
                     .response
@@ -2208,7 +2218,11 @@ impl App {
             };
             // (the sessions still as read: changed elsewhere meanwhile, writing them back would
             // undo that)
-            if RunConfig::project_sessions(&cfg.work).is_none_or(|now| now != cfg.sessions) {
+            let base = self
+                .confirm_sessions
+                .take()
+                .unwrap_or_else(|| cfg.sessions.clone());
+            if RunConfig::project_sessions(&cfg.work).is_none_or(|now| now != base) {
                 self.notify(
                     Level::Warn,
                     tl(
@@ -2234,6 +2248,7 @@ impl App {
             self.load_scene(ctx);
         } else {
             self.confirm_replace = Some((k, raw));
+            self.confirm_sessions = self.project().map(|c| c.sessions);
         }
     }
 
@@ -2418,6 +2433,22 @@ impl App {
                 return;
             }
         };
+        // (the sessions as they were when the rename was asked for: reordered elsewhere since,
+        // the index would name another)
+        let base = self
+            .confirm_sessions
+            .take()
+            .unwrap_or_else(|| cfg.sessions.clone());
+        if RunConfig::project_sessions(&cfg.work).is_none_or(|now| now != base) {
+            self.notify(
+                Level::Warn,
+                tl(
+                    "セッションが別の場所で変わりました。もう一度やり直してください",
+                    "The sessions changed elsewhere meanwhile: do it again",
+                ),
+            );
+            return;
+        }
         let mut c = cfg.clone();
         match c.rename_session(k, name) {
             Ok(()) => {
@@ -2599,7 +2630,11 @@ impl App {
         };
         // (the sessions the change was made from still those of the work folder: another window
         // or the CLI changed them meanwhile, the change would put them back)
-        if RunConfig::project_sessions(&cfg.work).is_some_and(|now| now != cfg.sessions) {
+        let base = self
+            .confirm_sessions
+            .take()
+            .unwrap_or_else(|| cfg.sessions.clone());
+        if RunConfig::project_sessions(&cfg.work).is_none_or(|now| now != base) {
             self.notify(
                 Level::Warn,
                 tl(
@@ -4461,6 +4496,7 @@ mod tests {
             confirm_replace: None,
             confirm_remove: None,
             rename_session: None,
+            confirm_sessions: None,
             confirm_exit: false,
             exit_confirmed: false,
             window_place: Default::default(),

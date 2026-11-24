@@ -294,6 +294,11 @@ impl LasWriter {
                     ["X", "Y", "Z"][d]
                 );
                 let stored = o + q as i32 as f64 * scale;
+                anyhow::ensure!(
+                    stored.is_finite(),
+                    "a coordinate on the {} axis not finite once stored",
+                    ["X", "Y", "Z"][d]
+                );
                 lo[d] = lo[d].min(stored);
                 hi[d] = hi[d].max(stored);
             }

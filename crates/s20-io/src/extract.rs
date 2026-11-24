@@ -255,7 +255,7 @@ pub fn extract(raw: &Path, out: &Path, job: &crate::job::Job) -> Result<ExtractS
     fs::write(
         out.join(crate::dataset::FINGERPRINT_FILE),
         format!(
-            "{:016x}\n",
+            "{}\n",
             crate::dataset::bag_fingerprint_checked(&bag_path, &|| job.check())?
         ),
     )?;

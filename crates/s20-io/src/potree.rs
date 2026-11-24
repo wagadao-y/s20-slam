@@ -552,7 +552,9 @@ fn write_into(
     progress: &(dyn Fn(u64, u64) + Sync),
 ) -> Result<u64> {
     const BATCH: usize = 1 << 20;
-    let info = LasReader::open(source)?.info();
+    let header = LasReader::open(source)?;
+    let (info, count) = (header.info(), header.len());
+    drop(header);
     let scale = info.scale;
     ensure!(
         scale[0] == scale[1] && scale[1] == scale[2] && scale[0] > 0.0,
@@ -561,6 +563,13 @@ fn write_into(
     );
     let scale = scale[0];
     let [lo, hi] = info.bounds;
+    // (bounds finite and in order on every axis, for a file with points: else the cube is made
+    // of the other axes and the points of that one moved onto its side)
+    ensure!(
+        count == 0 || (0..3).all(|d| lo[d].is_finite() && hi[d].is_finite() && lo[d] <= hi[d]),
+        "{}: the header's bounds are not finite and in order",
+        source.display()
+    );
     // the cube's corner on the LAS grid, so that the integer coordinates are those of the file
     let offset: [f64; 3] = std::array::from_fn(|d| {
         let lo = if lo[d].is_finite() && lo[d] <= hi[d] {

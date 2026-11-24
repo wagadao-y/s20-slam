@@ -71,13 +71,18 @@ fn top_items(h: &str) -> Option<Vec<(String, String)>> {
     };
     let mut out = Vec::new();
     for item in items.iter().filter(|i| !i.trim().is_empty()) {
-        // the key is quoted: its colon is the first outside the key
+        // the key is quoted (an ASCII quote, so a byte): its colon is the first outside it; the
+        // value kept as written (a string quoted, False bare), without its spaces
         let item = item.trim();
         let q = item.chars().next()?;
+        if q != '\'' && q != '"' {
+            return None;
+        }
         let end = item[1..].find(q)? + 1;
         let (k, rest) = item.split_at(end + 1);
         let v = rest.trim_start().strip_prefix(':')?;
-        out.push((clean(k), clean(v)));
+        let v: String = v.chars().filter(|c| !c.is_whitespace()).collect();
+        out.push((clean(k), v));
     }
     Some(out)
 }
@@ -115,7 +120,10 @@ pub fn read_f64(path: &Path) -> Result<(Vec<f64>, usize, usize)> {
         );
     }
     let value = |key: &str| map.get(key).map(String::as_str);
-    if value("descr") != Some("<f8") || value("fortran_order") != Some("False") {
+    // (descr the string '<f8', fortran_order the bare False, not the string "False")
+    if !matches!(value("descr"), Some("'<f8'" | "\"<f8\""))
+        || value("fortran_order") != Some("False")
+    {
         // (not the header itself: names in it could tell a place)
         bail!(
             "{}: only C-order float64 arrays are supported",
@@ -201,6 +209,20 @@ mod tests {
         npy_of(
             &f,
             "{'descr': '<f8', 'note': ',fortran_order:False,', 'fortran_order': True, 'shape': (2, 3), }",
+            6,
+        );
+        assert!(read_f64(&f).is_err());
+        // a string "False" is not False; a key not quoted, of other characters than ASCII, an
+        // error and no panic
+        npy_of(
+            &f,
+            r#"{"descr":"<f8","fortran_order":"False","shape":(2,3)}"#,
+            6,
+        );
+        assert!(read_f64(&f).is_err());
+        npy_of(
+            &f,
+            "{日本: 1, 'descr': '<f8', 'fortran_order': False, 'shape': (2, 3), }",
             6,
         );
         assert!(read_f64(&f).is_err());
